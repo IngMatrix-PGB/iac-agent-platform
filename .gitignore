@@ -1,0 +1,35 @@
+# --- Python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# --- Environment / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Runtime-generated request artifacts (never source-controlled) ---
+artifacts/
+
+# --- Terraform runtime state ---
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+tfplan*
+crash.log
+crash.*.log
+
+# --- IDE / OS ---
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
