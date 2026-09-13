@@ -97,3 +97,61 @@ class PolicyEvaluation:
         if any(f.status is PolicyStatus.WARN for f in self.findings):
             return PolicyStatus.WARN
         return PolicyStatus.PASS
+
+
+@dataclass(frozen=True)
+class SecurityGateResult:
+    """The aggregate security decision combining first-party platform
+    policy findings with external scanner (Checkov) findings.
+
+    This is a pure aggregator: it does not evaluate anything itself,
+    only combines and orders findings already produced elsewhere (see
+    ``iac_agent.security.gate.evaluate_security_gate``).
+
+    ``findings`` is normalized on construction — sorted by
+    ``(source, policy_id, resource or "", message)`` — so two gate
+    results built from the same logical findings, in any order, are
+    equal. ``overall_status`` and the count properties are all derived,
+    never stored, so none of them can drift from ``findings``.
+
+    There is deliberately no ``can_proceed`` (or similarly named)
+    boolean here: in Phase 1, WARN is a legitimate outcome that may
+    still require human review once HITL exists, so collapsing
+    PASS/WARN into a single "may proceed" flag would risk being read as
+    "no further review needed" when that is not yet true. Consumers
+    should branch on ``overall_status`` directly.
+    """
+
+    findings: tuple[SecurityFinding, ...]
+
+    def __post_init__(self) -> None:
+        normalized = tuple(
+            sorted(
+                self.findings, key=lambda f: (f.source, f.policy_id, f.resource or "", f.message)
+            )
+        )
+        object.__setattr__(self, "findings", normalized)
+
+    @property
+    def overall_status(self) -> PolicyStatus:
+        if any(f.status is PolicyStatus.BLOCK for f in self.findings):
+            return PolicyStatus.BLOCK
+        if any(f.status is PolicyStatus.WARN for f in self.findings):
+            return PolicyStatus.WARN
+        return PolicyStatus.PASS
+
+    @property
+    def finding_count(self) -> int:
+        return len(self.findings)
+
+    @property
+    def pass_count(self) -> int:
+        return sum(1 for f in self.findings if f.status is PolicyStatus.PASS)
+
+    @property
+    def warn_count(self) -> int:
+        return sum(1 for f in self.findings if f.status is PolicyStatus.WARN)
+
+    @property
+    def block_count(self) -> int:
+        return sum(1 for f in self.findings if f.status is PolicyStatus.BLOCK)
