@@ -19,8 +19,8 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-where = ["src"]
-include = ["iac_agent*"]
+where = ["src", "."]
+include = ["iac_agent*", "evals*"]
 
 [tool.ruff]
 target-version = "py312"

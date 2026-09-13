@@ -1,0 +1,164 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "basic_standard_queue",
+      "description": "A minimal valid standard (non-FIFO) queue using only the queue name, with every other field left at its safe default.",
+      "input": {
+        "name": "basic-queue"
+      },
+      "expected": {
+        "valid": true,
+        "queue_name": "basic-queue",
+        "fifo": false,
+        "dlq_enabled": true,
+        "encryption_enabled": true,
+        "kms_key_id": null,
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "encrypted_queue_with_dlq",
+      "description": "A queue referencing an existing KMS key (SSE-KMS) with the default DLQ still enabled.",
+      "input": {
+        "name": "payment-events",
+        "encryption": {
+          "kms_key_id": "alias/aws/sqs"
+        }
+      },
+      "expected": {
+        "valid": true,
+        "queue_name": "payment-events",
+        "fifo": false,
+        "dlq_enabled": true,
+        "encryption_enabled": true,
+        "kms_key_id": "alias/aws/sqs",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "fifo_queue",
+      "description": "A FIFO queue with a name correctly ending in the literal '.fifo' suffix.",
+      "input": {
+        "name": "order-processing.fifo",
+        "fifo": true
+      },
+      "expected": {
+        "valid": true,
+        "queue_name": "order-processing.fifo",
+        "fifo": true,
+        "dlq_enabled": true,
+        "encryption_enabled": true,
+        "kms_key_id": null,
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "invalid_fifo_name_combination",
+      "description": "fifo=true but the name does not end in '.fifo' — the contract must reject this rather than silently rewriting the name.",
+      "input": {
+        "name": "orders",
+        "fifo": true
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_message_retention",
+      "description": "message_retention_seconds below the AWS/contract minimum of 60 seconds.",
+      "input": {
+        "name": "order-events",
+        "message_retention_seconds": 30
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "attempted_encryption_disable",
+      "description": "An attempt to construct a queue with encryption explicitly disabled — must be rejected at the Pydantic contract boundary before any rendering, planning, or security evaluation occurs.",
+      "input": {
+        "name": "order-events",
+        "encryption": {
+          "enabled": false
+        }
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "dlq_disabled_warn",
+      "description": "A valid queue with the dead-letter queue intentionally disabled — a legitimate but risk-flagged configuration, proving WARN is a real non-blocking outcome.",
+      "input": {
+        "name": "order-events",
+        "dlq": {
+          "enabled": false,
+          "max_receive_count": null
+        }
+      },
+      "expected": {
+        "valid": true,
+        "queue_name": "order-events",
+        "fifo": false,
+        "dlq_enabled": false,
+        "encryption_enabled": true,
+        "kms_key_id": null,
+        "overall_security_status": "warn"
+      }
+    },
+    {
+      "id": "secure_default_queue_pass",
+      "description": "The representative secure-default configuration (encrypted, DLQ enabled, tagged, create-only) used as the one optional real-tool eval scenario.",
+      "input": {
+        "name": "order-events",
+        "dlq": {
+          "enabled": true,
+          "max_receive_count": 5
+        },
+        "tags": {
+          "Service": "orders"
+        }
+      },
+      "expected": {
+        "valid": true,
+        "queue_name": "order-events",
+        "fifo": false,
+        "dlq_enabled": true,
+        "encryption_enabled": true,
+        "kms_key_id": null,
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "boundary_numeric_values_valid",
+      "description": "Optional extra: every numeric field set to its inclusive minimum boundary, which must still construct successfully.",
+      "input": {
+        "name": "boundary-queue",
+        "visibility_timeout_seconds": 0,
+        "message_retention_seconds": 60,
+        "delay_seconds": 0
+      },
+      "expected": {
+        "valid": true,
+        "queue_name": "boundary-queue",
+        "fifo": false,
+        "dlq_enabled": true,
+        "encryption_enabled": true,
+        "kms_key_id": null,
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "invalid_queue_name_charset",
+      "description": "Optional extra: a queue name containing a disallowed character (a space and an exclamation mark).",
+      "input": {
+        "name": "invalid name!"
+      },
+      "expected": {
+        "valid": false
+      }
+    }
+  ]
+}
