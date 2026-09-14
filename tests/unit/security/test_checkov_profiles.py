@@ -29,10 +29,26 @@ def test_s3_profile_has_exactly_the_four_approved_skips():
     )
 
 
+def test_dynamodb_profile_has_exactly_the_one_approved_skip():
+    """Batch 17: a real Checkov scan of the trusted DynamoDB module's
+    secure baseline reported exactly one finding (CKV_AWS_119,
+    customer-managed KMS) — corresponding to the one documented Phase 2
+    DynamoDB non-goal, approved via AskUserQuestion before being added."""
+    profile = checkov_profile_for(ResourceType.DYNAMODB)
+    assert isinstance(profile, CheckovScanProfile)
+    assert profile.skipped_checks == ("CKV_AWS_119",)
+
+
 def test_s3_profile_never_leaks_into_sqs_profile():
     sqs_profile = checkov_profile_for(ResourceType.SQS)
     s3_profile = checkov_profile_for(ResourceType.S3)
     assert set(sqs_profile.skipped_checks).isdisjoint(s3_profile.skipped_checks)
+
+
+def test_s3_profile_never_leaks_into_dynamodb_profile():
+    s3_profile = checkov_profile_for(ResourceType.S3)
+    dynamodb_profile = checkov_profile_for(ResourceType.DYNAMODB)
+    assert set(s3_profile.skipped_checks).isdisjoint(dynamodb_profile.skipped_checks)
 
 
 def test_every_registered_resource_type_has_a_profile():

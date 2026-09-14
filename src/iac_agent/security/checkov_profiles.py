@@ -49,9 +49,30 @@ _S3_SKIPPED_CHECKS: tuple[str, ...] = (
 #: Listed explicitly (not merely "absent from the mapping") so a
 #: reviewer can see at a glance that SQS was a deliberate zero-skip
 #: decision, not an oversight.
+
+#: Verified empirically (2026-09, Checkov 3.3.13, real scan of the
+#: trusted DynamoDB module's secure-default baseline — resource_count=1,
+#: passed=3, failed=1): exactly this one check fails, corresponding to
+#: the one documented Phase 2 DynamoDB non-goal (customer-managed KMS
+#: encryption — see docs/resources/dynamodb.md and
+#: `DynamoDBEncryptionSpec`'s docstring for why it's deferred, a real
+#: Terraform-provider-semantics limitation confirmed via a real
+#: `terraform plan` failure, not an oversight). Surfaced to the project
+#: owner via `AskUserQuestion` before being added (per this batch's own
+#: "classify the finding, STOP and report a declared non-goal before
+#: adding a skip" instruction), mirroring the S3 precedent from
+#: Batch 16.
+_DYNAMODB_SKIPPED_CHECKS: tuple[str, ...] = (
+    # "Ensure DynamoDB Tables are encrypted using a KMS Customer
+    # Managed CMK" — customer-managed KMS is a documented Phase 2
+    # non-goal; this phase only supports AWS-owned-key encryption.
+    "CKV_AWS_119",
+)
+
 _PROFILES_BY_RESOURCE_TYPE: dict[ResourceType, CheckovScanProfile] = {
     ResourceType.SQS: CheckovScanProfile(skipped_checks=()),
     ResourceType.S3: CheckovScanProfile(skipped_checks=_S3_SKIPPED_CHECKS),
+    ResourceType.DYNAMODB: CheckovScanProfile(skipped_checks=_DYNAMODB_SKIPPED_CHECKS),
 }
 
 

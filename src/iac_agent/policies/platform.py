@@ -1,18 +1,21 @@
-"""Phase 2 deterministic platform policies for SQS and S3 requests.
+"""Phase 2 deterministic platform policies for SQS, S3, and DynamoDB
+requests.
 
 `evaluate_platform_policies` is a pure function of two already-validated
-facts — a resource spec (`SQSResourceSpec` or `S3ResourceSpec`) and a
-`PlanSummary` — and nothing else. It never touches raw Terraform plan
-JSON, the Terraform CLI, Checkov, the AWS API, or an LLM. Given the same
-spec and plan summary, it always returns an equal `PolicyEvaluation`.
+facts — a resource spec (`SQSResourceSpec`, `S3ResourceSpec`, or
+`DynamoDBResourceSpec`) and a `PlanSummary` — and nothing else. It
+never touches raw Terraform plan JSON, the Terraform CLI, Checkov, the
+AWS API, or an LLM. Given the same spec and plan summary, it always
+returns an equal `PolicyEvaluation`.
 
 Resource-specific policies stay resource-specific (SQS encryption/DLQ
 checks only ever run for `SQSResourceSpec`; S3 encryption/public-access/
-versioning checks only ever run for `S3ResourceSpec`).
-`TF_NO_DESTRUCTIVE_CHANGES` is platform-wide — it never touches the
-resource spec at all, only the plan summary — so it is evaluated
-exactly once, for every resource type, rather than duplicated per
-resource.
+versioning checks only ever run for `S3ResourceSpec`; DynamoDB
+encryption/PITR/deletion-protection checks only ever run for
+`DynamoDBResourceSpec`). `TF_NO_DESTRUCTIVE_CHANGES` is platform-wide —
+it never touches the resource spec at all, only the plan summary — so
+it is evaluated exactly once, for every resource type, rather than
+duplicated per resource.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ from iac_agent.domain.security import (
     SecurityFinding,
     SecuritySeverity,
 )
+from iac_agent.providers.aws.dynamodb.contract import DynamoDBResourceSpec
 from iac_agent.providers.aws.resource import AWSResourceSpec
 from iac_agent.providers.aws.s3.contract import S3ResourceSpec
 from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
@@ -35,6 +39,9 @@ SQS_DLQ_RECOMMENDED = "SQS_DLQ_RECOMMENDED"
 S3_ENCRYPTION_REQUIRED = "S3_ENCRYPTION_REQUIRED"
 S3_PUBLIC_ACCESS_BLOCK_REQUIRED = "S3_PUBLIC_ACCESS_BLOCK_REQUIRED"
 S3_VERSIONING_RECOMMENDED = "S3_VERSIONING_RECOMMENDED"
+DDB_ENCRYPTION_REQUIRED = "DDB_ENCRYPTION_REQUIRED"
+DDB_PITR_RECOMMENDED = "DDB_PITR_RECOMMENDED"
+DDB_DELETION_PROTECTION_RECOMMENDED = "DDB_DELETION_PROTECTION_RECOMMENDED"
 TF_NO_DESTRUCTIVE_CHANGES = "TF_NO_DESTRUCTIVE_CHANGES"
 
 #: The complete set of platform-policy IDs `evaluate_platform_policies`
@@ -50,6 +57,12 @@ REQUIRED_PLATFORM_POLICY_IDS_BY_RESOURCE_TYPE: dict[ResourceType, tuple[str, ...
         S3_ENCRYPTION_REQUIRED,
         S3_PUBLIC_ACCESS_BLOCK_REQUIRED,
         S3_VERSIONING_RECOMMENDED,
+        TF_NO_DESTRUCTIVE_CHANGES,
+    ),
+    ResourceType.DYNAMODB: (
+        DDB_ENCRYPTION_REQUIRED,
+        DDB_PITR_RECOMMENDED,
+        DDB_DELETION_PROTECTION_RECOMMENDED,
         TF_NO_DESTRUCTIVE_CHANGES,
     ),
 }
@@ -77,6 +90,12 @@ def evaluate_platform_policies(
                 _evaluate_s3_encryption_policy(spec),
                 _evaluate_s3_public_access_policy(spec),
                 _evaluate_s3_versioning_policy(spec),
+            )
+        case DynamoDBResourceSpec():
+            resource_findings = (
+                _evaluate_dynamodb_encryption_policy(spec),
+                _evaluate_dynamodb_pitr_policy(spec),
+                _evaluate_dynamodb_deletion_protection_policy(spec),
             )
         case _:
             raise ValueError(f"unsupported resource spec type: {type(spec).__name__}")
@@ -211,6 +230,80 @@ def _evaluate_s3_versioning_policy(spec: S3ResourceSpec) -> SecurityFinding:
         status=PolicyStatus.WARN,
         resource=spec.name,
         message="S3 object versioning is disabled; review data-recovery requirements.",
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+# ---------------------------------------------------------------------------
+# DynamoDB policies
+# ---------------------------------------------------------------------------
+
+
+def _evaluate_dynamodb_encryption_policy(spec: DynamoDBResourceSpec) -> SecurityFinding:
+    """DDB_ENCRYPTION_REQUIRED — defense in depth, mirroring the SQS/S3
+    encryption policies exactly: the Pydantic contract and the trusted
+    Terraform module already make an unencrypted table unconstructible."""
+    if spec.encryption.enabled:
+        return SecurityFinding(
+            policy_id=DDB_ENCRYPTION_REQUIRED,
+            severity=SecuritySeverity.HIGH,
+            status=PolicyStatus.PASS,
+            resource=spec.name,
+            message="DynamoDB encryption is enabled.",
+            source=FindingSource.PLATFORM_POLICY,
+        )
+    return SecurityFinding(
+        policy_id=DDB_ENCRYPTION_REQUIRED,
+        severity=SecuritySeverity.HIGH,
+        status=PolicyStatus.BLOCK,
+        resource=spec.name,
+        message="DynamoDB encryption is disabled; this request cannot proceed.",
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+def _evaluate_dynamodb_pitr_policy(spec: DynamoDBResourceSpec) -> SecurityFinding:
+    """DDB_PITR_RECOMMENDED — a warning, not a block. Disabled
+    point-in-time recovery is a legitimate choice for some workloads
+    (mirrors the SQS DLQ / S3 versioning WARN-not-BLOCK precedent)."""
+    if spec.point_in_time_recovery:
+        return SecurityFinding(
+            policy_id=DDB_PITR_RECOMMENDED,
+            severity=SecuritySeverity.MEDIUM,
+            status=PolicyStatus.PASS,
+            resource=spec.name,
+            message="DynamoDB point-in-time recovery is enabled.",
+            source=FindingSource.PLATFORM_POLICY,
+        )
+    return SecurityFinding(
+        policy_id=DDB_PITR_RECOMMENDED,
+        severity=SecuritySeverity.MEDIUM,
+        status=PolicyStatus.WARN,
+        resource=spec.name,
+        message="DynamoDB point-in-time recovery is disabled; review data-recovery requirements.",
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+def _evaluate_dynamodb_deletion_protection_policy(spec: DynamoDBResourceSpec) -> SecurityFinding:
+    """DDB_DELETION_PROTECTION_RECOMMENDED — a warning, not a block:
+    users may legitimately need an ephemeral/demo table, so this is
+    never force-corrected back to True, only flagged."""
+    if spec.deletion_protection:
+        return SecurityFinding(
+            policy_id=DDB_DELETION_PROTECTION_RECOMMENDED,
+            severity=SecuritySeverity.MEDIUM,
+            status=PolicyStatus.PASS,
+            resource=spec.name,
+            message="DynamoDB deletion protection is enabled.",
+            source=FindingSource.PLATFORM_POLICY,
+        )
+    return SecurityFinding(
+        policy_id=DDB_DELETION_PROTECTION_RECOMMENDED,
+        severity=SecuritySeverity.MEDIUM,
+        status=PolicyStatus.WARN,
+        resource=spec.name,
+        message="DynamoDB deletion protection is disabled; review accidental-deletion risk.",
         source=FindingSource.PLATFORM_POLICY,
     )
 
