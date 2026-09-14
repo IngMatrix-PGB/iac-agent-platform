@@ -12,7 +12,9 @@ import ast
 import inspect
 
 import pytest
+from langgraph.types import Command
 
+from iac_agent.domain.approval import ApprovalDecision
 from iac_agent.domain.plan import PlanSummary
 from iac_agent.domain.security import (
     FindingSource,
@@ -162,8 +164,8 @@ def test_happy_path_node_order_and_final_status(tmp_path):
     assert tf.calls == ["fmt", "init", "validate", "plan", "show_json"]
     assert len(renderer.render_calls) == 1
     assert len(checkov.scan_calls) == 1
-    assert result["workflow_status"] is WorkflowStatus.PASS
-    assert result["current_stage"] is WorkflowStage.COMPLETE
+    assert result["workflow_status"] is WorkflowStatus.AWAITING_APPROVAL
+    assert result["current_stage"] is WorkflowStage.APPROVAL
 
 
 def test_renderer_called_once_with_correct_spec(tmp_path):
@@ -218,17 +220,19 @@ def test_security_gate_result_is_propagated(tmp_path):
     assert result["security_gate"].overall_status is PolicyStatus.PASS
 
 
-def test_pass_gate_gives_pass_workflow_status(tmp_path):
+def test_pass_gate_gives_awaiting_approval_workflow_status(tmp_path):
     graph, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
-    assert result["workflow_status"] is WorkflowStatus.PASS
+    assert result["workflow_status"] is WorkflowStatus.AWAITING_APPROVAL
+    assert result["security_gate"].overall_status is PolicyStatus.PASS
 
 
-def test_warn_gate_gives_warn_workflow_status(tmp_path):
+def test_warn_gate_gives_awaiting_approval_workflow_status(tmp_path):
     spec = _spec(dlq=DlqSpec(enabled=False, max_receive_count=None))
     graph, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": spec})
-    assert result["workflow_status"] is WorkflowStatus.WARN
+    assert result["workflow_status"] is WorkflowStatus.AWAITING_APPROVAL
+    assert result["security_gate"].overall_status is PolicyStatus.WARN
 
 
 def test_block_gate_gives_blocked_workflow_status(tmp_path):
@@ -586,11 +590,16 @@ def test_graph_module_does_not_contain_platform_policy_ids_or_rules():
 
 
 def test_graph_compiles_and_runs_unchanged_without_a_checkpointer(tmp_path):
-    """Batch 11 behavior is preserved exactly when checkpointer=None
-    (the default) — no config/thread_id is even required."""
+    """Batch 11 behavior (no config/thread_id required) is preserved when
+    checkpointer=None (the default). Batch 13: a PASS result still
+    reaches the approval interrupt on first invoke even with no
+    checkpointer — LangGraph only refuses at *resume* time
+    (`Command(resume=...)` requires a checkpointer), which this test
+    does not attempt."""
     graph, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
-    assert result["workflow_status"] is WorkflowStatus.PASS
+    assert result["workflow_status"] is WorkflowStatus.AWAITING_APPROVAL
+    assert "__interrupt__" in result
 
 
 def test_injected_checkpointer_is_actually_used_by_the_compiled_graph(tmp_path):
@@ -612,7 +621,7 @@ def test_injected_checkpointer_is_actually_used_by_the_compiled_graph(tmp_path):
         # get_state only works at all when a checkpointer was actually
         # wired into compile() — this call itself is the proof.
         snapshot = graph.get_state(config)
-        assert snapshot.values["workflow_status"] is WorkflowStatus.PASS
+        assert snapshot.values["workflow_status"] is WorkflowStatus.AWAITING_APPROVAL
 
 
 def test_graph_module_does_not_instantiate_sqlite():
@@ -643,7 +652,7 @@ def _build_durable(workspace_root, checkpointer, **overrides):
     )
 
 
-def test_completed_pass_state_round_trips_through_real_sqlite(tmp_path):
+def test_interrupted_pass_state_round_trips_through_real_sqlite(tmp_path):
     db_path = tmp_path / "checkpoints.sqlite3"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
@@ -654,7 +663,8 @@ def test_completed_pass_state_round_trips_through_real_sqlite(tmp_path):
         first_result = graph.invoke(
             {"request_id": "req-durable-001", "resource_spec": _spec()}, config
         )
-        assert first_result["workflow_status"] is WorkflowStatus.PASS
+        assert first_result["workflow_status"] is WorkflowStatus.AWAITING_APPROVAL
+        assert "__interrupt__" in first_result
 
     # Reopen a brand-new saver and a brand-new compiled graph against the
     # SAME database file — this simulates process reconstruction. The
@@ -670,9 +680,507 @@ def test_completed_pass_state_round_trips_through_real_sqlite(tmp_path):
     assert isinstance(recovered["platform_evaluation"], PolicyEvaluation)
     assert isinstance(recovered["checkov_result"], CheckovScanResult)
     assert isinstance(recovered["security_gate"], SecurityGateResult)
-    assert recovered["workflow_status"] is WorkflowStatus.PASS
-    assert recovered["current_stage"] is WorkflowStage.COMPLETE
+    assert recovered["workflow_status"] is WorkflowStatus.AWAITING_APPROVAL
+    assert recovered["current_stage"] is WorkflowStage.APPROVAL
+    assert recovered.get("approval_decision") is None
     assert "terraform_plan_json" not in recovered
+
+
+# ---------------------------------------------------------------------------
+# Human approval gate (Batch 13)
+# ---------------------------------------------------------------------------
+
+
+def _spec_warn(**overrides) -> SQSResourceSpec:
+    return _spec(dlq=DlqSpec(enabled=False, max_receive_count=None), **overrides)
+
+
+def _block_checkov_result() -> CheckovScanResult:
+    return CheckovScanResult(
+        findings=(
+            SecurityFinding(
+                policy_id="CKV_AWS_27",
+                severity=SecuritySeverity.HIGH,
+                status=PolicyStatus.BLOCK,
+                resource="module.queue.aws_sqs_queue.this",
+                message="Checkov CKV_AWS_27 failed.",
+                source=FindingSource.CHECKOV,
+            ),
+        ),
+        passed_checks=4,
+        failed_checks=1,
+        skipped_checks=0,
+        scanner_version="3.3.13",
+    )
+
+
+# -- Routing ----------------------------------------------------------------
+
+
+def test_pass_routes_to_approval_interrupt(tmp_path):
+    graph, _, _, _ = _build(tmp_path)
+    result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
+    assert "__interrupt__" in result
+    assert result["workflow_status"] is WorkflowStatus.AWAITING_APPROVAL
+
+
+def test_warn_routes_to_approval_interrupt(tmp_path):
+    graph, _, _, _ = _build(tmp_path)
+    result = graph.invoke({"request_id": "req-001", "resource_spec": _spec_warn()})
+    assert "__interrupt__" in result
+    assert result["workflow_status"] is WorkflowStatus.AWAITING_APPROVAL
+
+
+def test_block_routes_to_blocked_and_end_with_no_interrupt(tmp_path):
+    graph, _, _, _ = _build(
+        tmp_path, checkov_adapter=FakeCheckovAdapter(result=_block_checkov_result())
+    )
+    result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
+
+    assert result["workflow_status"] is WorkflowStatus.BLOCKED
+    assert result["current_stage"] is WorkflowStage.COMPLETE
+    assert "__interrupt__" not in result
+
+
+def test_error_routes_to_error_and_end_with_no_interrupt(tmp_path):
+    tf_error = TerraformCommandError(_ok_result("terraform", "plan"))
+    graph, _, _, _ = _build(
+        tmp_path, terraform_runner=FakeTerraformRunner(fail_at="plan", fail_exc=tf_error)
+    )
+    result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
+
+    assert result["workflow_status"] is WorkflowStatus.ERROR
+    assert "__interrupt__" not in result
+
+
+def test_block_never_reaches_interrupt_checked_via_pending_tasks(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    config = workflow_config("req-block-001")
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph = _build_durable(
+            workspace_root,
+            saver,
+            checkov_adapter=FakeCheckovAdapter(result=_block_checkov_result()),
+        )
+        graph.invoke({"request_id": "req-block-001", "resource_spec": _spec()}, config)
+        snapshot = graph.get_state(config)
+
+    assert snapshot.next == ()
+    assert snapshot.tasks == ()
+
+
+def test_error_never_reaches_interrupt_checked_via_pending_tasks(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    config = workflow_config("req-error-001")
+    tf_error = TerraformCommandError(_ok_result("terraform", "plan"))
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph = _build_durable(
+            workspace_root,
+            saver,
+            terraform_runner=FakeTerraformRunner(fail_at="plan", fail_exc=tf_error),
+        )
+        graph.invoke({"request_id": "req-error-001", "resource_spec": _spec()}, config)
+        snapshot = graph.get_state(config)
+
+    assert snapshot.next == ()
+    assert snapshot.tasks == ()
+
+
+# -- Interrupt payload --------------------------------------------------
+
+
+def _interrupt_payload(result: dict) -> dict:
+    return result["__interrupt__"][0].value
+
+
+def test_interrupt_payload_contains_request_id(tmp_path):
+    graph, _, _, _ = _build(tmp_path)
+    result = graph.invoke({"request_id": "req-007", "resource_spec": _spec()})
+    assert _interrupt_payload(result)["request_id"] == "req-007"
+
+
+def test_interrupt_payload_contains_resource_name(tmp_path):
+    graph, _, _, _ = _build(tmp_path)
+    result = graph.invoke({"request_id": "req-001", "resource_spec": _spec(name="payment-events")})
+    assert _interrupt_payload(result)["resource"] == "payment-events"
+
+
+def test_interrupt_payload_contains_security_status(tmp_path):
+    graph, _, _, _ = _build(tmp_path)
+    result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
+    assert _interrupt_payload(result)["security_status"] == "pass"
+
+
+def test_interrupt_payload_contains_warn_security_status_not_normalized_to_pass(tmp_path):
+    graph, _, _, _ = _build(tmp_path)
+    result = graph.invoke({"request_id": "req-001", "resource_spec": _spec_warn()})
+    assert _interrupt_payload(result)["security_status"] == "warn"
+
+
+def test_interrupt_payload_contains_plan_counts(tmp_path):
+    graph, _, _, _ = _build(tmp_path)
+    result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
+    plan = _interrupt_payload(result)["plan"]
+    assert plan == {"add": 2, "change": 0, "destroy": 0}
+
+
+def test_interrupt_payload_contains_normalized_findings(tmp_path):
+    graph, _, _, _ = _build(tmp_path)
+    result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
+    findings = _interrupt_payload(result)["findings"]
+    assert len(findings) > 0
+    for finding in findings:
+        assert set(finding) == {"policy_id", "status", "severity", "resource"}
+
+
+def test_interrupt_payload_contains_no_raw_plan_json(tmp_path):
+    graph, _, _, _ = _build(tmp_path)
+    result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
+    payload_text = str(_interrupt_payload(result))
+    assert "resource_changes" not in payload_text
+    assert "terraform_version" not in payload_text
+
+
+def test_interrupt_payload_contains_no_raw_scanner_json(tmp_path):
+    graph, _, _, _ = _build(tmp_path)
+    result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
+    payload_text = str(_interrupt_payload(result))
+    assert "passed_checks" not in payload_text
+    assert "scanner_version" not in payload_text
+
+
+def test_interrupt_payload_contains_no_secrets_or_paths(tmp_path):
+    graph, _, _, _ = _build(tmp_path)
+    result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
+    payload_text = str(_interrupt_payload(result))
+    for forbidden in (
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        str(tmp_path),
+        "stdout",
+        "stderr",
+    ):
+        assert forbidden not in payload_text
+
+
+# -- Resume ---------------------------------------------------------------
+
+
+def _invoke_to_interrupt(workspace_root, saver, request_id, spec, **overrides):
+    graph = _build_durable(workspace_root, saver, **overrides)
+    config = workflow_config(request_id)
+    graph.invoke({"request_id": request_id, "resource_spec": spec}, config)
+    return graph, config
+
+
+def test_approve_resume_gives_approved_status(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph, config = _invoke_to_interrupt(workspace_root, saver, "req-approve", _spec())
+        result = graph.invoke(Command(resume=ApprovalDecision.APPROVE.value), config)
+
+    assert result["workflow_status"] is WorkflowStatus.APPROVED
+    assert result["current_stage"] is WorkflowStage.COMPLETE
+    assert result["approval_decision"] is ApprovalDecision.APPROVE
+
+
+def test_reject_resume_gives_rejected_status(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph, config = _invoke_to_interrupt(workspace_root, saver, "req-reject", _spec())
+        result = graph.invoke(Command(resume=ApprovalDecision.REJECT.value), config)
+
+    assert result["workflow_status"] is WorkflowStatus.REJECTED
+    assert result["current_stage"] is WorkflowStage.COMPLETE
+    assert result["approval_decision"] is ApprovalDecision.REJECT
+
+
+def test_reject_is_not_error_and_not_blocked(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph, config = _invoke_to_interrupt(workspace_root, saver, "req-reject", _spec())
+        result = graph.invoke(Command(resume=ApprovalDecision.REJECT.value), config)
+
+    assert result["workflow_status"] is not WorkflowStatus.ERROR
+    assert result["workflow_status"] is not WorkflowStatus.BLOCKED
+    assert result.get("error") is None
+
+
+def test_security_gate_result_preserved_unchanged_after_approve(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph, config = _invoke_to_interrupt(workspace_root, saver, "req-approve", _spec())
+        result = graph.invoke(Command(resume=ApprovalDecision.APPROVE.value), config)
+
+    assert result["security_gate"].overall_status is PolicyStatus.PASS
+
+
+def test_security_gate_result_preserved_unchanged_after_reject(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph, config = _invoke_to_interrupt(workspace_root, saver, "req-reject", _spec())
+        result = graph.invoke(Command(resume=ApprovalDecision.REJECT.value), config)
+
+    assert result["security_gate"].overall_status is PolicyStatus.PASS
+
+
+def test_warn_result_remains_warn_after_approval():
+    """Human APPROVE must never rewrite SecurityGateResult — a WARN
+    finding stays WARN even once the workflow itself is APPROVED."""
+    # Direct construction, not a graph run: proves the invariant at the
+    # domain-model level (SecurityGateResult has no mutation path at
+    # all — see iac_agent.domain.security), independent of any specific
+    # workflow run.
+    finding = SecurityFinding(
+        policy_id="SQS_DLQ_RECOMMENDED",
+        severity=SecuritySeverity.MEDIUM,
+        status=PolicyStatus.WARN,
+        resource="order-events",
+        message="Dead-letter queue is disabled.",
+        source=FindingSource.PLATFORM_POLICY,
+    )
+    gate_result = SecurityGateResult(findings=(finding,))
+    assert gate_result.overall_status is PolicyStatus.WARN
+
+
+def test_warn_gate_approve_resume_gives_approved_with_warn_preserved(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph, config = _invoke_to_interrupt(workspace_root, saver, "req-warn", _spec_warn())
+        result = graph.invoke(Command(resume=ApprovalDecision.APPROVE.value), config)
+
+    assert result["workflow_status"] is WorkflowStatus.APPROVED
+    assert result["security_gate"].overall_status is PolicyStatus.WARN
+
+
+# -- Invalid resume value -----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    ["yes", "ok", "approve please", True, False, 1, 0, {"decision": "approve"}, ["approve"]],
+    ids=[
+        "yes",
+        "ok",
+        "sentence",
+        "bool-true",
+        "bool-false",
+        "int-1",
+        "int-0",
+        "mapping",
+        "list",
+    ],
+)
+def test_invalid_resume_value_gives_error_not_approved(tmp_path, bad_value):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph, config = _invoke_to_interrupt(workspace_root, saver, "req-invalid", _spec())
+        result = graph.invoke(Command(resume=bad_value), config)
+
+    assert result["workflow_status"] is WorkflowStatus.ERROR
+    assert result["workflow_status"] is not WorkflowStatus.APPROVED
+    assert result["error"].stage is WorkflowStage.APPROVAL
+    assert result["error"].error_type == "InvalidApprovalDecisionError"
+    assert result.get("approval_decision") is None
+
+
+# -- Non-override --------------------------------------------------------
+
+
+def test_block_thread_cannot_be_approved(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    config = workflow_config("req-block-approve")
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph = _build_durable(
+            workspace_root,
+            saver,
+            checkov_adapter=FakeCheckovAdapter(result=_block_checkov_result()),
+        )
+        graph.invoke({"request_id": "req-block-approve", "resource_spec": _spec()}, config)
+
+        # There is no pending interrupt to resume — this is a structural
+        # no-op, not a state transition, so the thread's final state is
+        # untouched by the attempt.
+        result = graph.invoke(Command(resume=ApprovalDecision.APPROVE.value), config)
+
+    assert result["workflow_status"] is WorkflowStatus.BLOCKED
+    assert result["workflow_status"] is not WorkflowStatus.APPROVED
+    assert result.get("approval_decision") is None
+
+
+def test_error_thread_cannot_be_approved(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    config = workflow_config("req-error-approve")
+    tf_error = TerraformCommandError(_ok_result("terraform", "plan"))
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph = _build_durable(
+            workspace_root,
+            saver,
+            terraform_runner=FakeTerraformRunner(fail_at="plan", fail_exc=tf_error),
+        )
+        graph.invoke({"request_id": "req-error-approve", "resource_spec": _spec()}, config)
+
+        result = graph.invoke(Command(resume=ApprovalDecision.APPROVE.value), config)
+
+    assert result["workflow_status"] is WorkflowStatus.ERROR
+    assert result["workflow_status"] is not WorkflowStatus.APPROVED
+    assert result.get("approval_decision") is None
+
+
+def test_no_approval_decision_field_exists_on_blocked_state(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    config = workflow_config("req-block-field")
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph = _build_durable(
+            workspace_root,
+            saver,
+            checkov_adapter=FakeCheckovAdapter(result=_block_checkov_result()),
+        )
+        result = graph.invoke({"request_id": "req-block-field", "resource_spec": _spec()}, config)
+
+    assert result.get("approval_decision") is None
+
+
+def test_no_approval_decision_field_exists_on_error_state(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    config = workflow_config("req-error-field")
+    tf_error = TerraformCommandError(_ok_result("terraform", "plan"))
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph = _build_durable(
+            workspace_root,
+            saver,
+            terraform_runner=FakeTerraformRunner(fail_at="plan", fail_exc=tf_error),
+        )
+        result = graph.invoke({"request_id": "req-error-field", "resource_spec": _spec()}, config)
+
+    assert result.get("approval_decision") is None
+
+
+# -- Durability: reconstruction + resume ----------------------------------
+
+
+def test_approve_resume_works_after_saver_and_graph_reconstruction(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    config = workflow_config("req-durable-approve")
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph = _build_durable(workspace_root, saver)
+        graph.invoke({"request_id": "req-durable-approve", "resource_spec": _spec()}, config)
+
+    # Brand-new saver, brand-new graph — the original objects above are
+    # never reused for the resume below.
+    with open_sqlite_checkpointer(db_path) as saver2:
+        graph2 = _build_durable(workspace_root, saver2)
+        result = graph2.invoke(Command(resume=ApprovalDecision.APPROVE.value), config)
+
+    assert result["workflow_status"] is WorkflowStatus.APPROVED
+    assert result["current_stage"] is WorkflowStage.COMPLETE
+
+
+def test_final_approved_state_is_durable_across_a_third_reconstruction(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    config = workflow_config("req-durable-approve-2")
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph = _build_durable(workspace_root, saver)
+        graph.invoke({"request_id": "req-durable-approve-2", "resource_spec": _spec()}, config)
+
+    with open_sqlite_checkpointer(db_path) as saver2:
+        graph2 = _build_durable(workspace_root, saver2)
+        graph2.invoke(Command(resume=ApprovalDecision.APPROVE.value), config)
+
+    # A third, entirely fresh saver/graph pair recovers the final
+    # APPROVED state with no further invoke() call at all.
+    with open_sqlite_checkpointer(db_path) as saver3:
+        graph3 = _build_durable(workspace_root, saver3)
+        recovered = graph3.get_state(config).values
+
+    assert recovered["workflow_status"] is WorkflowStatus.APPROVED
+    assert recovered["current_stage"] is WorkflowStage.COMPLETE
+    assert recovered["approval_decision"] is ApprovalDecision.APPROVE
+    assert recovered["security_gate"].overall_status is PolicyStatus.PASS
+
+
+def test_final_rejected_state_is_durable_across_reconstruction(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    config = workflow_config("req-durable-reject")
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph = _build_durable(workspace_root, saver)
+        graph.invoke({"request_id": "req-durable-reject", "resource_spec": _spec()}, config)
+
+    with open_sqlite_checkpointer(db_path) as saver2:
+        graph2 = _build_durable(workspace_root, saver2)
+        graph2.invoke(Command(resume=ApprovalDecision.REJECT.value), config)
+
+    with open_sqlite_checkpointer(db_path) as saver3:
+        graph3 = _build_durable(workspace_root, saver3)
+        recovered = graph3.get_state(config).values
+
+    assert recovered["workflow_status"] is WorkflowStatus.REJECTED
+    assert recovered["current_stage"] is WorkflowStage.COMPLETE
+    assert recovered["approval_decision"] is ApprovalDecision.REJECT
+
+
+def test_same_thread_id_preserved_through_interrupt_and_resume(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    request_id = "req-durable-thread-id"
+    config = workflow_config(request_id)
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph = _build_durable(workspace_root, saver)
+        interrupted = graph.invoke({"request_id": request_id, "resource_spec": _spec()}, config)
+        assert interrupted["request_id"] == request_id
+
+        result = graph.invoke(Command(resume=ApprovalDecision.APPROVE.value), config)
+        assert result["request_id"] == request_id
 
 
 # ---------------------------------------------------------------------------

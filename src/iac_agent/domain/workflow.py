@@ -14,20 +14,39 @@ from pathlib import Path
 
 
 class WorkflowStatus(StrEnum):
-    """The overall status of one workflow run.
+    """The overall lifecycle status of one workflow run.
+
+    This is workflow *lifecycle*, deliberately distinct from the
+    deterministic *security outcome* (``SecurityGateResult.overall_status``,
+    which stays ``PASS``/``WARN``/``BLOCK`` and is never rewritten by
+    human approval — see ``iac_agent.domain.security.PolicyStatus``).
+    Batch 13 removed the ``PASS``/``WARN`` workflow statuses that
+    existed before the human approval gate: with an approval gate in
+    the graph, a deterministic PASS/WARN result is no longer a terminal
+    workflow outcome by itself, and keeping both a
+    ``WorkflowStatus.PASS`` and a ``SecurityGateResult.overall_status ==
+    PASS`` would be exactly the ambiguous duplicate state this project
+    avoids elsewhere.
 
     BLOCKED and ERROR are deliberately distinct: BLOCKED means security
     evidence was completed successfully and explicitly rejected the
-    change (``SecurityGateResult.overall_status == BLOCK``). ERROR
-    means reliable security evidence could not be obtained at all
-    (a Terraform, plan-analysis, Checkov, or security-gate boundary
-    raised) — the two must never be collapsed into one meaning.
+    change (``SecurityGateResult.overall_status == BLOCK``) — this
+    workflow never reaches human review. ERROR means reliable security
+    evidence could not be obtained at all (a Terraform, plan-analysis,
+    Checkov, security-gate, or approval-decision boundary raised) — the
+    two must never be collapsed into one meaning, and neither ever
+    reaches human review either.
+
+    AWAITING_APPROVAL means a PASS or WARN security result is durably
+    paused for human review. APPROVED/REJECTED are the only two
+    terminal outcomes reachable from AWAITING_APPROVAL.
     """
 
     PENDING = "pending"
     RUNNING = "running"
-    PASS = "pass"
-    WARN = "warn"
+    AWAITING_APPROVAL = "awaiting_approval"
+    APPROVED = "approved"
+    REJECTED = "rejected"
     BLOCKED = "blocked"
     ERROR = "error"
 
@@ -41,6 +60,7 @@ class WorkflowStage(StrEnum):
     PLATFORM_POLICY = "platform_policy"
     CHECKOV = "checkov"
     SECURITY_GATE = "security_gate"
+    APPROVAL = "approval"
     COMPLETE = "complete"
     ERROR = "error"
 

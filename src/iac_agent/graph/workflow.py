@@ -1,6 +1,6 @@
 """Deterministic LangGraph orchestration of the SQS pipeline.
 
-`build_sqs_workflow` wires exactly six narrow nodes around the already-
+`build_sqs_workflow` wires seven narrow nodes around the already-
 proven deterministic components:
 
     render_terraform   -> TerraformCompositionRenderer
@@ -9,20 +9,22 @@ proven deterministic components:
     platform_policy      -> evaluate_platform_policies
     checkov_scan         -> CheckovAdapter.scan
     security_gate        -> evaluate_security_gate
+    approval_gate         -> a durable LangGraph `interrupt()` (Batch 13)
 
 Each node consumes state, invokes exactly one existing capability, and
 returns only its own state update. None of the underlying business
 logic (contract validation, Terraform rendering/command semantics,
 plan-action classification, platform policy rules, Checkov
-normalization, or security-gate precedence) is reimplemented here —
-this module is orchestration only.
+normalization, security-gate precedence, or approval-decision parsing)
+is reimplemented here — this module is orchestration only.
 
 Any known boundary error (TerraformError, PlanAnalysisError,
-CheckovError, SecurityGateError) is caught at its node and translated
-into WorkflowStatus.ERROR + a safe WorkflowError — never into BLOCKED,
-which means something different (security evidence completed and
-explicitly rejected the change). If any node sets ERROR, no later
-node runs; the graph routes straight to END.
+CheckovError, SecurityGateError, InvalidApprovalDecisionError) is
+caught at its node and translated into WorkflowStatus.ERROR + a safe
+WorkflowError — never into BLOCKED, which means something different
+(security evidence completed and explicitly rejected the change). If
+any node sets ERROR, no later node runs; the graph routes straight to
+END.
 
 Batch 12 correction: `terraform_execute` no longer calls `show_json` or
 writes a raw plan into state. `plan_analysis` now calls
@@ -32,6 +34,20 @@ once checkpointing is enabled (see `iac_agent.persistence`): anything
 written into `WorkflowState` can be durably persisted to SQLite, so raw
 Terraform plan JSON must never become a state value at all, not merely
 be cleared later.
+
+Batch 13 adds the human approval gate. `security_gate` no longer sets a
+terminal PASS/WARN workflow status itself: a BLOCK result is terminal
+(WorkflowStatus.BLOCKED, straight to END, no interrupt, no approval
+path reachable); a PASS or WARN result instead sets
+WorkflowStatus.AWAITING_APPROVAL and routes to `approval_gate`, which
+calls LangGraph's `interrupt()` with a small, bounded, JSON-shaped
+payload. Resuming with `Command(resume=...)` must supply exactly
+`"approve"` or `"reject"` (see `iac_agent.domain.approval`); anything
+else is a WorkflowStatus.ERROR, never a silent approval. Human approval
+never rewrites `SecurityGateResult` — a WARN result is still inspectable
+as WARN after the workflow reaches APPROVED. This durably pauses via
+the same SQLite checkpointing introduced in Batch 12 — `interrupt()`
+requires a checkpointer to be resumable at all.
 """
 
 from __future__ import annotations
@@ -42,9 +58,15 @@ from pathlib import Path
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import interrupt
 
+from iac_agent.domain.approval import (
+    ApprovalDecision,
+    InvalidApprovalDecisionError,
+    parse_approval_decision,
+)
 from iac_agent.domain.plan import PlanSummary
-from iac_agent.domain.security import PolicyStatus
+from iac_agent.domain.security import PolicyStatus, SecurityGateResult
 from iac_agent.domain.workflow import (
     WorkflowError,
     WorkflowStage,
@@ -70,13 +92,42 @@ _DEFAULT_TRUSTED_MODULE_DIR = Path(__file__).resolve().parents[3] / "terraform" 
 #: stored in workflow state.
 _PLAN_ENV_OVERRIDES = {"AWS_ACCESS_KEY_ID": "test", "AWS_SECRET_ACCESS_KEY": "test"}
 
-_GATE_STATUS_TO_WORKFLOW_STATUS = {
-    PolicyStatus.PASS: WorkflowStatus.PASS,
-    PolicyStatus.WARN: WorkflowStatus.WARN,
-    PolicyStatus.BLOCK: WorkflowStatus.BLOCKED,
-}
-
 _ERROR_MESSAGE_LIMIT = 500
+
+
+def _approval_payload(state: WorkflowState) -> dict:
+    """Build the bounded, JSON-shaped payload surfaced to a human
+    reviewer via `interrupt()`.
+
+    Deliberately built only from already-derived, already-normalized
+    evidence (`PlanSummary`, `SecurityGateResult`) — never from raw
+    Terraform/Checkov JSON, stdout/stderr, exception objects,
+    environment values, or filesystem paths. Reused as-is on node
+    re-execution after resume (LangGraph re-runs the node from the
+    start): this function is pure and has no side effects.
+    """
+    gate_result: SecurityGateResult = state["security_gate"]
+    plan_summary: PlanSummary = state["plan_summary"]
+
+    return {
+        "request_id": state["request_id"],
+        "resource": state["resource_spec"].name,
+        "security_status": gate_result.overall_status.value,
+        "plan": {
+            "add": plan_summary.add_count,
+            "change": plan_summary.change_count,
+            "destroy": plan_summary.destroy_count,
+        },
+        "findings": [
+            {
+                "policy_id": finding.policy_id,
+                "status": finding.status.value,
+                "severity": finding.severity.value,
+                "resource": finding.resource,
+            }
+            for finding in gate_result.findings
+        ],
+    }
 
 
 def _resolve_request_workspace(workspace_root: Path, request_id: str) -> Path:
@@ -219,11 +270,52 @@ def build_sqs_workflow(
         except SecurityGateError as exc:
             return _error_update(WorkflowStage.SECURITY_GATE, exc)
 
+        if gate_result.overall_status is PolicyStatus.BLOCK:
+            # Terminal, by construction: no interrupt is ever reached for
+            # a BLOCK result, so there is no resume path that could ever
+            # turn this into an approval — the core Batch 13 security
+            # rule (human approval must not override a deterministic
+            # block) holds structurally, not merely by convention.
+            return {
+                "security_gate": gate_result,
+                "workflow_status": WorkflowStatus.BLOCKED,
+                "current_stage": WorkflowStage.COMPLETE,
+            }
+
         return {
             "security_gate": gate_result,
-            "workflow_status": _GATE_STATUS_TO_WORKFLOW_STATUS[gate_result.overall_status],
+            "workflow_status": WorkflowStatus.AWAITING_APPROVAL,
+            "current_stage": WorkflowStage.APPROVAL,
+        }
+
+    def approval_gate(state: WorkflowState) -> dict:
+        # Re-executed from the start on resume (LangGraph semantics for
+        # `interrupt()`) — `_approval_payload` is pure, so recomputing it
+        # is safe and always produces the same value.
+        raw_decision = interrupt(_approval_payload(state))
+
+        try:
+            decision = parse_approval_decision(raw_decision)
+        except InvalidApprovalDecisionError as exc:
+            return _error_update(WorkflowStage.APPROVAL, exc)
+
+        final_status = (
+            WorkflowStatus.APPROVED
+            if decision is ApprovalDecision.APPROVE
+            else WorkflowStatus.REJECTED
+        )
+        return {
+            "approval_decision": decision,
+            "workflow_status": final_status,
             "current_stage": WorkflowStage.COMPLETE,
         }
+
+    def _route_after_security_gate(state: WorkflowState) -> str:
+        # BLOCK and ERROR both terminate at security_gate itself; only
+        # AWAITING_APPROVAL ever proceeds to the interrupt.
+        if state.get("workflow_status") == WorkflowStatus.AWAITING_APPROVAL:
+            return "approval_gate"
+        return END
 
     builder = StateGraph(WorkflowState)
     builder.add_node("render_terraform", render_terraform)
@@ -232,6 +324,7 @@ def build_sqs_workflow(
     builder.add_node("platform_policy", platform_policy)
     builder.add_node("checkov_scan", checkov_scan)
     builder.add_node("security_gate", security_gate)
+    builder.add_node("approval_gate", approval_gate)
 
     builder.add_edge(START, "render_terraform")
     builder.add_conditional_edges("render_terraform", _route_unless_error("terraform_execute"))
@@ -239,6 +332,7 @@ def build_sqs_workflow(
     builder.add_conditional_edges("plan_analysis", _route_unless_error("platform_policy"))
     builder.add_conditional_edges("platform_policy", _route_unless_error("checkov_scan"))
     builder.add_conditional_edges("checkov_scan", _route_unless_error("security_gate"))
-    builder.add_edge("security_gate", END)
+    builder.add_conditional_edges("security_gate", _route_after_security_gate)
+    builder.add_edge("approval_gate", END)
 
     return builder.compile(checkpointer=checkpointer)
