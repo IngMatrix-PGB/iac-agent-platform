@@ -33,7 +33,7 @@ company-specific terminology, or developer paths.
 
 ## Current SQS scenario coverage
 
-Ten scenarios, in dataset order (the order the runner also reports
+Fourteen scenarios, in dataset order (the order the runner also reports
 results in):
 
 | Scenario ID | Proves |
@@ -48,6 +48,10 @@ results in):
 | `secure_default_queue_pass` | The representative secure-default configuration — also the one scenario exercised against the real Terraform/Checkov binaries (see below) |
 | `boundary_numeric_values_valid` *(extra)* | Every numeric field at its inclusive minimum still constructs successfully |
 | `invalid_queue_name_charset` *(extra)* | A disallowed character in the queue name is rejected |
+| `derived_dlq_name_boundary_valid` *(Batch 12.5)* | A 76-character standard name is valid — its Terraform-derived `<name>-dlq` DLQ name lands at exactly the 80-character limit |
+| `derived_dlq_name_too_long_rejected` *(Batch 12.5)* | A 77-character standard name is individually valid but is rejected because its derived DLQ name would be 81 characters |
+| `long_primary_without_dlq_valid` *(Batch 12.5)* | The same 77-character name is valid once the DLQ is disabled — no DLQ name is ever derived |
+| `fifo_derived_dlq_name_too_long_rejected` *(Batch 12.5)* | The FIFO mirror of `derived_dlq_name_too_long_rejected`: a 77-character `.fifo` name whose derived `<base>-dlq.fifo` name would be 81 characters |
 
 Each scenario's `expected` block records: `valid`, and — only when
 `valid` is `true` — `queue_name`, `fifo`, `dlq_enabled`,

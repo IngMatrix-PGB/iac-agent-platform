@@ -61,6 +61,37 @@ def _validate_queue_name(value: str) -> str:
     return value
 
 
+# -- Derived DLQ name -------------------------------------------------------
+# The trusted Terraform module (terraform/modules/sqs/main.tf) derives the
+# DLQ's physical name from the primary queue name rather than accepting it
+# as a separate input:
+#
+#     name = var.fifo
+#       ? "${trimsuffix(var.name, ".fifo")}-dlq.fifo"
+#       : "${var.name}-dlq"
+#
+# A primary name that is individually valid (<= 80 characters) can still
+# produce a derived DLQ name that exceeds AWS's 80-character SQS queue-name
+# limit. `derive_dlq_name` is the single canonical Python mirror of that
+# exact Terraform expression — every place in this codebase (contract
+# validation, tests, the cross-layer proof against a real Terraform plan)
+# computes the expected derived name by calling this function, never by
+# rebuilding the string independently.
+
+
+def derive_dlq_name(name: str, fifo: bool) -> str:
+    """Mirror the trusted Terraform module's DLQ-name derivation exactly.
+
+    Pure and deterministic: no network access, no filesystem access, and
+    the primary `name` is never mutated — this only computes what the
+    *derived* DLQ name would be.
+    """
+    if fifo:
+        base = name[: -len(_FIFO_SUFFIX)] if name.endswith(_FIFO_SUFFIX) else name
+        return f"{base}-dlq.fifo"
+    return f"{name}-dlq"
+
+
 class EncryptionSpec(BaseModel):
     """Server-side encryption configuration for the queue.
 
@@ -155,4 +186,20 @@ class SQSResourceSpec(BaseModel):
             raise ValueError("fifo=True requires name to end with '.fifo'")
         if not self.fifo and ends_with_fifo:
             raise ValueError("fifo=False requires name to NOT end with '.fifo'")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_derived_dlq_name_length(self) -> SQSResourceSpec:
+        # Only meaningful when a DLQ will actually be created — a primary
+        # name that is valid up to the normal 80-character limit must
+        # remain valid when no DLQ exists to derive a name for.
+        if not self.dlq.enabled:
+            return self
+
+        derived_name = derive_dlq_name(self.name, self.fifo)
+        if len(derived_name) > _MAX_NAME_LENGTH:
+            raise ValueError(
+                f"derived DLQ queue name {derived_name!r} is {len(derived_name)} characters, "
+                f"exceeding the SQS {_MAX_NAME_LENGTH}-character limit — shorten name"
+            )
         return self

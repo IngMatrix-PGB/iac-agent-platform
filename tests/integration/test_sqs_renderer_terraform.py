@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from iac_agent.providers.aws.sqs.contract import DlqSpec, SQSResourceSpec
+from iac_agent.providers.aws.sqs.contract import DlqSpec, SQSResourceSpec, derive_dlq_name
 from iac_agent.providers.aws.sqs.renderer import TerraformCompositionRenderer
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -113,3 +113,54 @@ def test_renderer_output_produces_a_valid_credential_free_plan(tmp_path):
         "module.queue.aws_sqs_queue.dlq[0]": ["create"],
     }
     assert not any("delete" in actions for actions in resource_changes.values())
+
+
+# ---------------------------------------------------------------------------
+# Batch 12.5 — cross-layer derived DLQ name proof
+#
+# Proves that Python's derive_dlq_name() and the trusted module's actual
+# planned aws_sqs_queue.dlq name agree exactly, for a real boundary-valid
+# spec of each queue type — not merely that both independently claim to
+# implement "the same" derivation.
+# ---------------------------------------------------------------------------
+
+
+def _planned_dlq_name(spec: SQSResourceSpec, tmp_path: Path) -> str:
+    module_source = os.path.relpath(_TRUSTED_MODULE_DIR, start=tmp_path)
+    composition = TerraformCompositionRenderer().render(spec, module_source=module_source)
+    composition.write_to(tmp_path)
+
+    env = _clean_env()
+    init = _run(["terraform", "init", "-backend=false"], cwd=tmp_path, env=env)
+    assert init.returncode == 0, f"terraform init failed:\n{init.stdout}\n{init.stderr}"
+
+    plan_env = {**env, "AWS_ACCESS_KEY_ID": "test", "AWS_SECRET_ACCESS_KEY": "test"}
+    plan = _run(["terraform", "plan", "-out=tfplan"], cwd=tmp_path, env=plan_env)
+    assert plan.returncode == 0, f"terraform plan failed:\n{plan.stdout}\n{plan.stderr}"
+
+    show = _run(["terraform", "show", "-json", "tfplan"], cwd=tmp_path, env=env)
+    assert show.returncode == 0, f"terraform show -json failed:\n{show.stderr}"
+
+    plan_json = json.loads(show.stdout)
+    for resource_change in plan_json["resource_changes"]:
+        if resource_change["address"] == "module.queue.aws_sqs_queue.dlq[0]":
+            return resource_change["change"]["after"]["name"]
+    raise AssertionError("no module.queue.aws_sqs_queue.dlq[0] in plan resource_changes")
+
+
+def test_planned_dlq_name_matches_derive_dlq_name_for_standard_queue(tmp_path):
+    name = "a" * 76  # boundary-valid: derived length is exactly 80
+    spec = SQSResourceSpec(name=name)
+
+    planned_name = _planned_dlq_name(spec, tmp_path)
+
+    assert planned_name == derive_dlq_name(spec.name, spec.fifo)
+
+
+def test_planned_dlq_name_matches_derive_dlq_name_for_fifo_queue(tmp_path):
+    name = "a" * 71 + ".fifo"  # boundary-valid: derived length is exactly 80
+    spec = SQSResourceSpec(name=name, fifo=True)
+
+    planned_name = _planned_dlq_name(spec, tmp_path)
+
+    assert planned_name == derive_dlq_name(spec.name, spec.fifo)
