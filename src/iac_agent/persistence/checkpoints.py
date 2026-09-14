@@ -39,6 +39,8 @@ _ALLOWED_WORKFLOW_TYPES: tuple[tuple[str, str], ...] = (
     ("iac_agent.providers.aws.sqs.contract", "SQSResourceSpec"),
     ("iac_agent.providers.aws.sqs.contract", "EncryptionSpec"),
     ("iac_agent.providers.aws.sqs.contract", "DlqSpec"),
+    ("iac_agent.providers.aws.s3.contract", "S3ResourceSpec"),
+    ("iac_agent.providers.aws.s3.contract", "S3EncryptionSpec"),
     ("iac_agent.domain.plan", "PlanAction"),
     ("iac_agent.domain.plan", "ResourceChange"),
     ("iac_agent.domain.plan", "PlanSummary"),

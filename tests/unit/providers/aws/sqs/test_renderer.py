@@ -16,8 +16,8 @@ from iac_agent.providers.aws.sqs.renderer import (
     DEFAULT_MODULE_SOURCE,
     GeneratedTerraformComposition,
     TerraformCompositionRenderer,
-    _hcl_string,
 )
+from iac_agent.providers.aws.terraform_render import hcl_string as _hcl_string
 
 RENDERER = TerraformCompositionRenderer()
 
