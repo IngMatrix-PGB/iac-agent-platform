@@ -4,11 +4,20 @@ SQSResourceSpec -> real LangGraph workflow (real renderer, real
 Terraform, real trusted module, real plan analyzer, real platform
 policy, real Checkov, real security gate) -> SQLite checkpoint -> CLOSE
 -> new checkpointer + new compiled graph against the SAME database file
--> get_state(same thread config) -> recovered PASS state.
+-> get_state(same thread config) -> recovered interrupted state.
 
 The original saver and graph objects are never reused for recovery —
 this is what makes the test a genuine simulation of process
 reconstruction, not just "the graph remembered it in memory".
+
+Batch 13: a clean PASS result now durably pauses at the human approval
+gate rather than reaching a terminal state by itself, so recovery here
+proves the *interrupted* AWAITING_APPROVAL state survives
+reconstruction. The full interrupt -> reconstruct -> resume -> APPROVED
+sequence (the one real-tool durable *approval* integration test) lives
+in tests/integration/test_sqs_workflow_hitl.py; this test keeps its
+original Batch 12 purpose of proving durability of the real pipeline's
+output up to that point.
 """
 
 from __future__ import annotations
@@ -61,8 +70,9 @@ def test_real_workflow_state_survives_sqlite_checkpointer_and_graph_reconstructi
         graph = _build_real_graph(workspace_root, saver)
         first_result = graph.invoke({"request_id": request_id, "resource_spec": spec}, config)
 
-    assert first_result["workflow_status"] is WorkflowStatus.PASS
-    assert first_result["current_stage"] is WorkflowStage.COMPLETE
+    assert first_result["workflow_status"] is WorkflowStatus.AWAITING_APPROVAL
+    assert first_result["current_stage"] is WorkflowStage.APPROVAL
+    assert "__interrupt__" in first_result
 
     # `saver` and `graph` above are now out of scope / their SQLite
     # connection is closed. Recovery below uses entirely new objects
@@ -92,8 +102,8 @@ def test_real_workflow_state_survives_sqlite_checkpointer_and_graph_reconstructi
     assert isinstance(security_gate, SecurityGateResult)
     assert security_gate.overall_status.value == "pass"
 
-    assert recovered["workflow_status"] is WorkflowStatus.PASS
-    assert recovered["current_stage"] is WorkflowStage.COMPLETE
+    assert recovered["workflow_status"] is WorkflowStatus.AWAITING_APPROVAL
+    assert recovered["current_stage"] is WorkflowStage.APPROVAL
 
     # The raw Terraform plan JSON field must never exist, checkpointed
     # or not.

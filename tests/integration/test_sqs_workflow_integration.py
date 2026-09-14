@@ -42,9 +42,16 @@ def test_real_workflow_passes_for_a_secure_dlq_enabled_request(tmp_path):
 
     result = graph.invoke({"request_id": "req-001", "resource_spec": spec})
 
-    assert result["workflow_status"] is WorkflowStatus.PASS
-    assert result["current_stage"] is WorkflowStage.COMPLETE
+    # Batch 13: a clean PASS security result is no longer terminal by
+    # itself — it durably pauses for human approval. This call has no
+    # checkpointer, so it cannot be resumed (see
+    # tests/integration/test_sqs_workflow_hitl.py for the full
+    # interrupt -> reconstruct -> resume -> APPROVED proof); it only
+    # needs to reach the interrupt correctly here.
+    assert result["workflow_status"] is WorkflowStatus.AWAITING_APPROVAL
+    assert result["current_stage"] is WorkflowStage.APPROVAL
     assert result.get("error") is None
+    assert "__interrupt__" in result
 
     plan_summary = result["plan_summary"]
     assert plan_summary.add_count == 2
