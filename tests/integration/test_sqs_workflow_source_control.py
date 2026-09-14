@@ -144,7 +144,7 @@ def _build_graph(workspace_root: Path, checkpointer, source_control_port):
 
 
 def test_real_github_adapter_publishes_approved_change_through_the_graph(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
 

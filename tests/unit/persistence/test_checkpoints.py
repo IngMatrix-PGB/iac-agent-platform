@@ -12,12 +12,18 @@ from __future__ import annotations
 
 import ast
 import inspect
+import re
+from pathlib import Path
 
 import pytest
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from iac_agent.persistence import checkpoints as checkpoints_module
 from iac_agent.persistence.checkpoints import open_sqlite_checkpointer, workflow_config
+
+#: Repository root, computed from this test file's location rather than
+#: the process working directory.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # ---------------------------------------------------------------------------
 # Persistence boundary
@@ -39,14 +45,14 @@ def test_nonexistent_parent_directory_is_rejected(tmp_path):
     """Documented Batch 12 choice: a missing parent directory is
     rejected rather than silently created — the caller must create it
     explicitly."""
-    missing_parent_path = tmp_path / "does-not-exist" / "checkpoints.sqlite3"
+    missing_parent_path = tmp_path / "does-not-exist" / "state.db"
     with pytest.raises(ValueError, match="parent directory"):
         with open_sqlite_checkpointer(missing_parent_path):
             pass
 
 
 def test_existing_parent_directory_with_new_db_file_is_accepted(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     with open_sqlite_checkpointer(db_path) as saver:
         assert isinstance(saver, SqliteSaver)
     assert db_path.exists()
@@ -84,7 +90,7 @@ def test_sqlite_imports_are_isolated_to_the_persistence_package():
 
 
 def test_saver_lifecycle_closes_the_underlying_connection_cleanly(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     captured_conn = None
 
     with open_sqlite_checkpointer(db_path) as saver:
@@ -95,7 +101,7 @@ def test_saver_lifecycle_closes_the_underlying_connection_cleanly(tmp_path):
 
 
 def test_saver_connection_is_closed_even_when_the_with_block_raises(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     captured_conn = None
 
     with pytest.raises(RuntimeError):
@@ -149,3 +155,36 @@ def test_workflow_config_never_generates_a_uuid_or_timestamp():
 
     forbidden = {"uuid", "datetime", "time", "random"}
     assert not (imported_roots & forbidden), imported_roots & forbidden
+
+
+# ---------------------------------------------------------------------------
+# Batch 15: state.db canonical filename — no stale own-example names
+# ---------------------------------------------------------------------------
+
+
+def test_no_stale_own_example_sqlite_filenames_remain_in_source_or_tests():
+    """`checkpoints.sqlite3` (and its near-variants) was our own example/
+    test filename, replaced in Batch 15 by the shorter `state.db`
+    convention. This does not touch third-party terminology
+    (`checkpoint`, `checkpointer`, `BaseCheckpointSaver`, `SqliteSaver`,
+    LangGraph's own `checkpoint` concept all remain correct and
+    untouched) — only the specific stale filename strings."""
+    stale_pattern = re.compile(r"\b(checkpoints?|workflow[-_]state)\.sqlite3\b", re.IGNORECASE)
+    this_file = Path(__file__).resolve()
+    checked_any = False
+    for directory in ("src", "tests", "docs"):
+        for path in (_REPO_ROOT / directory).rglob("*"):
+            if not path.is_file() or path.suffix not in (".py", ".md"):
+                continue
+            if "__pycache__" in path.parts:
+                continue
+            if path == this_file:
+                # This test's own docstring/pattern necessarily names the
+                # stale strings it's checking for.
+                continue
+            checked_any = True
+            text = path.read_text(encoding="utf-8")
+            match = stale_pattern.search(text)
+            assert match is None, f"stale SQLite example filename {match.group()!r} in {path}"
+
+    assert checked_any

@@ -63,7 +63,7 @@ def _build_real_graph(workspace_root: Path, checkpointer):
 
 
 def test_real_workflow_state_survives_sqlite_checkpointer_and_graph_reconstruction(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
 
