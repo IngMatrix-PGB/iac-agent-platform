@@ -38,8 +38,17 @@ class WorkflowStatus(StrEnum):
     reaches human review either.
 
     AWAITING_APPROVAL means a PASS or WARN security result is durably
-    paused for human review. APPROVED/REJECTED are the only two
-    terminal outcomes reachable from AWAITING_APPROVAL.
+    paused for human review. APPROVED/REJECTED are the two outcomes
+    reachable from AWAITING_APPROVAL.
+
+    Batch 14 adds PR_CREATED: APPROVED is now an *intermediate*
+    post-HITL status, not terminal by itself — an APPROVED workflow
+    proceeds to publish the generated Terraform composition to source
+    control (see ``iac_agent.git``), and PR_CREATED means that
+    publication succeeded. Source-control mutation is reachable only
+    from APPROVED; REJECTED, BLOCKED, ERROR, AWAITING_APPROVAL,
+    RUNNING, and PENDING can never invoke it (see
+    ``iac_agent.graph.workflow._ensure_workflow_approved``).
     """
 
     PENDING = "pending"
@@ -49,6 +58,7 @@ class WorkflowStatus(StrEnum):
     REJECTED = "rejected"
     BLOCKED = "blocked"
     ERROR = "error"
+    PR_CREATED = "pr_created"
 
 
 class WorkflowStage(StrEnum):
@@ -61,6 +71,7 @@ class WorkflowStage(StrEnum):
     CHECKOV = "checkov"
     SECURITY_GATE = "security_gate"
     APPROVAL = "approval"
+    SOURCE_CONTROL = "source_control"
     COMPLETE = "complete"
     ERROR = "error"
 

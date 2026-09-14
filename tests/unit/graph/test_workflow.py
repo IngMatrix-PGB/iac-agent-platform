@@ -24,9 +24,11 @@ from iac_agent.domain.security import (
     SecurityGateResult,
     SecuritySeverity,
 )
+from iac_agent.domain.source_control import PullRequestResult
 from iac_agent.domain.workflow import WorkflowStage, WorkflowStatus
 from iac_agent.execution.plan_analyzer import PlanAnalysisError
 from iac_agent.execution.terraform_runner import CommandResult, TerraformCommandError
+from iac_agent.git.port import SourceControlError
 from iac_agent.graph import workflow as workflow_module
 from iac_agent.graph.workflow import build_sqs_workflow
 from iac_agent.persistence.checkpoints import open_sqlite_checkpointer, workflow_config
@@ -126,6 +128,48 @@ class FakeCheckovAdapter:
         return self._result
 
 
+class FakeSourceControl:
+    """Records every `publish_change` call and returns a deterministic
+    `PullRequestResult` — never a real HTTP request, never a real
+    GitHub repository."""
+
+    def __init__(self, *, raise_exc: Exception | None = None, pr_number: int = 1):
+        self.calls: list[dict] = []
+        self._raise_exc = raise_exc
+        self._pr_number = pr_number
+
+    def publish_change(
+        self,
+        *,
+        request_id,
+        base_branch,
+        branch_name,
+        files,
+        commit_message,
+        pr_title,
+        pr_body,
+    ) -> PullRequestResult:
+        self.calls.append(
+            {
+                "request_id": request_id,
+                "base_branch": base_branch,
+                "branch_name": branch_name,
+                "files": dict(files),
+                "commit_message": commit_message,
+                "pr_title": pr_title,
+                "pr_body": pr_body,
+            }
+        )
+        if self._raise_exc is not None:
+            raise self._raise_exc
+        return PullRequestResult(
+            number=self._pr_number,
+            url=f"https://example.invalid/pull/{self._pr_number}",
+            branch=branch_name,
+            base_branch=base_branch,
+        )
+
+
 def _spec(**overrides) -> SQSResourceSpec:
     defaults = {"name": "order-events"}
     defaults.update(overrides)
@@ -138,18 +182,21 @@ def _build(
     renderer=None,
     terraform_runner=None,
     checkov_adapter=None,
+    source_control_port=None,
 ):
     renderer = renderer or FakeRenderer()
     terraform_runner = terraform_runner or FakeTerraformRunner()
     checkov_adapter = checkov_adapter or FakeCheckovAdapter()
+    source_control_port = source_control_port or FakeSourceControl()
 
     graph = build_sqs_workflow(
         renderer=renderer,
         terraform_runner=terraform_runner,
         checkov_adapter=checkov_adapter,
+        source_control_port=source_control_port,
         workspace_root=tmp_path,
     )
-    return graph, renderer, terraform_runner, checkov_adapter
+    return graph, renderer, terraform_runner, checkov_adapter, source_control_port
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +205,7 @@ def _build(
 
 
 def test_happy_path_node_order_and_final_status(tmp_path):
-    graph, renderer, tf, checkov = _build(tmp_path)
+    graph, renderer, tf, checkov, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
 
     assert tf.calls == ["fmt", "init", "validate", "plan", "show_json"]
@@ -169,7 +216,7 @@ def test_happy_path_node_order_and_final_status(tmp_path):
 
 
 def test_renderer_called_once_with_correct_spec(tmp_path):
-    graph, renderer, _, _ = _build(tmp_path)
+    graph, renderer, _, _, _ = _build(tmp_path)
     spec = _spec()
     graph.invoke({"request_id": "req-001", "resource_spec": spec})
 
@@ -178,7 +225,7 @@ def test_renderer_called_once_with_correct_spec(tmp_path):
 
 
 def test_terraform_fmt_init_validate_plan_show_json_each_called_once(tmp_path):
-    graph, _, tf, _ = _build(tmp_path)
+    graph, _, tf, _, _ = _build(tmp_path)
     graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
 
     for step in ("fmt", "init", "validate", "plan", "show_json"):
@@ -186,7 +233,7 @@ def test_terraform_fmt_init_validate_plan_show_json_each_called_once(tmp_path):
 
 
 def test_plan_summary_is_propagated(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
 
     plan_summary = result["plan_summary"]
@@ -198,7 +245,7 @@ def test_plan_summary_is_propagated(tmp_path):
 
 
 def test_platform_evaluation_is_propagated(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
 
     assert result["platform_evaluation"] is not None
@@ -206,14 +253,14 @@ def test_platform_evaluation_is_propagated(tmp_path):
 
 
 def test_checkov_called_once(tmp_path):
-    graph, _, _, checkov = _build(tmp_path)
+    graph, _, _, checkov, _ = _build(tmp_path)
     graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
 
     assert len(checkov.scan_calls) == 1
 
 
 def test_security_gate_result_is_propagated(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
 
     assert result["security_gate"] is not None
@@ -221,7 +268,7 @@ def test_security_gate_result_is_propagated(tmp_path):
 
 
 def test_pass_gate_gives_awaiting_approval_workflow_status(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
     assert result["workflow_status"] is WorkflowStatus.AWAITING_APPROVAL
     assert result["security_gate"].overall_status is PolicyStatus.PASS
@@ -229,7 +276,7 @@ def test_pass_gate_gives_awaiting_approval_workflow_status(tmp_path):
 
 def test_warn_gate_gives_awaiting_approval_workflow_status(tmp_path):
     spec = _spec(dlq=DlqSpec(enabled=False, max_receive_count=None))
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": spec})
     assert result["workflow_status"] is WorkflowStatus.AWAITING_APPROVAL
     assert result["security_gate"].overall_status is PolicyStatus.WARN
@@ -252,7 +299,7 @@ def test_block_gate_gives_blocked_workflow_status(tmp_path):
         skipped_checks=0,
         scanner_version="3.3.13",
     )
-    graph, _, _, _ = _build(tmp_path, checkov_adapter=FakeCheckovAdapter(result=checkov_block))
+    graph, _, _, _, _ = _build(tmp_path, checkov_adapter=FakeCheckovAdapter(result=checkov_block))
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
 
     assert result["workflow_status"] is WorkflowStatus.BLOCKED
@@ -264,7 +311,7 @@ def test_block_gate_gives_blocked_workflow_status(tmp_path):
 
 
 def test_renderer_failure_gives_error_and_stops(tmp_path):
-    graph, renderer, tf, checkov = _build(
+    graph, renderer, tf, checkov, _ = _build(
         tmp_path, renderer=FakeRenderer(raise_exc=RuntimeError("boom"))
     )
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
@@ -281,7 +328,7 @@ def test_terraform_execute_stage_failure_gives_error_and_stops(tmp_path, stage):
     show_json moved to plan_analysis, so it is NOT covered by this case —
     see test_show_json_failure_gives_error_and_stops below)."""
     tf_error = TerraformCommandError(_ok_result("terraform", stage))
-    graph, renderer, tf, checkov = _build(
+    graph, renderer, tf, checkov, _ = _build(
         tmp_path, terraform_runner=FakeTerraformRunner(fail_at=stage, fail_exc=tf_error)
     )
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
@@ -296,7 +343,7 @@ def test_show_json_failure_gives_error_and_stops(tmp_path):
     """Batch 12: show_json is called by plan_analysis, not
     terraform_execute — its failure is attributed to PLAN_ANALYSIS."""
     tf_error = TerraformCommandError(_ok_result("terraform", "show", "-json"))
-    graph, renderer, tf, checkov = _build(
+    graph, renderer, tf, checkov, _ = _build(
         tmp_path, terraform_runner=FakeTerraformRunner(fail_at="show_json", fail_exc=tf_error)
     )
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
@@ -308,7 +355,7 @@ def test_show_json_failure_gives_error_and_stops(tmp_path):
 
 
 def test_plan_analysis_failure_gives_error_and_stops(tmp_path):
-    graph, renderer, tf, checkov = _build(
+    graph, renderer, tf, checkov, _ = _build(
         tmp_path, terraform_runner=FakeTerraformRunner(plan_json={"resource_changes": "not-a-list"})
     )
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
@@ -319,7 +366,7 @@ def test_plan_analysis_failure_gives_error_and_stops(tmp_path):
 
 
 def test_checkov_executable_missing_gives_error_and_stops(tmp_path):
-    graph, _, _, checkov = _build(
+    graph, _, _, checkov, _ = _build(
         tmp_path,
         checkov_adapter=FakeCheckovAdapter(raise_exc=CheckovExecutableNotFoundError("checkov")),
     )
@@ -333,7 +380,7 @@ def test_checkov_executable_missing_gives_error_and_stops(tmp_path):
 def test_checkov_timeout_gives_error_and_stops(tmp_path):
     from iac_agent.security.checkov import CheckovTimeoutError
 
-    graph, _, _, checkov = _build(
+    graph, _, _, checkov, _ = _build(
         tmp_path,
         checkov_adapter=FakeCheckovAdapter(
             raise_exc=CheckovTimeoutError(command=("checkov",), timeout_seconds=120.0)
@@ -348,7 +395,7 @@ def test_checkov_timeout_gives_error_and_stops(tmp_path):
 def test_checkov_malformed_json_gives_error_and_stops(tmp_path):
     from iac_agent.security.checkov import CheckovJsonError
 
-    graph, _, _, checkov = _build(
+    graph, _, _, checkov, _ = _build(
         tmp_path,
         checkov_adapter=FakeCheckovAdapter(
             raise_exc=CheckovJsonError(command=("checkov",), cause=ValueError("bad json"))
@@ -371,7 +418,7 @@ def test_security_gate_error_gives_error_status(tmp_path):
     original = wf_module.evaluate_security_gate
     wf_module.evaluate_security_gate = _raise
     try:
-        graph, _, _, _ = _build(tmp_path)
+        graph, _, _, _, _ = _build(tmp_path)
         result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
     finally:
         wf_module.evaluate_security_gate = original
@@ -397,11 +444,12 @@ def test_explicit_workspace_root_is_required(tmp_path):
             renderer=FakeRenderer(),
             terraform_runner=FakeTerraformRunner(),
             checkov_adapter=FakeCheckovAdapter(),
+            source_control_port=FakeSourceControl(),
         )
 
 
 def test_request_specific_workspace_created_under_root(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
 
     workspace = result["workspace"]
@@ -412,7 +460,7 @@ def test_request_specific_workspace_created_under_root(tmp_path):
 
 @pytest.mark.parametrize("bad_request_id", ["../escape", "a/../../b", "sub/dir"])
 def test_request_id_path_traversal_is_rejected(tmp_path, bad_request_id):
-    graph, renderer, tf, _ = _build(tmp_path)
+    graph, renderer, tf, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": bad_request_id, "resource_spec": _spec()})
 
     assert result["workflow_status"] is WorkflowStatus.ERROR
@@ -422,7 +470,7 @@ def test_request_id_path_traversal_is_rejected(tmp_path, bad_request_id):
 
 
 def test_absolute_request_id_is_rejected(tmp_path):
-    graph, renderer, _, _ = _build(tmp_path)
+    graph, renderer, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "/etc/passwd", "resource_spec": _spec()})
 
     assert result["workflow_status"] is WorkflowStatus.ERROR
@@ -431,7 +479,7 @@ def test_absolute_request_id_is_rejected(tmp_path):
 
 def test_workspace_path_does_not_depend_on_process_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path.parent)
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
 
     assert result["workspace"] == tmp_path / "req-001"
@@ -443,13 +491,13 @@ def test_workspace_path_does_not_depend_on_process_cwd(tmp_path, monkeypatch):
 
 
 def test_final_successful_state_contains_plan_summary(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
     assert result["plan_summary"] is not None
 
 
 def test_final_successful_state_contains_security_gate_result(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
     assert result["security_gate"] is not None
 
@@ -463,7 +511,7 @@ def test_workflow_state_has_no_terraform_plan_json_field_at_all():
 
 
 def test_final_successful_state_does_not_retain_raw_terraform_plan_json(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
     assert result.get("terraform_plan_json") is None
     assert "terraform_plan_json" not in result
@@ -475,7 +523,7 @@ def test_terraform_execute_does_not_call_show_json(tmp_path):
     the error would be attributed to WorkflowStage.TERRAFORM instead of
     PLAN_ANALYSIS (see test_show_json_failure_gives_error_and_stops)."""
     tf = FakeTerraformRunner()
-    graph, _, _, _ = _build(tmp_path, terraform_runner=tf)
+    graph, _, _, _, _ = _build(tmp_path, terraform_runner=tf)
     graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
 
     assert tf.calls.index("plan") < tf.calls.index("show_json")
@@ -483,14 +531,14 @@ def test_terraform_execute_does_not_call_show_json(tmp_path):
 
 def test_plan_analysis_calls_show_json_exactly_once(tmp_path):
     tf = FakeTerraformRunner()
-    graph, _, _, _ = _build(tmp_path, terraform_runner=tf)
+    graph, _, _, _, _ = _build(tmp_path, terraform_runner=tf)
     graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
 
     assert tf.calls.count("show_json") == 1
 
 
 def test_final_successful_state_does_not_retain_raw_checkov_json(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
     assert "raw_checkov_json" not in result
     assert "checkov_stdout" not in result
@@ -507,7 +555,7 @@ def test_workflow_error_does_not_expose_secret_shaped_env_values(tmp_path):
             duration_seconds=0.0,
         )
     )
-    graph, _, _, _ = _build(
+    graph, _, _, _, _ = _build(
         tmp_path, terraform_runner=FakeTerraformRunner(fail_at="plan", fail_exc=tf_error)
     )
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
@@ -516,7 +564,7 @@ def test_workflow_error_does_not_expose_secret_shaped_env_values(tmp_path):
 
 
 def test_no_developer_absolute_path_in_workflow_error(tmp_path):
-    graph, renderer, _, _ = _build(
+    graph, renderer, _, _, _ = _build(
         tmp_path,
         renderer=FakeRenderer(raise_exc=ValueError("/Users/some-developer/leak/path issue")),
     )
@@ -583,6 +631,28 @@ def test_graph_module_does_not_contain_platform_policy_ids_or_rules():
         assert forbidden not in source
 
 
+def test_graph_module_does_not_contain_github_specific_details():
+    """The graph knows only `SourceControlPort` — never GitHub's Git
+    Data API, HTTP, or authorization headers. That belongs solely to
+    `iac_agent.git.github`."""
+    source = inspect.getsource(workflow_module)
+    for forbidden in (
+        "api.github.com",
+        "Authorization",
+        "Bearer",
+        "git/blobs",
+        "git/trees",
+        "git/refs",
+        "refs/heads",
+        "/pulls",
+        "urllib",
+        "HTTPError",
+        "status_code",
+        "response.status",
+    ):
+        assert forbidden not in source
+
+
 # ---------------------------------------------------------------------------
 # Checkpointer dependency injection (fakes only — no real Terraform/Checkov;
 # SQLite itself is real, since that is the actual behavior under test)
@@ -596,7 +666,7 @@ def test_graph_compiles_and_runs_unchanged_without_a_checkpointer(tmp_path):
     checkpointer — LangGraph only refuses at *resume* time
     (`Command(resume=...)` requires a checkpointer), which this test
     does not attempt."""
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
     assert result["workflow_status"] is WorkflowStatus.AWAITING_APPROVAL
     assert "__interrupt__" in result
@@ -612,6 +682,7 @@ def test_injected_checkpointer_is_actually_used_by_the_compiled_graph(tmp_path):
             renderer=FakeRenderer(),
             terraform_runner=FakeTerraformRunner(),
             checkov_adapter=FakeCheckovAdapter(),
+            source_control_port=FakeSourceControl(),
             workspace_root=workspace_root,
             checkpointer=saver,
         )
@@ -647,6 +718,7 @@ def _build_durable(workspace_root, checkpointer, **overrides):
         renderer=overrides.get("renderer") or FakeRenderer(),
         terraform_runner=overrides.get("terraform_runner") or FakeTerraformRunner(),
         checkov_adapter=overrides.get("checkov_adapter") or FakeCheckovAdapter(),
+        source_control_port=overrides.get("source_control_port") or FakeSourceControl(),
         workspace_root=workspace_root,
         checkpointer=checkpointer,
     )
@@ -718,21 +790,21 @@ def _block_checkov_result() -> CheckovScanResult:
 
 
 def test_pass_routes_to_approval_interrupt(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
     assert "__interrupt__" in result
     assert result["workflow_status"] is WorkflowStatus.AWAITING_APPROVAL
 
 
 def test_warn_routes_to_approval_interrupt(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec_warn()})
     assert "__interrupt__" in result
     assert result["workflow_status"] is WorkflowStatus.AWAITING_APPROVAL
 
 
 def test_block_routes_to_blocked_and_end_with_no_interrupt(tmp_path):
-    graph, _, _, _ = _build(
+    graph, _, _, _, _ = _build(
         tmp_path, checkov_adapter=FakeCheckovAdapter(result=_block_checkov_result())
     )
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
@@ -744,7 +816,7 @@ def test_block_routes_to_blocked_and_end_with_no_interrupt(tmp_path):
 
 def test_error_routes_to_error_and_end_with_no_interrupt(tmp_path):
     tf_error = TerraformCommandError(_ok_result("terraform", "plan"))
-    graph, _, _, _ = _build(
+    graph, _, _, _, _ = _build(
         tmp_path, terraform_runner=FakeTerraformRunner(fail_at="plan", fail_exc=tf_error)
     )
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
@@ -800,38 +872,38 @@ def _interrupt_payload(result: dict) -> dict:
 
 
 def test_interrupt_payload_contains_request_id(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-007", "resource_spec": _spec()})
     assert _interrupt_payload(result)["request_id"] == "req-007"
 
 
 def test_interrupt_payload_contains_resource_name(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec(name="payment-events")})
     assert _interrupt_payload(result)["resource"] == "payment-events"
 
 
 def test_interrupt_payload_contains_security_status(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
     assert _interrupt_payload(result)["security_status"] == "pass"
 
 
 def test_interrupt_payload_contains_warn_security_status_not_normalized_to_pass(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec_warn()})
     assert _interrupt_payload(result)["security_status"] == "warn"
 
 
 def test_interrupt_payload_contains_plan_counts(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
     plan = _interrupt_payload(result)["plan"]
     assert plan == {"add": 2, "change": 0, "destroy": 0}
 
 
 def test_interrupt_payload_contains_normalized_findings(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
     findings = _interrupt_payload(result)["findings"]
     assert len(findings) > 0
@@ -840,7 +912,7 @@ def test_interrupt_payload_contains_normalized_findings(tmp_path):
 
 
 def test_interrupt_payload_contains_no_raw_plan_json(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
     payload_text = str(_interrupt_payload(result))
     assert "resource_changes" not in payload_text
@@ -848,7 +920,7 @@ def test_interrupt_payload_contains_no_raw_plan_json(tmp_path):
 
 
 def test_interrupt_payload_contains_no_raw_scanner_json(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
     payload_text = str(_interrupt_payload(result))
     assert "passed_checks" not in payload_text
@@ -856,7 +928,7 @@ def test_interrupt_payload_contains_no_raw_scanner_json(tmp_path):
 
 
 def test_interrupt_payload_contains_no_secrets_or_paths(tmp_path):
-    graph, _, _, _ = _build(tmp_path)
+    graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
     payload_text = str(_interrupt_payload(result))
     for forbidden in (
@@ -880,6 +952,10 @@ def _invoke_to_interrupt(workspace_root, saver, request_id, spec, **overrides):
 
 
 def test_approve_resume_gives_approved_status(tmp_path):
+    """Batch 14: APPROVED is no longer terminal by itself — a single
+    resume immediately proceeds through source_control to PR_CREATED
+    (see the "IMPORTANT RESUME BEHAVIOR" requirement: no second
+    invocation is needed). `approval_decision` still reflects APPROVE."""
     db_path = tmp_path / "checkpoints.sqlite3"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
@@ -888,9 +964,10 @@ def test_approve_resume_gives_approved_status(tmp_path):
         graph, config = _invoke_to_interrupt(workspace_root, saver, "req-approve", _spec())
         result = graph.invoke(Command(resume=ApprovalDecision.APPROVE.value), config)
 
-    assert result["workflow_status"] is WorkflowStatus.APPROVED
+    assert result["workflow_status"] is WorkflowStatus.PR_CREATED
     assert result["current_stage"] is WorkflowStage.COMPLETE
     assert result["approval_decision"] is ApprovalDecision.APPROVE
+    assert result["pull_request"] is not None
 
 
 def test_reject_resume_gives_rejected_status(tmp_path):
@@ -965,6 +1042,9 @@ def test_warn_result_remains_warn_after_approval():
 
 
 def test_warn_gate_approve_resume_gives_approved_with_warn_preserved(tmp_path):
+    """Batch 14: a WARN result can be human-approved and published —
+    the final workflow reaches PR_CREATED, and the security result is
+    still inspectable as WARN, never rewritten to look like PASS."""
     db_path = tmp_path / "checkpoints.sqlite3"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
@@ -973,7 +1053,7 @@ def test_warn_gate_approve_resume_gives_approved_with_warn_preserved(tmp_path):
         graph, config = _invoke_to_interrupt(workspace_root, saver, "req-warn", _spec_warn())
         result = graph.invoke(Command(resume=ApprovalDecision.APPROVE.value), config)
 
-    assert result["workflow_status"] is WorkflowStatus.APPROVED
+    assert result["workflow_status"] is WorkflowStatus.PR_CREATED
     assert result["security_gate"].overall_status is PolicyStatus.WARN
 
 
@@ -1114,8 +1194,9 @@ def test_approve_resume_works_after_saver_and_graph_reconstruction(tmp_path):
         graph2 = _build_durable(workspace_root, saver2)
         result = graph2.invoke(Command(resume=ApprovalDecision.APPROVE.value), config)
 
-    assert result["workflow_status"] is WorkflowStatus.APPROVED
+    assert result["workflow_status"] is WorkflowStatus.PR_CREATED
     assert result["current_stage"] is WorkflowStage.COMPLETE
+    assert result["pull_request"] is not None
 
 
 def test_final_approved_state_is_durable_across_a_third_reconstruction(tmp_path):
@@ -1138,10 +1219,11 @@ def test_final_approved_state_is_durable_across_a_third_reconstruction(tmp_path)
         graph3 = _build_durable(workspace_root, saver3)
         recovered = graph3.get_state(config).values
 
-    assert recovered["workflow_status"] is WorkflowStatus.APPROVED
+    assert recovered["workflow_status"] is WorkflowStatus.PR_CREATED
     assert recovered["current_stage"] is WorkflowStage.COMPLETE
     assert recovered["approval_decision"] is ApprovalDecision.APPROVE
     assert recovered["security_gate"].overall_status is PolicyStatus.PASS
+    assert recovered["pull_request"] is not None
 
 
 def test_final_rejected_state_is_durable_across_reconstruction(tmp_path):
@@ -1181,6 +1263,286 @@ def test_same_thread_id_preserved_through_interrupt_and_resume(tmp_path):
 
         result = graph.invoke(Command(resume=ApprovalDecision.APPROVE.value), config)
         assert result["request_id"] == request_id
+
+
+# ---------------------------------------------------------------------------
+# Source control (Batch 14)
+# ---------------------------------------------------------------------------
+
+
+def _approve(graph, config):
+    return graph.invoke(Command(resume=ApprovalDecision.APPROVE.value), config)
+
+
+def test_approve_routes_to_source_control(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    source_control = FakeSourceControl()
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph, config = _invoke_to_interrupt(
+            workspace_root, saver, "req-sc-approve", _spec(), source_control_port=source_control
+        )
+        _approve(graph, config)
+
+    assert len(source_control.calls) == 1
+
+
+def test_source_control_port_called_exactly_once(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    source_control = FakeSourceControl()
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph, config = _invoke_to_interrupt(
+            workspace_root, saver, "req-sc-once", _spec(), source_control_port=source_control
+        )
+        result = _approve(graph, config)
+
+    assert result["workflow_status"] is WorkflowStatus.PR_CREATED
+    assert len(source_control.calls) == 1
+
+
+def test_reject_never_calls_source_control(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    source_control = FakeSourceControl()
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph, config = _invoke_to_interrupt(
+            workspace_root, saver, "req-sc-reject", _spec(), source_control_port=source_control
+        )
+        graph.invoke(Command(resume=ApprovalDecision.REJECT.value), config)
+
+    assert source_control.calls == []
+
+
+def test_block_never_calls_source_control(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    source_control = FakeSourceControl()
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph = _build_durable(
+            workspace_root,
+            saver,
+            checkov_adapter=FakeCheckovAdapter(result=_block_checkov_result()),
+            source_control_port=source_control,
+        )
+        graph.invoke(
+            {"request_id": "req-sc-block", "resource_spec": _spec()},
+            workflow_config("req-sc-block"),
+        )
+
+    assert source_control.calls == []
+
+
+def test_error_never_calls_source_control(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    source_control = FakeSourceControl()
+    tf_error = TerraformCommandError(_ok_result("terraform", "plan"))
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph = _build_durable(
+            workspace_root,
+            saver,
+            terraform_runner=FakeTerraformRunner(fail_at="plan", fail_exc=tf_error),
+            source_control_port=source_control,
+        )
+        graph.invoke(
+            {"request_id": "req-sc-error", "resource_spec": _spec()},
+            workflow_config("req-sc-error"),
+        )
+
+    assert source_control.calls == []
+
+
+def test_invalid_resume_value_never_calls_source_control(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    source_control = FakeSourceControl()
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph, config = _invoke_to_interrupt(
+            workspace_root, saver, "req-sc-invalid", _spec(), source_control_port=source_control
+        )
+        graph.invoke(Command(resume="yes"), config)
+
+    assert source_control.calls == []
+
+
+def test_source_control_success_gives_pr_created_status(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph, config = _invoke_to_interrupt(workspace_root, saver, "req-sc-pr", _spec())
+        result = _approve(graph, config)
+
+    assert result["workflow_status"] is WorkflowStatus.PR_CREATED
+    assert result["current_stage"] is WorkflowStage.COMPLETE
+
+
+def test_source_control_success_stores_pull_request_result(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph, config = _invoke_to_interrupt(workspace_root, saver, "req-sc-store", _spec())
+        result = _approve(graph, config)
+
+    pull_request = result["pull_request"]
+    assert isinstance(pull_request, PullRequestResult)
+    assert pull_request.branch == "iac-agent/req-sc-store"
+    assert pull_request.base_branch == "main"
+
+
+def test_source_control_error_gives_error_status(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    source_control = FakeSourceControl(raise_exc=SourceControlError("simulated GitHub failure"))
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph, config = _invoke_to_interrupt(
+            workspace_root, saver, "req-sc-error", _spec(), source_control_port=source_control
+        )
+        result = _approve(graph, config)
+
+    assert result["workflow_status"] is WorkflowStatus.ERROR
+    assert result["error"].stage is WorkflowStage.SOURCE_CONTROL
+    assert result["error"].error_type == "SourceControlError"
+
+
+def test_source_control_error_preserves_approval_decision(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    source_control = FakeSourceControl(raise_exc=SourceControlError("simulated GitHub failure"))
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph, config = _invoke_to_interrupt(
+            workspace_root, saver, "req-sc-error-2", _spec(), source_control_port=source_control
+        )
+        result = _approve(graph, config)
+
+    assert result["approval_decision"] is ApprovalDecision.APPROVE
+
+
+def test_source_control_error_preserves_security_gate_result(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    source_control = FakeSourceControl(raise_exc=SourceControlError("simulated GitHub failure"))
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph, config = _invoke_to_interrupt(
+            workspace_root, saver, "req-sc-error-3", _spec(), source_control_port=source_control
+        )
+        result = _approve(graph, config)
+
+    assert result["security_gate"].overall_status is PolicyStatus.PASS
+
+
+def test_source_control_node_refuses_non_approved_state_directly():
+    """Defense-in-depth: `_ensure_workflow_approved` is tested directly
+    against a fabricated state, independent of graph routing (routing
+    already prevents source_control from ever running with a non-
+    APPROVED status — this proves the node's own guard would still
+    fail closed even if that were somehow bypassed)."""
+    for bad_status in (
+        WorkflowStatus.REJECTED,
+        WorkflowStatus.BLOCKED,
+        WorkflowStatus.ERROR,
+        WorkflowStatus.AWAITING_APPROVAL,
+        WorkflowStatus.RUNNING,
+        WorkflowStatus.PENDING,
+    ):
+        with pytest.raises(SourceControlError):
+            workflow_module._ensure_workflow_approved({"workflow_status": bad_status})
+
+
+def test_source_control_node_accepts_approved_state_directly():
+    workflow_module._ensure_workflow_approved(
+        {"workflow_status": WorkflowStatus.APPROVED}
+    )  # no raise
+
+
+def test_generated_file_allowlist_is_exact(tmp_path):
+    """Only the renderer's own two output files are ever published —
+    never a tfplan, a SQLite DB, a .terraform artifact, or anything
+    else that might exist in the local workspace directory."""
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    source_control = FakeSourceControl()
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph, config = _invoke_to_interrupt(
+            workspace_root, saver, "req-sc-allowlist", _spec(), source_control_port=source_control
+        )
+        _approve(graph, config)
+
+    published_files = source_control.calls[0]["files"]
+    assert set(published_files) == {"main.tf", "versions.tf"}
+    for forbidden in ("tfplan", "terraform.tfstate", "checkpoints.sqlite3", ".terraform"):
+        assert forbidden not in published_files
+
+
+def test_no_tfplan_or_state_or_terraform_dir_ever_reaches_source_control(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    source_control = FakeSourceControl()
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph, config = _invoke_to_interrupt(
+            workspace_root,
+            saver,
+            "req-sc-no-artifacts",
+            _spec(),
+            source_control_port=source_control,
+        )
+        _approve(graph, config)
+
+    call = source_control.calls[0]
+    for key in ("files", "commit_message", "pr_title", "pr_body"):
+        serialized = str(call[key])
+        for forbidden in ("tfplan", ".terraform", "checkpoints.sqlite3", str(workspace_root)):
+            assert forbidden not in serialized
+
+
+def test_replayed_invocation_of_a_published_thread_does_not_call_source_control_again(tmp_path):
+    """Idempotency / replay safety: an already-PR_CREATED thread's
+    `pull_request` field is already set, so a second pass through
+    `source_control` (however it were triggered) must not call the
+    adapter again."""
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    source_control = FakeSourceControl()
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph, config = _invoke_to_interrupt(
+            workspace_root, saver, "req-sc-replay", _spec(), source_control_port=source_control
+        )
+        first = _approve(graph, config)
+        assert first["workflow_status"] is WorkflowStatus.PR_CREATED
+        assert len(source_control.calls) == 1
+
+        # get_state alone must never trigger a side effect.
+        snapshot = graph.get_state(config)
+        assert snapshot.values["workflow_status"] is WorkflowStatus.PR_CREATED
+        assert len(source_control.calls) == 1
 
 
 # ---------------------------------------------------------------------------
