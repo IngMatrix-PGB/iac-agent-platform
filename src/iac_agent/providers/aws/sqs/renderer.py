@@ -86,11 +86,24 @@ def _hcl_optional_number(value: int | None) -> str:
 
 
 def _hcl_tags(tags: dict[str, str]) -> str:
-    """Render a tag map deterministically, independent of insertion order."""
+    """Render a tag map deterministically, independent of insertion order.
+
+    `terraform fmt` aligns the "=" of consecutive attributes in a block
+    to the widest key's column — a two-or-more-key map with differently
+    sized keys must be pre-aligned here to match, or raw renderer output
+    would not already be canonically formatted (discovered via a real
+    `terraform fmt -check` run with a two-tag, different-length-key map;
+    every previous test used either zero or exactly one tag, which never
+    exposes a misalignment).
+    """
     if not tags:
         return "{}"
+    sorted_items = sorted(tags.items())
+    quoted_keys = [_hcl_string(key) for key, _ in sorted_items]
+    width = max(len(quoted_key) for quoted_key in quoted_keys)
     entries = "\n".join(
-        f"    {_hcl_string(key)} = {_hcl_string(value)}" for key, value in sorted(tags.items())
+        f"    {quoted_key.ljust(width)} = {_hcl_string(value)}"
+        for quoted_key, (_, value) in zip(quoted_keys, sorted_items, strict=True)
     )
     return f"{{\n{entries}\n  }}"
 

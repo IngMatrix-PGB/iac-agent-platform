@@ -131,6 +131,33 @@ def test_no_organization_specific_tags_are_injected():
     assert main_tf.count('"Service"') + main_tf.count('"orders"') >= 2
 
 
+def test_multiple_tags_with_different_key_lengths_have_aligned_equals_signs():
+    """Regression test (found via the Batch 15 live smoke, which used a
+    real two-tag map with differently-sized keys): `terraform fmt`
+    aligns the "=" of consecutive attributes in a block to the widest
+    key's column, so a naive single-space-before-"=" render is not
+    already canonically formatted once two tags have different-length
+    keys. A single-tag map (the only case earlier tests covered) can
+    never expose this, since there is nothing to align against."""
+    spec = SQSResourceSpec(
+        name="order-events",
+        tags={"ManagedBy": "iac-agent-platform", "Purpose": "phase1-live-smoke"},
+    )
+    main_tf = _render(spec).files["main.tf"]
+
+    assert '    "ManagedBy" = "iac-agent-platform"\n' in main_tf
+    assert '    "Purpose"   = "phase1-live-smoke"\n' in main_tf
+
+
+def test_three_tags_with_varying_key_lengths_all_align_to_the_widest():
+    spec = SQSResourceSpec(name="order-events", tags={"A": "1", "ABC": "2", "AB": "3"})
+    main_tf = _render(spec).files["main.tf"]
+
+    assert '    "A"   = "1"\n' in main_tf
+    assert '    "AB"  = "3"\n' in main_tf
+    assert '    "ABC" = "2"\n' in main_tf
+
+
 # ---------------------------------------------------------------------------
 # environment field is metadata-only
 # ---------------------------------------------------------------------------

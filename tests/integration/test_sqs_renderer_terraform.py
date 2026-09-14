@@ -115,6 +115,31 @@ def test_renderer_output_produces_a_valid_credential_free_plan(tmp_path):
     assert not any("delete" in actions for actions in resource_changes.values())
 
 
+def test_renderer_output_with_multiple_differently_sized_tag_keys_is_canonically_formatted(
+    tmp_path,
+):
+    """Regression test for a real bug found by the Batch 15 live smoke:
+    every prior real-`terraform fmt` test here used at most one tag, so
+    the renderer's tag-map "=" alignment was never actually exercised
+    against real `terraform fmt` with two-or-more differently-sized
+    keys — see the fix and unit tests in
+    tests/unit/providers/aws/sqs/test_renderer.py."""
+    spec = SQSResourceSpec(
+        name="iac-agent-phase1-demo",
+        dlq=DlqSpec(enabled=True, max_receive_count=5),
+        tags={"ManagedBy": "iac-agent-platform", "Purpose": "phase1-live-smoke"},
+    )
+    module_source = os.path.relpath(_TRUSTED_MODULE_DIR, start=tmp_path)
+    composition = TerraformCompositionRenderer().render(spec, module_source=module_source)
+    composition.write_to(tmp_path)
+
+    fmt_check = _run(["terraform", "fmt", "-check", "-diff"], cwd=tmp_path, env=_clean_env())
+    assert fmt_check.returncode == 0, (
+        "renderer output with multi-tag map is not canonically formatted:\n"
+        f"stdout={fmt_check.stdout}\nstderr={fmt_check.stderr}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Batch 12.5 — cross-layer derived DLQ name proof
 #
