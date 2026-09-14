@@ -10,6 +10,7 @@ from iac_agent.providers.aws.dynamodb.contract import (
     DynamoDBKeyType,
     DynamoDBResourceSpec,
 )
+from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec
 from iac_agent.providers.aws.resource import resource_type_of
 from iac_agent.providers.aws.s3.contract import S3ResourceSpec
 from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
@@ -30,6 +31,11 @@ def test_dynamodb_spec_classified_as_dynamodb():
         name="orders-table", partition_key=DynamoDBKeySpec(name="pk", type=DynamoDBKeyType.STRING)
     )
     assert resource_type_of(spec) is ResourceType.DYNAMODB
+
+
+def test_lambda_spec_classified_as_lambda():
+    spec = LambdaResourceSpec(name="orders-processor", handler="app.handler")
+    assert resource_type_of(spec) is ResourceType.LAMBDA
 
 
 def test_unsupported_spec_type_fails_closed():

@@ -9,6 +9,7 @@ from iac_agent.providers.aws.dynamodb.contract import (
     DynamoDBKeyType,
     DynamoDBResourceSpec,
 )
+from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec
 from iac_agent.providers.aws.renderer import AWSResourceRenderer
 from iac_agent.providers.aws.s3.contract import S3ResourceSpec
 from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
@@ -28,6 +29,7 @@ def _dispatcher(**overrides):
         "sqs_renderer": _RecordingRenderer(),
         "s3_renderer": _RecordingRenderer(),
         "dynamodb_renderer": _RecordingRenderer(),
+        "lambda_renderer": _RecordingRenderer(),
     }
     defaults.update(overrides)
     return AWSResourceRenderer(**defaults), defaults
@@ -44,6 +46,7 @@ def test_sqs_spec_dispatches_to_sqs_renderer():
     assert renderers["sqs_renderer"].calls[0]["spec"] is spec
     assert renderers["s3_renderer"].calls == []
     assert renderers["dynamodb_renderer"].calls == []
+    assert renderers["lambda_renderer"].calls == []
 
 
 def test_s3_spec_dispatches_to_s3_renderer():
@@ -57,6 +60,7 @@ def test_s3_spec_dispatches_to_s3_renderer():
     assert renderers["s3_renderer"].calls[0]["spec"] is spec
     assert renderers["sqs_renderer"].calls == []
     assert renderers["dynamodb_renderer"].calls == []
+    assert renderers["lambda_renderer"].calls == []
 
 
 def test_dynamodb_spec_dispatches_to_dynamodb_renderer():
@@ -72,6 +76,21 @@ def test_dynamodb_spec_dispatches_to_dynamodb_renderer():
     assert renderers["dynamodb_renderer"].calls[0]["spec"] is spec
     assert renderers["sqs_renderer"].calls == []
     assert renderers["s3_renderer"].calls == []
+    assert renderers["lambda_renderer"].calls == []
+
+
+def test_lambda_spec_dispatches_to_lambda_renderer():
+    dispatcher, renderers = _dispatcher()
+
+    spec = LambdaResourceSpec(name="orders-processor", handler="app.handler")
+    result = dispatcher.render(spec, module_source="../../terraform/modules/lambda")
+
+    assert result == "rendered"
+    assert len(renderers["lambda_renderer"].calls) == 1
+    assert renderers["lambda_renderer"].calls[0]["spec"] is spec
+    assert renderers["sqs_renderer"].calls == []
+    assert renderers["s3_renderer"].calls == []
+    assert renderers["dynamodb_renderer"].calls == []
 
 
 def test_unsupported_spec_type_fails_closed_never_defaults_to_sqs():
@@ -83,6 +102,7 @@ def test_unsupported_spec_type_fails_closed_never_defaults_to_sqs():
     assert renderers["sqs_renderer"].calls == []
     assert renderers["s3_renderer"].calls == []
     assert renderers["dynamodb_renderer"].calls == []
+    assert renderers["lambda_renderer"].calls == []
 
 
 def test_default_construction_uses_real_renderers():
