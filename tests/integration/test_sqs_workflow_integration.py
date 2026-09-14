@@ -20,10 +20,13 @@ from iac_agent.providers.aws.sqs.contract import DlqSpec, SQSResourceSpec
 from iac_agent.providers.aws.sqs.renderer import TerraformCompositionRenderer
 from iac_agent.security.checkov import CheckovAdapter
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("terraform") is None or shutil.which("checkov") is None,
-    reason="terraform and/or checkov binary not available on PATH",
-)
+pytestmark = [
+    pytest.mark.real_tool,
+    pytest.mark.skipif(
+        shutil.which("terraform") is None or shutil.which("checkov") is None,
+        reason="terraform and/or checkov binary not available on PATH",
+    ),
+]
 
 
 class _NeverCalledSourceControl:
@@ -35,7 +38,7 @@ class _NeverCalledSourceControl:
         raise AssertionError("publish_change must not be called in this test")
 
 
-def test_real_workflow_passes_for_a_secure_dlq_enabled_request(tmp_path):
+def test_real_workflow_passes_for_a_secure_dlq_enabled_request(tmp_path, terraform_test_env):
     spec = SQSResourceSpec(
         name="order-events",
         dlq=DlqSpec(enabled=True, max_receive_count=5),
@@ -44,7 +47,7 @@ def test_real_workflow_passes_for_a_secure_dlq_enabled_request(tmp_path):
 
     graph = build_sqs_workflow(
         renderer=TerraformCompositionRenderer(),
-        terraform_runner=TerraformRunner(),
+        terraform_runner=TerraformRunner(base_env=terraform_test_env),
         checkov_adapter=CheckovAdapter(),
         source_control_port=_NeverCalledSourceControl(),
         workspace_root=tmp_path,

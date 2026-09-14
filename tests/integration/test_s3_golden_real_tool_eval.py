@@ -27,18 +27,22 @@ from iac_agent.policies.platform import evaluate_platform_policies
 from iac_agent.providers.aws.s3.contract import S3ResourceSpec
 from iac_agent.providers.aws.s3.renderer import S3TerraformCompositionRenderer
 from iac_agent.security.checkov import CheckovAdapter
+from iac_agent.security.checkov_profiles import checkov_profile_for
 from iac_agent.security.gate import evaluate_security_gate
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TRUSTED_MODULE_DIR = _REPO_ROOT / "terraform" / "modules" / "s3"
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("terraform") is None or shutil.which("checkov") is None,
-    reason="terraform and/or checkov binary not available on PATH",
-)
+pytestmark = [
+    pytest.mark.real_tool,
+    pytest.mark.skipif(
+        shutil.which("terraform") is None or shutil.which("checkov") is None,
+        reason="terraform and/or checkov binary not available on PATH",
+    ),
+]
 
 
-def test_basic_secure_bucket_scenario_against_real_tools(tmp_path):
+def test_basic_secure_bucket_scenario_against_real_tools(tmp_path, terraform_test_env):
     scenarios = load_s3_golden_dataset(DEFAULT_DATASET_PATH)
     scenario = next(s for s in scenarios if s.id == "basic_secure_bucket")
 
@@ -48,7 +52,7 @@ def test_basic_secure_bucket_scenario_against_real_tools(tmp_path):
     composition = S3TerraformCompositionRenderer().render(spec, module_source=module_source)
     composition.write_to(tmp_path)
 
-    runner = TerraformRunner()
+    runner = TerraformRunner(base_env=terraform_test_env)
     runner.fmt(tmp_path)
     runner.init(tmp_path)
     runner.validate(tmp_path)
@@ -59,7 +63,7 @@ def test_basic_secure_bucket_scenario_against_real_tools(tmp_path):
     plan_summary = analyze_plan(runner.show_json(tmp_path))
 
     platform_evaluation = evaluate_platform_policies(spec, plan_summary)
-    checkov_result = CheckovAdapter().scan(tmp_path)
+    checkov_result = CheckovAdapter().scan(tmp_path, profile=checkov_profile_for(ResourceType.S3))
     gate_result = evaluate_security_gate(
         platform_evaluation, checkov_result, resource_type=ResourceType.S3
     )

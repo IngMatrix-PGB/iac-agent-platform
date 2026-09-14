@@ -23,6 +23,7 @@ from iac_agent.security.checkov import (
     CheckovExecutableNotFoundError,
     CheckovExecutionError,
     CheckovJsonError,
+    CheckovScanProfile,
     CheckovScanResult,
     CheckovTimeoutError,
 )
@@ -83,12 +84,12 @@ def adapter():
 # ---------------------------------------------------------------------------
 
 
-def test_exact_argv_is_built_correctly(workspace):
-    """With skip_checks explicitly disabled, the argv is exactly the
-    original Phase 1 shape (no --skip-check flag)."""
+def test_exact_argv_is_built_correctly(adapter, workspace):
+    """Batch 16.5: with no profile passed at all, `scan()` always
+    performs the strict, zero-skip scan — there is no implicit
+    resource-blind default skip list on the adapter itself."""
     import json as _json
 
-    adapter = CheckovAdapter(base_env={"PATH": "/usr/bin", "HOME": "/home/test"}, skip_checks=())
     with patch(
         RUN_TARGET, return_value=_completed(stdout=_json.dumps(_clean_scan_json()))
     ) as mock_run:
@@ -108,21 +109,34 @@ def test_exact_argv_is_built_correctly(workspace):
     )
 
 
-def test_default_skip_checks_are_appended_to_argv(adapter, workspace):
-    """Batch 16 (Phase 2): by default, the adapter skips exactly the
-    Checkov checks corresponding to documented Phase 2 scope exclusions
-    (S3 access logging, lifecycle, event notifications, cross-region
-    replication) — never any other check, and never silently."""
+def test_empty_profile_adds_no_skip_check_flag(adapter, workspace):
+    """A profile with an empty skip tuple behaves identically to no
+    profile at all — never adds a bare `--skip-check` with nothing
+    after it."""
     import json as _json
-
-    from iac_agent.security.checkov import DEFAULT_SKIPPED_CHECKS
 
     with patch(
         RUN_TARGET, return_value=_completed(stdout=_json.dumps(_clean_scan_json()))
     ) as mock_run:
-        adapter.scan(workspace)
+        adapter.scan(workspace, profile=CheckovScanProfile())
 
-    args, kwargs = mock_run.call_args
+    args, _kwargs = mock_run.call_args
+    assert "--skip-check" not in args[0]
+
+
+def test_profile_with_skips_appends_skip_check_argv(adapter, workspace):
+    """Batch 16.5: skips are applied only when the caller explicitly
+    hands `scan()` a profile naming them — proving the adapter itself
+    never infers which checks to skip for any resource type."""
+    import json as _json
+
+    profile = CheckovScanProfile(skipped_checks=("CKV_AWS_18", "CKV2_AWS_61"))
+    with patch(
+        RUN_TARGET, return_value=_completed(stdout=_json.dumps(_clean_scan_json()))
+    ) as mock_run:
+        adapter.scan(workspace, profile=profile)
+
+    args, _kwargs = mock_run.call_args
     assert args[0] == (
         "checkov",
         "-d",
@@ -134,7 +148,7 @@ def test_default_skip_checks_are_appended_to_argv(adapter, workspace):
         "--compact",
         "--quiet",
         "--skip-check",
-        ",".join(DEFAULT_SKIPPED_CHECKS),
+        "CKV_AWS_18,CKV2_AWS_61",
     )
 
 

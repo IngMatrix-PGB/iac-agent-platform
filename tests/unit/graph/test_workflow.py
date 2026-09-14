@@ -118,11 +118,13 @@ class FakeTerraformRunner:
 class FakeCheckovAdapter:
     def __init__(self, *, result=None, raise_exc: Exception | None = None):
         self.scan_calls: list = []
+        self.profiles_seen: list = []
         self._result = result if result is not None else _CLEAN_CHECKOV_RESULT
         self._raise_exc = raise_exc
 
-    def scan(self, workspace):
+    def scan(self, workspace, *, profile=None):
         self.scan_calls.append(workspace)
+        self.profiles_seen.append(profile)
         if self._raise_exc is not None:
             raise self._raise_exc
         return self._result
@@ -257,6 +259,18 @@ def test_checkov_called_once(tmp_path):
     graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
 
     assert len(checkov.scan_calls) == 1
+
+
+def test_sqs_request_gets_a_zero_skip_checkov_profile(tmp_path):
+    """Batch 16.5 regression: SQS must never receive any of S3's
+    scope-exclusion skips (or anyone else's) — its profile is exactly
+    the strict, zero-skip one, selected explicitly via
+    checkov_profile_for, never merely "absent"."""
+    graph, _, _, checkov, _ = _build(tmp_path)
+    graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
+
+    assert len(checkov.profiles_seen) == 1
+    assert checkov.profiles_seen[0].skipped_checks == ()
 
 
 def test_security_gate_result_is_propagated(tmp_path):

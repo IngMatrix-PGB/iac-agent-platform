@@ -6,6 +6,13 @@ S3: validated S3ResourceSpec -> generated composition -> trusted
 module -> terraform fmt/init/validate/plan, entirely without real AWS
 credentials. The real add/change/destroy counts are observed here, not
 assumed in advance.
+
+Batch 16.5: environment construction now goes through the shared
+`terraform_test_env`/`terraform_plan_env_overrides` fixtures
+(tests/integration/conftest.py) rather than a locally defined
+`_clean_env()`, so `terraform init` here reuses the session-scoped
+`TF_PLUGIN_CACHE_DIR` instead of downloading its own copy of the AWS
+provider binary.
 """
 
 from __future__ import annotations
@@ -24,21 +31,22 @@ from iac_agent.providers.aws.s3.renderer import S3TerraformCompositionRenderer
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TRUSTED_MODULE_DIR = _REPO_ROOT / "terraform" / "modules" / "s3"
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("terraform") is None,
-    reason="terraform binary not available on PATH",
-)
-
-
-def _clean_env() -> dict[str, str]:
-    return {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")}
+pytestmark = [
+    pytest.mark.real_tool,
+    pytest.mark.skipif(
+        shutil.which("terraform") is None,
+        reason="terraform binary not available on PATH",
+    ),
+]
 
 
 def _run(args: list[str], cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess:
     return subprocess.run(args, cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
 
 
-def test_renderer_output_produces_a_valid_credential_free_plan(tmp_path):
+def test_renderer_output_produces_a_valid_credential_free_plan(
+    tmp_path, terraform_test_env, terraform_plan_env_overrides
+):
     spec = S3ResourceSpec(
         name="my-example-bucket",
         tags={"Service": "reports"},
@@ -51,7 +59,7 @@ def test_renderer_output_produces_a_valid_credential_free_plan(tmp_path):
     assert (tmp_path / "main.tf").exists()
     assert (tmp_path / "versions.tf").exists()
 
-    env = _clean_env()
+    env = terraform_test_env
 
     fmt_check = _run(["terraform", "fmt", "-check"], cwd=tmp_path, env=env)
     assert fmt_check.returncode == 0, (
@@ -67,8 +75,9 @@ def test_renderer_output_produces_a_valid_credential_free_plan(tmp_path):
         f"terraform validate failed:\n{validate.stdout}\n{validate.stderr}"
     )
 
-    plan_env = {**env, "AWS_ACCESS_KEY_ID": "test", "AWS_SECRET_ACCESS_KEY": "test"}
-    plan = _run(["terraform", "plan", "-out=tfplan"], cwd=tmp_path, env=plan_env)
+    plan = _run(
+        ["terraform", "plan", "-out=tfplan"], cwd=tmp_path, env=terraform_plan_env_overrides
+    )
     assert plan.returncode == 0, f"terraform plan failed:\n{plan.stdout}\n{plan.stderr}"
 
     show = _run(["terraform", "show", "-json", "tfplan"], cwd=tmp_path, env=env)
@@ -91,7 +100,9 @@ def test_renderer_output_produces_a_valid_credential_free_plan(tmp_path):
     assert not any("delete" in actions for actions in resource_changes.values())
 
 
-def test_renderer_output_with_kms_encryption_produces_a_valid_plan(tmp_path):
+def test_renderer_output_with_kms_encryption_produces_a_valid_plan(
+    tmp_path, terraform_test_env, terraform_plan_env_overrides
+):
     spec = S3ResourceSpec(
         name="my-example-bucket", encryption=S3EncryptionSpec(kms_key_id="alias/aws/s3")
     )
@@ -99,12 +110,13 @@ def test_renderer_output_with_kms_encryption_produces_a_valid_plan(tmp_path):
     composition = S3TerraformCompositionRenderer().render(spec, module_source=module_source)
     composition.write_to(tmp_path)
 
-    env = _clean_env()
+    env = terraform_test_env
     init = _run(["terraform", "init", "-backend=false"], cwd=tmp_path, env=env)
     assert init.returncode == 0, f"terraform init failed:\n{init.stdout}\n{init.stderr}"
 
-    plan_env = {**env, "AWS_ACCESS_KEY_ID": "test", "AWS_SECRET_ACCESS_KEY": "test"}
-    plan = _run(["terraform", "plan", "-out=tfplan"], cwd=tmp_path, env=plan_env)
+    plan = _run(
+        ["terraform", "plan", "-out=tfplan"], cwd=tmp_path, env=terraform_plan_env_overrides
+    )
     assert plan.returncode == 0, f"terraform plan failed:\n{plan.stdout}\n{plan.stderr}"
 
     show = _run(["terraform", "show", "-json", "tfplan"], cwd=tmp_path, env=env)

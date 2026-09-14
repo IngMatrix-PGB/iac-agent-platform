@@ -27,13 +27,16 @@ from iac_agent.providers.aws.sqs.renderer import TerraformCompositionRenderer
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TRUSTED_MODULE_DIR = _REPO_ROOT / "terraform" / "modules" / "sqs"
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("terraform") is None,
-    reason="terraform binary not available on PATH",
-)
+pytestmark = [
+    pytest.mark.real_tool,
+    pytest.mark.skipif(
+        shutil.which("terraform") is None,
+        reason="terraform binary not available on PATH",
+    ),
+]
 
 
-def test_analyze_plan_on_real_dlq_enabled_composition(tmp_path):
+def test_analyze_plan_on_real_dlq_enabled_composition(tmp_path, terraform_test_env):
     spec = SQSResourceSpec(
         name="order-events",
         dlq=DlqSpec(enabled=True, max_receive_count=5),
@@ -44,7 +47,7 @@ def test_analyze_plan_on_real_dlq_enabled_composition(tmp_path):
     composition = TerraformCompositionRenderer().render(spec, module_source=module_source)
     composition.write_to(tmp_path)
 
-    runner = TerraformRunner()
+    runner = TerraformRunner(base_env=terraform_test_env)
     runner.fmt(tmp_path)
     runner.init(tmp_path)
     runner.validate(tmp_path)

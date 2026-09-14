@@ -4,7 +4,8 @@ S3ResourceSpec -> build_iac_workflow(...).invoke(...) using the real
 `AWSResourceRenderer` (dispatching to `S3TerraformCompositionRenderer`),
 the real `TerraformRunner` (real Terraform binary), the real trusted
 `terraform/modules/s3` module, and the real `CheckovAdapter` (real
-Checkov binary, with its default `DEFAULT_SKIPPED_CHECKS` applied — see
+Checkov binary; the graph's `checkov_scan` node selects the approved
+S3 `CheckovScanProfile` via `checkov_profile_for` — see
 `docs/resources/s3.md` for why those four checks are a documented Phase
 2 scope exclusion, not a suppressed security weakness). No AWS
 credentials, no `terraform apply`.
@@ -29,10 +30,13 @@ from iac_agent.providers.aws.renderer import AWSResourceRenderer
 from iac_agent.providers.aws.s3.contract import S3ResourceSpec
 from iac_agent.security.checkov import CheckovAdapter
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("terraform") is None or shutil.which("checkov") is None,
-    reason="terraform and/or checkov binary not available on PATH",
-)
+pytestmark = [
+    pytest.mark.real_tool,
+    pytest.mark.skipif(
+        shutil.which("terraform") is None or shutil.which("checkov") is None,
+        reason="terraform and/or checkov binary not available on PATH",
+    ),
+]
 
 
 class _NeverCalledSourceControl:
@@ -44,12 +48,12 @@ class _NeverCalledSourceControl:
         raise AssertionError("publish_change must not be called in this test")
 
 
-def test_real_workflow_passes_for_a_secure_default_bucket_request(tmp_path):
+def test_real_workflow_passes_for_a_secure_default_bucket_request(tmp_path, terraform_test_env):
     spec = S3ResourceSpec(name="order-events-bucket", tags={"Service": "orders"})
 
     graph = build_iac_workflow(
         renderer=AWSResourceRenderer(),
-        terraform_runner=TerraformRunner(),
+        terraform_runner=TerraformRunner(base_env=terraform_test_env),
         checkov_adapter=CheckovAdapter(),
         source_control_port=_NeverCalledSourceControl(),
         workspace_root=tmp_path,

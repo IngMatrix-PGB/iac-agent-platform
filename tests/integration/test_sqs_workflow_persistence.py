@@ -37,10 +37,13 @@ from iac_agent.providers.aws.sqs.contract import DlqSpec, SQSResourceSpec
 from iac_agent.providers.aws.sqs.renderer import TerraformCompositionRenderer
 from iac_agent.security.checkov import CheckovAdapter, CheckovScanResult
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("terraform") is None or shutil.which("checkov") is None,
-    reason="terraform and/or checkov binary not available on PATH",
-)
+pytestmark = [
+    pytest.mark.real_tool,
+    pytest.mark.skipif(
+        shutil.which("terraform") is None or shutil.which("checkov") is None,
+        reason="terraform and/or checkov binary not available on PATH",
+    ),
+]
 
 
 class _NeverCalledSourceControl:
@@ -51,10 +54,10 @@ class _NeverCalledSourceControl:
         raise AssertionError("publish_change must not be called in this test")
 
 
-def _build_real_graph(workspace_root: Path, checkpointer):
+def _build_real_graph(workspace_root: Path, checkpointer, terraform_test_env: dict[str, str]):
     return build_sqs_workflow(
         renderer=TerraformCompositionRenderer(),
-        terraform_runner=TerraformRunner(),
+        terraform_runner=TerraformRunner(base_env=terraform_test_env),
         checkov_adapter=CheckovAdapter(),
         source_control_port=_NeverCalledSourceControl(),
         workspace_root=workspace_root,
@@ -62,7 +65,9 @@ def _build_real_graph(workspace_root: Path, checkpointer):
     )
 
 
-def test_real_workflow_state_survives_sqlite_checkpointer_and_graph_reconstruction(tmp_path):
+def test_real_workflow_state_survives_sqlite_checkpointer_and_graph_reconstruction(
+    tmp_path, terraform_test_env
+):
     db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
@@ -76,7 +81,7 @@ def test_real_workflow_state_survives_sqlite_checkpointer_and_graph_reconstructi
     config = workflow_config(request_id)
 
     with open_sqlite_checkpointer(db_path) as saver:
-        graph = _build_real_graph(workspace_root, saver)
+        graph = _build_real_graph(workspace_root, saver, terraform_test_env)
         first_result = graph.invoke({"request_id": request_id, "resource_spec": spec}, config)
 
     assert first_result["workflow_status"] is WorkflowStatus.AWAITING_APPROVAL
@@ -88,7 +93,7 @@ def test_real_workflow_state_survives_sqlite_checkpointer_and_graph_reconstructi
     # against the same database file — this is the actual proof of
     # durability, not merely re-reading the same in-memory graph.
     with open_sqlite_checkpointer(db_path) as saver2:
-        graph2 = _build_real_graph(workspace_root, saver2)
+        graph2 = _build_real_graph(workspace_root, saver2, terraform_test_env)
         recovered = graph2.get_state(config).values
 
     assert recovered["request_id"] == request_id

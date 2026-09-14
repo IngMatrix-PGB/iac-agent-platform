@@ -42,10 +42,14 @@ Delivered so far:
   SQS's own policy IDs — see `docs/resources/s3.md` for why this was a
   real (not hypothetical) blocker for every S3 request, and the
   resource-type-aware fix applied.
-- An explicit, narrowly-scoped Checkov skip list
-  (`DEFAULT_SKIPPED_CHECKS`) for the four checks corresponding exactly
-  to this batch's documented S3 scope exclusions — a project-owner
-  decision, not a unilateral one.
+- An explicit, narrowly-scoped Checkov skip list for the four checks
+  corresponding exactly to this batch's documented S3 scope exclusions
+  — a project-owner decision, not a unilateral one. Batch 16.5 later
+  hardened this into a resource-aware `CheckovScanProfile` /
+  `checkov_profile_for` mapping (`src/iac_agent/security/
+  checkov_profiles.py`) so the skip list can never grow into a global
+  bucket of suppressions as more resource types are added — see
+  `docs/resources/s3.md`.
 - An S3 golden eval dataset (`evals/datasets/s3_golden.json`, 14
   scenarios) and parallel evaluators/loader/runner
   (`evals/evaluators/s3.py`, `evals/scenarios/s3_loader.py`,
