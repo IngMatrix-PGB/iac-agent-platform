@@ -159,6 +159,63 @@
       "expected": {
         "valid": false
       }
+    },
+    {
+      "id": "derived_dlq_name_boundary_valid",
+      "description": "Batch 12.5: a 76-character standard queue name is individually valid AND its Terraform-derived DLQ name ('<name>-dlq') is exactly 80 characters — the longest primary name that stays valid with the default DLQ enabled.",
+      "input": {
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "expected": {
+        "valid": true,
+        "queue_name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fifo": false,
+        "dlq_enabled": true,
+        "encryption_enabled": true,
+        "kms_key_id": null,
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "derived_dlq_name_too_long_rejected",
+      "description": "Batch 12.5: a 77-character standard queue name is individually valid (under the 80-character limit) but its derived DLQ name ('<name>-dlq') would be 81 characters — the contract must reject this before it ever reaches Terraform.",
+      "input": {
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "long_primary_without_dlq_valid",
+      "description": "Batch 12.5: the same 77-character name as derived_dlq_name_too_long_rejected is valid once the DLQ is disabled, since no DLQ name is ever derived in that case.",
+      "input": {
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "dlq": {
+          "enabled": false,
+          "max_receive_count": null
+        }
+      },
+      "expected": {
+        "valid": true,
+        "queue_name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "fifo": false,
+        "dlq_enabled": false,
+        "encryption_enabled": true,
+        "kms_key_id": null,
+        "overall_security_status": "warn"
+      }
+    },
+    {
+      "id": "fifo_derived_dlq_name_too_long_rejected",
+      "description": "Batch 12.5: a FIFO queue name (72-character base + '.fifo', 77 characters total) is individually valid but its derived DLQ name ('<base>-dlq.fifo') would be 81 characters — rejected for the same reason as the standard-queue case, mirrored for FIFO.",
+      "input": {
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.fifo",
+        "fifo": true
+      },
+      "expected": {
+        "valid": false
+      }
     }
   ]
 }

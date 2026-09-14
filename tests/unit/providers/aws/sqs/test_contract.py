@@ -7,11 +7,17 @@ exercised anywhere in this module.
 """
 
 import json
+import re
 
 import pytest
 from pydantic import ValidationError
 
-from iac_agent.providers.aws.sqs.contract import DlqSpec, EncryptionSpec, SQSResourceSpec
+from iac_agent.providers.aws.sqs.contract import (
+    DlqSpec,
+    EncryptionSpec,
+    SQSResourceSpec,
+    derive_dlq_name,
+)
 
 # ---------------------------------------------------------------------------
 # Valid cases
@@ -140,8 +146,11 @@ def test_dlq_max_receive_count_boundaries_are_valid(value):
 
 
 def test_name_at_max_length_is_valid():
+    # DLQ disabled: an 80-character name is valid on its own, even though
+    # (per test_derived_dlq_name_length below) it would be invalid with a
+    # DLQ enabled, since deriving a DLQ name would push it over 80 chars.
     name = "a" * 80
-    spec = SQSResourceSpec(name=name)
+    spec = SQSResourceSpec(name=name, dlq=DlqSpec(enabled=False, max_receive_count=None))
     assert spec.name == name
 
 
@@ -306,6 +315,152 @@ def test_serialization_is_deterministic_for_the_same_spec():
     spec = SQSResourceSpec(name="order-events", tags={"Service": "orders"})
 
     assert spec.model_dump(mode="json") == spec.model_dump(mode="json")
+
+
+# ---------------------------------------------------------------------------
+# Derived DLQ name invariant (Batch 12.5)
+#
+# The trusted Terraform module derives the DLQ's physical name from the
+# primary name ("{name}-dlq" for standard, "{base}-dlq.fifo" for FIFO)
+# rather than accepting it separately. A primary name individually valid
+# up to 80 characters can still derive a DLQ name over AWS's 80-character
+# SQS queue-name limit. These tests cover that invariant; the Terraform-
+# side counterpart is proven independently in tests/terraform/sqs/.
+# ---------------------------------------------------------------------------
+
+_STANDARD_BOUNDARY_NAME = "a" * 76  # derived: 76 + len("-dlq") == 80
+_STANDARD_OVER_BOUNDARY_NAME = "a" * 77  # derived: 77 + len("-dlq") == 81
+_FIFO_BOUNDARY_NAME = "a" * 71 + ".fifo"  # derived: 71 + len("-dlq.fifo") == 80
+_FIFO_OVER_BOUNDARY_NAME = "a" * 72 + ".fifo"  # derived: 72 + len("-dlq.fifo") == 81
+
+
+# -- Standard queue -----------------------------------------------------
+
+
+def test_derived_dlq_name_at_boundary_is_valid_for_standard_queue():
+    spec = SQSResourceSpec(name=_STANDARD_BOUNDARY_NAME)
+    assert spec.name == _STANDARD_BOUNDARY_NAME
+
+
+def test_derived_dlq_name_one_over_boundary_is_rejected_for_standard_queue():
+    with pytest.raises(ValidationError, match="exceeding the SQS 80-character limit"):
+        SQSResourceSpec(name=_STANDARD_OVER_BOUNDARY_NAME)
+
+
+def test_standard_name_over_boundary_is_valid_when_dlq_disabled():
+    spec = SQSResourceSpec(
+        name=_STANDARD_OVER_BOUNDARY_NAME, dlq=DlqSpec(enabled=False, max_receive_count=None)
+    )
+    assert spec.name == _STANDARD_OVER_BOUNDARY_NAME
+
+
+def test_derived_dlq_name_length_error_message_reports_derived_name_and_length():
+    expected_derived_name = derive_dlq_name(_STANDARD_OVER_BOUNDARY_NAME, fifo=False)
+    with pytest.raises(ValidationError, match=re.escape(expected_derived_name)) as excinfo:
+        SQSResourceSpec(name=_STANDARD_OVER_BOUNDARY_NAME)
+    assert "81 characters" in str(excinfo.value)
+
+
+def test_short_standard_name_with_dlq_enabled_is_unaffected():
+    spec = SQSResourceSpec(name="order-events", dlq=DlqSpec())
+    assert spec.name == "order-events"
+
+
+# -- FIFO queue -----------------------------------------------------------
+
+
+def test_derived_dlq_name_at_boundary_is_valid_for_fifo_queue():
+    spec = SQSResourceSpec(name=_FIFO_BOUNDARY_NAME, fifo=True)
+    assert spec.name == _FIFO_BOUNDARY_NAME
+
+
+def test_derived_dlq_name_one_over_boundary_is_rejected_for_fifo_queue():
+    with pytest.raises(ValidationError, match="exceeding the SQS 80-character limit"):
+        SQSResourceSpec(name=_FIFO_OVER_BOUNDARY_NAME, fifo=True)
+
+
+def test_fifo_name_over_boundary_is_valid_when_dlq_disabled():
+    spec = SQSResourceSpec(
+        name=_FIFO_OVER_BOUNDARY_NAME,
+        fifo=True,
+        dlq=DlqSpec(enabled=False, max_receive_count=None),
+    )
+    assert spec.name == _FIFO_OVER_BOUNDARY_NAME
+
+
+def test_derived_dlq_name_for_fifo_over_boundary_ends_with_dlq_fifo_suffix():
+    expected_derived_name = derive_dlq_name(_FIFO_OVER_BOUNDARY_NAME, fifo=True)
+    assert expected_derived_name.endswith("-dlq.fifo")
+    with pytest.raises(ValidationError, match=re.escape(expected_derived_name)):
+        SQSResourceSpec(name=_FIFO_OVER_BOUNDARY_NAME, fifo=True)
+
+
+def test_short_fifo_name_with_dlq_enabled_is_unaffected():
+    spec = SQSResourceSpec(name="order-processing.fifo", fifo=True, dlq=DlqSpec())
+    assert spec.name == "order-processing.fifo"
+
+
+# -- derive_dlq_name() helper, tested directly -----------------------------
+
+
+def test_derive_dlq_name_standard_appends_dlq_suffix():
+    assert derive_dlq_name("order-events", fifo=False) == "order-events-dlq"
+
+
+def test_derive_dlq_name_fifo_places_dlq_before_fifo_suffix():
+    assert derive_dlq_name("order-processing.fifo", fifo=True) == "order-processing-dlq.fifo"
+
+
+def test_derive_dlq_name_does_not_mutate_input_name():
+    name = "order-events"
+    derive_dlq_name(name, fifo=False)
+    assert name == "order-events"
+
+
+def test_derive_dlq_name_is_pure_and_deterministic():
+    assert derive_dlq_name("order-events", fifo=False) == derive_dlq_name(
+        "order-events", fifo=False
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "fifo", "expected_derived_length"),
+    [
+        (_STANDARD_BOUNDARY_NAME, False, 80),
+        (_STANDARD_OVER_BOUNDARY_NAME, False, 81),
+        (_FIFO_BOUNDARY_NAME, True, 80),
+        (_FIFO_OVER_BOUNDARY_NAME, True, 81),
+    ],
+    ids=["standard-boundary", "standard-over", "fifo-boundary", "fifo-over"],
+)
+def test_derive_dlq_name_matches_model_validator_threshold(name, fifo, expected_derived_length):
+    """The exact lengths the model validator accepts/rejects at must match
+    what derive_dlq_name() itself computes — proving the model validator
+    calls this helper rather than recomputing the rule independently."""
+    assert len(derive_dlq_name(name, fifo=fifo)) == expected_derived_length
+
+
+# -- Serialization / regression --------------------------------------------
+
+
+def test_serialization_round_trip_preserves_boundary_valid_spec():
+    original = SQSResourceSpec(name=_STANDARD_BOUNDARY_NAME)
+    dumped = original.model_dump(mode="json")
+    reconstructed = SQSResourceSpec(**dumped)
+
+    assert reconstructed == original
+
+
+def test_spec_name_field_is_never_mutated_when_dlq_enabled():
+    spec = SQSResourceSpec(name=_STANDARD_BOUNDARY_NAME, dlq=DlqSpec())
+    assert spec.name == _STANDARD_BOUNDARY_NAME
+    assert len(spec.name) == 76
+
+
+def test_derived_dlq_name_validator_does_not_reject_when_dlq_disabled_regardless_of_length():
+    name = "a" * 80
+    spec = SQSResourceSpec(name=name, dlq=DlqSpec(enabled=False, max_receive_count=None))
+    assert spec.name == name
 
 
 def test_serialization_round_trip_reconstructs_an_equal_spec():

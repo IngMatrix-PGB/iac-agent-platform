@@ -7,12 +7,17 @@
 
 locals {
   use_kms = var.kms_key_id != null
+
+  # Single canonical derivation of the DLQ's physical name — computed
+  # once and referenced both by aws_sqs_queue.dlq's own `name` and by the
+  # length precondition below, so the two can never drift apart.
+  dlq_name = var.fifo ? "${trimsuffix(var.name, ".fifo")}-dlq.fifo" : "${var.name}-dlq"
 }
 
 resource "aws_sqs_queue" "dlq" {
   count = var.dlq_enabled ? 1 : 0
 
-  name       = var.fifo ? "${trimsuffix(var.name, ".fifo")}-dlq.fifo" : "${var.name}-dlq"
+  name       = local.dlq_name
   fifo_queue = var.fifo
 
   sqs_managed_sse_enabled = local.use_kms ? null : true
@@ -48,6 +53,16 @@ resource "aws_sqs_queue" "this" {
     precondition {
       condition     = var.dlq_enabled ? var.max_receive_count != null : var.max_receive_count == null
       error_message = "max_receive_count must be set when dlq_enabled is true, and null when dlq_enabled is false."
+    }
+
+    precondition {
+      # A primary name valid up to 80 characters can still derive a DLQ
+      # name over 80 characters (the derivation always adds 4 characters:
+      # "-dlq" or the net effect of trimming ".fifo" and appending
+      # "-dlq.fifo"). This is only checked when a DLQ will actually be
+      # created — a primary name with dlq_enabled = false is unaffected.
+      condition     = var.dlq_enabled ? length(local.dlq_name) <= 80 : true
+      error_message = "derived DLQ queue name (\"${local.dlq_name}\") would be ${length(local.dlq_name)} characters, exceeding the SQS 80-character limit. Shorten the primary queue name."
     }
   }
 }
