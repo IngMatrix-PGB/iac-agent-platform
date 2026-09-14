@@ -43,11 +43,20 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+class _NeverCalledSourceControl:
+    """This test never resumes past the approval interrupt, so
+    `publish_change` must never be invoked."""
+
+    def publish_change(self, **kwargs):
+        raise AssertionError("publish_change must not be called in this test")
+
+
 def _build_real_graph(workspace_root: Path, checkpointer):
     return build_sqs_workflow(
         renderer=TerraformCompositionRenderer(),
         terraform_runner=TerraformRunner(),
         checkov_adapter=CheckovAdapter(),
+        source_control_port=_NeverCalledSourceControl(),
         workspace_root=workspace_root,
         checkpointer=checkpointer,
     )

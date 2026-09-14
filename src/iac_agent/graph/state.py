@@ -17,6 +17,7 @@ from typing import TypedDict
 from iac_agent.domain.approval import ApprovalDecision
 from iac_agent.domain.plan import PlanSummary
 from iac_agent.domain.security import PolicyEvaluation, SecurityGateResult
+from iac_agent.domain.source_control import PullRequestResult
 from iac_agent.domain.workflow import WorkflowError, WorkflowStage, WorkflowStatus
 from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
 from iac_agent.security.checkov import CheckovScanResult
@@ -43,6 +44,12 @@ class WorkflowState(TypedDict, total=False):
     has reviewed a ``PASS``/``WARN`` security result — never an
     identity, comment, or timestamp field (see
     ``iac_agent.domain.approval``).
+
+    ``pull_request`` (Batch 14) holds only the typed
+    ``PullRequestResult`` once an ``APPROVED`` workflow has been
+    published to source control — never a GitHub token, a raw GitHub
+    HTTP response, or an ``Authorization`` header (see
+    ``iac_agent.git``).
     """
 
     request_id: str
@@ -58,6 +65,7 @@ class WorkflowState(TypedDict, total=False):
     security_gate: SecurityGateResult | None
 
     approval_decision: ApprovalDecision | None
+    pull_request: PullRequestResult | None
 
     workflow_status: WorkflowStatus
     current_stage: WorkflowStage

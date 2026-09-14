@@ -48,6 +48,24 @@ never rewrites `SecurityGateResult` — a WARN result is still inspectable
 as WARN after the workflow reaches APPROVED. This durably pauses via
 the same SQLite checkpointing introduced in Batch 12 — `interrupt()`
 requires a checkpointer to be resumable at all.
+
+Batch 14 adds `source_control`, reachable only when `approval_gate`
+sets WorkflowStatus.APPROVED (never REJECTED/BLOCKED/ERROR/
+AWAITING_APPROVAL/RUNNING/PENDING). It publishes the already-generated
+Terraform composition through the injected `SourceControlPort` —
+`iac_agent.graph` knows only that narrow interface, never GitHub's Git
+Data API, HTTP, or authorization headers (see `iac_agent.git`).
+APPROVED is now an intermediate post-HITL status: success sets
+WorkflowStatus.PR_CREATED (the Phase 1 terminal artifact — no
+`terraform apply`, no AWS mutation, ever). A defense-in-depth
+precondition (`_ensure_workflow_approved`) refuses to call the adapter
+at all unless `workflow_status` is already APPROVED, independent of
+graph topology. A second defense-in-depth guard makes a replayed
+invocation of an already-published thread a safe no-op rather than a
+second publish attempt (see docs/source-control.md for why LangGraph
+replay makes this necessary, and why deterministic branch naming plus
+the adapter's own fail-closed branch-collision behavior is a third,
+independent layer of the same protection).
 """
 
 from __future__ import annotations
@@ -67,6 +85,7 @@ from iac_agent.domain.approval import (
 )
 from iac_agent.domain.plan import PlanSummary
 from iac_agent.domain.security import PolicyStatus, SecurityGateResult
+from iac_agent.domain.source_control import derive_branch_name
 from iac_agent.domain.workflow import (
     WorkflowError,
     WorkflowStage,
@@ -75,6 +94,7 @@ from iac_agent.domain.workflow import (
 )
 from iac_agent.execution.plan_analyzer import PlanAnalysisError, analyze_plan
 from iac_agent.execution.terraform_runner import TerraformError, TerraformRunner
+from iac_agent.git.port import SourceControlError, SourceControlPort
 from iac_agent.graph.state import WorkflowState
 from iac_agent.policies.platform import evaluate_platform_policies
 from iac_agent.providers.aws.sqs.renderer import TerraformCompositionRenderer
@@ -165,27 +185,73 @@ def _route_unless_error(next_node: str):
     return _route
 
 
+def _ensure_workflow_approved(state: WorkflowState) -> None:
+    """The Batch 14 defense-in-depth precondition: `source_control`
+    refuses to call the adapter unless `workflow_status` is already
+    APPROVED, independent of graph topology (routing already restricts
+    this — see `_route_after_approval_gate` — but this check does not
+    rely on that alone). Module-level and side-effect-free so it can be
+    tested directly against a fabricated state, not only indirectly
+    through graph routing.
+    """
+    if state.get("workflow_status") is not WorkflowStatus.APPROVED:
+        raise SourceControlError(
+            "source_control node requires an APPROVED workflow status, got "
+            f"{state.get('workflow_status')!r}"
+        )
+
+
+def _pr_body(state: WorkflowState) -> str:
+    """A small, deterministic, bounded PR description built only from
+    already-derived evidence — never raw Terraform/Checkov JSON,
+    workspace paths, tokens, or internal exception text. States the
+    security status verbatim (WARN is never rewritten to look like
+    PASS) and states only that a human approved the change, never a
+    reviewer identity Batch 13 has no way to authenticate."""
+    gate_result: SecurityGateResult = state["security_gate"]
+    plan_summary: PlanSummary = state["plan_summary"]
+    approval_decision: ApprovalDecision = state["approval_decision"]
+    approval_text = (
+        "approved" if approval_decision is ApprovalDecision.APPROVE else approval_decision.value
+    )
+
+    return (
+        f"Request ID: {state['request_id']}\n"
+        f"Resource: {state['resource_spec'].name}\n"
+        f"Security status: {gate_result.overall_status.value}\n"
+        f"Plan: {plan_summary.add_count} to add, {plan_summary.change_count} to change, "
+        f"{plan_summary.destroy_count} to destroy\n"
+        f"Human approval: {approval_text}\n"
+    )
+
+
 def build_sqs_workflow(
     *,
     renderer: TerraformCompositionRenderer,
     terraform_runner: TerraformRunner,
     checkov_adapter: CheckovAdapter,
+    source_control_port: SourceControlPort,
     workspace_root: Path,
     trusted_module_dir: Path = _DEFAULT_TRUSTED_MODULE_DIR,
+    base_branch: str = "main",
     checkpointer: BaseCheckpointSaver | None = None,
 ) -> CompiledStateGraph:
     """Build and compile the deterministic SQS workflow graph.
 
     All external boundaries are injected — no hidden global singletons,
-    no real Terraform/Checkov requirement for callers who inject fakes.
+    no real Terraform/Checkov/GitHub requirement for callers who inject
+    fakes.
 
     `checkpointer` is optional and backend-agnostic (any
     `BaseCheckpointSaver`, typically the SQLite-backed saver from
     `iac_agent.persistence.checkpoints`) — this module never
     constructs a SQLite connection itself. When `None` (the default),
     compilation is non-durable, preserving Batch 11's exact behavior.
-    No `interrupt_before`/HITL configuration exists yet (that comes
-    after persistence has a stable contract).
+
+    `base_branch` defaults to `"main"` here — this is the one place a
+    default is acceptable (the application composition layer); the
+    `SourceControlPort` itself always receives it explicitly and never
+    assumes a default on its own.
     """
 
     def render_terraform(state: WorkflowState) -> dict:
@@ -310,11 +376,57 @@ def build_sqs_workflow(
             "current_stage": WorkflowStage.COMPLETE,
         }
 
+    def source_control(state: WorkflowState) -> dict:
+        try:
+            _ensure_workflow_approved(state)
+        except SourceControlError as exc:
+            return _error_update(WorkflowStage.SOURCE_CONTROL, exc)
+
+        existing_pr = state.get("pull_request")
+        if existing_pr is not None:
+            # Idempotency / replay-safety guard: a replayed or duplicated
+            # invocation of an already-published thread must never call
+            # the adapter a second time — see docs/source-control.md.
+            # This is a safe no-op, not a fresh publish.
+            return {
+                "pull_request": existing_pr,
+                "workflow_status": WorkflowStatus.PR_CREATED,
+                "current_stage": WorkflowStage.COMPLETE,
+            }
+
+        request_id = state["request_id"]
+        try:
+            branch_name = derive_branch_name(request_id)
+            pr_result = source_control_port.publish_change(
+                request_id=request_id,
+                base_branch=base_branch,
+                branch_name=branch_name,
+                files=state.get("generated_files") or {},
+                commit_message=f"feat(iac): add SQS proposal {request_id}",
+                pr_title=f"IaC proposal: {request_id}",
+                pr_body=_pr_body(state),
+            )
+        except (SourceControlError, ValueError) as exc:
+            return _error_update(WorkflowStage.SOURCE_CONTROL, exc)
+
+        return {
+            "pull_request": pr_result,
+            "workflow_status": WorkflowStatus.PR_CREATED,
+            "current_stage": WorkflowStage.COMPLETE,
+        }
+
     def _route_after_security_gate(state: WorkflowState) -> str:
         # BLOCK and ERROR both terminate at security_gate itself; only
         # AWAITING_APPROVAL ever proceeds to the interrupt.
         if state.get("workflow_status") == WorkflowStatus.AWAITING_APPROVAL:
             return "approval_gate"
+        return END
+
+    def _route_after_approval_gate(state: WorkflowState) -> str:
+        # Only APPROVED ever proceeds to source_control. REJECTED and
+        # ERROR (an invalid resume value) both terminate here.
+        if state.get("workflow_status") == WorkflowStatus.APPROVED:
+            return "source_control"
         return END
 
     builder = StateGraph(WorkflowState)
@@ -325,6 +437,7 @@ def build_sqs_workflow(
     builder.add_node("checkov_scan", checkov_scan)
     builder.add_node("security_gate", security_gate)
     builder.add_node("approval_gate", approval_gate)
+    builder.add_node("source_control", source_control)
 
     builder.add_edge(START, "render_terraform")
     builder.add_conditional_edges("render_terraform", _route_unless_error("terraform_execute"))
@@ -333,6 +446,7 @@ def build_sqs_workflow(
     builder.add_conditional_edges("platform_policy", _route_unless_error("checkov_scan"))
     builder.add_conditional_edges("checkov_scan", _route_unless_error("security_gate"))
     builder.add_conditional_edges("security_gate", _route_after_security_gate)
-    builder.add_edge("approval_gate", END)
+    builder.add_conditional_edges("approval_gate", _route_after_approval_gate)
+    builder.add_edge("source_control", END)
 
     return builder.compile(checkpointer=checkpointer)

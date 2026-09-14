@@ -53,6 +53,7 @@ _ALLOWED_WORKFLOW_TYPES: tuple[tuple[str, str], ...] = (
     ("iac_agent.domain.workflow", "WorkflowStage"),
     ("iac_agent.domain.workflow", "WorkflowError"),
     ("iac_agent.domain.approval", "ApprovalDecision"),
+    ("iac_agent.domain.source_control", "PullRequestResult"),
 )
 
 

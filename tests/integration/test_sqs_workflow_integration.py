@@ -26,6 +26,15 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+class _NeverCalledSourceControl:
+    """This test never resumes past the approval interrupt, so
+    `publish_change` must never be invoked — calling it is a test
+    failure, not a fallback."""
+
+    def publish_change(self, **kwargs):
+        raise AssertionError("publish_change must not be called in this test")
+
+
 def test_real_workflow_passes_for_a_secure_dlq_enabled_request(tmp_path):
     spec = SQSResourceSpec(
         name="order-events",
@@ -37,6 +46,7 @@ def test_real_workflow_passes_for_a_secure_dlq_enabled_request(tmp_path):
         renderer=TerraformCompositionRenderer(),
         terraform_runner=TerraformRunner(),
         checkov_adapter=CheckovAdapter(),
+        source_control_port=_NeverCalledSourceControl(),
         workspace_root=tmp_path,
     )
 
