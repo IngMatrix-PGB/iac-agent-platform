@@ -16,10 +16,11 @@ abstraction layer.
 from __future__ import annotations
 
 from iac_agent.domain.resource import ResourceType
+from iac_agent.providers.aws.dynamodb.contract import DynamoDBResourceSpec
 from iac_agent.providers.aws.s3.contract import S3ResourceSpec
 from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
 
-AWSResourceSpec = SQSResourceSpec | S3ResourceSpec
+AWSResourceSpec = SQSResourceSpec | S3ResourceSpec | DynamoDBResourceSpec
 
 
 def resource_type_of(spec: AWSResourceSpec) -> ResourceType:
@@ -33,4 +34,6 @@ def resource_type_of(spec: AWSResourceSpec) -> ResourceType:
             return ResourceType.SQS
         case S3ResourceSpec():
             return ResourceType.S3
+        case DynamoDBResourceSpec():
+            return ResourceType.DYNAMODB
     raise ValueError(f"unsupported resource spec type: {type(spec).__name__}")

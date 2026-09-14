@@ -20,3 +20,4 @@ from enum import StrEnum
 class ResourceType(StrEnum):
     SQS = "sqs"
     S3 = "s3"
+    DYNAMODB = "dynamodb"
