@@ -1,14 +1,14 @@
 """The shared AWS resource dispatch boundary (Phase 2).
 
-The one place that knows both AWS resource contracts exist side by
+The one place that knows every AWS resource contract exists side by
 side. `AWSResourceSpec` is a plain typed union — not a generic
 `dict[str, Any]`, not a plugin registry, not a metaprogrammed schema.
-`resource_type_of` is the single explicit two-case dispatch used
-wherever code needs to classify which kind of resource a spec is
-(PR/commit text, eval field expectations) without hand-rolling
-`isinstance` checks in each call site.
+`resource_type_of` is the single explicit dispatch used wherever code
+needs to classify which kind of resource a spec is (PR/commit text,
+eval field expectations) without hand-rolling `isinstance` checks in
+each call site.
 
-Adding a third resource type means adding one member to `ResourceType`,
+Adding a new resource type means adding one member to `ResourceType`,
 one arm to `AWSResourceSpec`, and one `case` here — not a new
 abstraction layer.
 """
@@ -17,10 +17,11 @@ from __future__ import annotations
 
 from iac_agent.domain.resource import ResourceType
 from iac_agent.providers.aws.dynamodb.contract import DynamoDBResourceSpec
+from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec
 from iac_agent.providers.aws.s3.contract import S3ResourceSpec
 from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
 
-AWSResourceSpec = SQSResourceSpec | S3ResourceSpec | DynamoDBResourceSpec
+AWSResourceSpec = SQSResourceSpec | S3ResourceSpec | DynamoDBResourceSpec | LambdaResourceSpec
 
 
 def resource_type_of(spec: AWSResourceSpec) -> ResourceType:
@@ -36,4 +37,6 @@ def resource_type_of(spec: AWSResourceSpec) -> ResourceType:
             return ResourceType.S3
         case DynamoDBResourceSpec():
             return ResourceType.DYNAMODB
+        case LambdaResourceSpec():
+            return ResourceType.LAMBDA
     raise ValueError(f"unsupported resource spec type: {type(spec).__name__}")

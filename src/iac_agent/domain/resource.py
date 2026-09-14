@@ -21,3 +21,4 @@ class ResourceType(StrEnum):
     SQS = "sqs"
     S3 = "s3"
     DYNAMODB = "dynamodb"
+    LAMBDA = "lambda"
