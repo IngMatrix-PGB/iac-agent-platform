@@ -29,7 +29,6 @@ def test_workflow_state_declares_explicit_workflow_facts():
     for expected_field in (
         "workspace",
         "generated_files",
-        "terraform_plan_json",
         "plan_summary",
         "platform_evaluation",
         "checkov_result",
@@ -39,3 +38,10 @@ def test_workflow_state_declares_explicit_workflow_facts():
         "error",
     ):
         assert expected_field in annotations
+
+
+def test_workflow_state_has_no_raw_terraform_plan_json_field():
+    """Batch 12 correction: raw Terraform show-json output must never be
+    representable in WorkflowState at all, since anything here can be
+    durably checkpointed to SQLite."""
+    assert "terraform_plan_json" not in WorkflowState.__annotations__

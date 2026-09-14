@@ -60,7 +60,9 @@ def test_real_workflow_passes_for_a_secure_dlq_enabled_request(tmp_path):
 
     assert result["security_gate"].overall_status.value == "pass"
 
-    # Raw plan JSON must not survive into the final completed state.
+    # Batch 12: the raw plan JSON field does not exist in WorkflowState at
+    # all (not merely cleared) — structurally impossible to retain it.
     assert result.get("terraform_plan_json") is None
+    assert "terraform_plan_json" not in result
 
     assert result["workspace"] == tmp_path / "req-001"

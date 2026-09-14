@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 
 
 class WorkflowStatus(StrEnum):
@@ -57,3 +58,28 @@ class WorkflowError:
     stage: WorkflowStage
     error_type: str
     message: str
+
+
+def validate_request_id(request_id: str) -> str:
+    """The single request-ID safety rule shared by the workspace path
+    resolver (``iac_agent.graph.workflow``) and the checkpoint thread-ID
+    mapping (``iac_agent.persistence.checkpoints``) — deliberately one
+    rule set, not two that could drift apart.
+
+    A ``request_id`` must be a non-empty, simple path-segment-safe
+    string: no path separators, no parent-directory references, and
+    never shaped like an absolute path. It is never treated as a
+    trusted filesystem path or thread identifier without this check.
+    """
+    if not request_id:
+        raise ValueError("request_id must be a non-empty string")
+
+    candidate = Path(request_id)
+    if candidate.is_absolute():
+        raise ValueError(f"request_id must not be an absolute path: {request_id!r}")
+    if candidate.name != request_id or ".." in candidate.parts:
+        raise ValueError(
+            "request_id must be a simple path segment with no separators or "
+            f"parent-directory references, got {request_id!r}"
+        )
+    return request_id

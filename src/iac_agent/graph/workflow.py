@@ -4,8 +4,8 @@
 proven deterministic components:
 
     render_terraform   -> TerraformCompositionRenderer
-    terraform_execute   -> TerraformRunner (fmt, init, validate, plan, show_json)
-    plan_analysis       -> analyze_plan
+    terraform_execute   -> TerraformRunner (fmt, init, validate, plan)
+    plan_analysis       -> TerraformRunner.show_json + analyze_plan
     platform_policy      -> evaluate_platform_policies
     checkov_scan         -> CheckovAdapter.scan
     security_gate        -> evaluate_security_gate
@@ -23,6 +23,15 @@ into WorkflowStatus.ERROR + a safe WorkflowError — never into BLOCKED,
 which means something different (security evidence completed and
 explicitly rejected the change). If any node sets ERROR, no later
 node runs; the graph routes straight to END.
+
+Batch 12 correction: `terraform_execute` no longer calls `show_json` or
+writes a raw plan into state. `plan_analysis` now calls
+`terraform_runner.show_json(...)` itself, holds the result in a local
+variable only, and returns just the derived `PlanSummary`. This matters
+once checkpointing is enabled (see `iac_agent.persistence`): anything
+written into `WorkflowState` can be durably persisted to SQLite, so raw
+Terraform plan JSON must never become a state value at all, not merely
+be cleared later.
 """
 
 from __future__ import annotations
@@ -30,12 +39,18 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from iac_agent.domain.plan import PlanSummary
 from iac_agent.domain.security import PolicyStatus
-from iac_agent.domain.workflow import WorkflowError, WorkflowStage, WorkflowStatus
+from iac_agent.domain.workflow import (
+    WorkflowError,
+    WorkflowStage,
+    WorkflowStatus,
+    validate_request_id,
+)
 from iac_agent.execution.plan_analyzer import PlanAnalysisError, analyze_plan
 from iac_agent.execution.terraform_runner import TerraformError, TerraformRunner
 from iac_agent.graph.state import WorkflowState
@@ -66,20 +81,11 @@ _ERROR_MESSAGE_LIMIT = 500
 
 def _resolve_request_workspace(workspace_root: Path, request_id: str) -> Path:
     """Resolve `<workspace_root>/<request_id>`, rejecting anything that
-    could escape `workspace_root` — an absolute path, a path separator,
-    or a parent-directory reference. `request_id` is never treated as a
-    trusted filesystem path without this check."""
-    if not request_id:
-        raise ValueError("request_id must be a non-empty string")
-
-    candidate = Path(request_id)
-    if candidate.is_absolute():
-        raise ValueError(f"request_id must not be an absolute path: {request_id!r}")
-    if candidate.name != request_id or ".." in candidate.parts:
-        raise ValueError(
-            "request_id must be a simple path segment with no separators or "
-            f"parent-directory references, got {request_id!r}"
-        )
+    could escape `workspace_root` — using the same `request_id` safety
+    rule shared with the checkpoint thread-ID mapping
+    (`iac_agent.domain.workflow.validate_request_id`), not a second,
+    independently-drifting rule set."""
+    validate_request_id(request_id)
     return workspace_root / request_id
 
 
@@ -115,14 +121,20 @@ def build_sqs_workflow(
     checkov_adapter: CheckovAdapter,
     workspace_root: Path,
     trusted_module_dir: Path = _DEFAULT_TRUSTED_MODULE_DIR,
+    checkpointer: BaseCheckpointSaver | None = None,
 ) -> CompiledStateGraph:
     """Build and compile the deterministic SQS workflow graph.
 
     All external boundaries are injected — no hidden global singletons,
     no real Terraform/Checkov requirement for callers who inject fakes.
-    Compiled without a checkpointer (no durable persistence yet — that
-    is Batch 12) and without any `interrupt_before`/HITL configuration
-    (that comes after persistence has a stable contract).
+
+    `checkpointer` is optional and backend-agnostic (any
+    `BaseCheckpointSaver`, typically the SQLite-backed saver from
+    `iac_agent.persistence.checkpoints`) — this module never
+    constructs a SQLite connection itself. When `None` (the default),
+    compilation is non-durable, preserving Batch 11's exact behavior.
+    No `interrupt_before`/HITL configuration exists yet (that comes
+    after persistence has a stable contract).
     """
 
     def render_terraform(state: WorkflowState) -> dict:
@@ -149,25 +161,28 @@ def build_sqs_workflow(
             terraform_runner.init(workspace)
             terraform_runner.validate(workspace)
             terraform_runner.plan(workspace, env_overrides=_PLAN_ENV_OVERRIDES)
-            plan_json = terraform_runner.show_json(workspace)
         except TerraformError as exc:
             return _error_update(WorkflowStage.TERRAFORM, exc)
 
         return {
-            "terraform_plan_json": plan_json,
             "current_stage": WorkflowStage.PLAN_ANALYSIS,
         }
 
     def plan_analysis(state: WorkflowState) -> dict:
+        # `raw_plan` is a local variable ONLY — it is never assigned into
+        # WorkflowState, so it can never be durably checkpointed. This is
+        # the Batch 12 correction: previously `terraform_execute` wrote
+        # the raw show-json result into state for this node to consume;
+        # now this node fetches and consumes it in one step, and only
+        # the derived PlanSummary ever becomes a state update.
         try:
-            plan_summary: PlanSummary = analyze_plan(state["terraform_plan_json"])
-        except PlanAnalysisError as exc:
+            raw_plan = terraform_runner.show_json(state["workspace"])
+            plan_summary: PlanSummary = analyze_plan(raw_plan)
+        except (TerraformError, PlanAnalysisError) as exc:
             return _error_update(WorkflowStage.PLAN_ANALYSIS, exc)
 
         return {
             "plan_summary": plan_summary,
-            # Raw plan JSON must not survive past this node.
-            "terraform_plan_json": None,
             "current_stage": WorkflowStage.PLATFORM_POLICY,
         }
 
@@ -226,4 +241,4 @@ def build_sqs_workflow(
     builder.add_conditional_edges("checkov_scan", _route_unless_error("security_gate"))
     builder.add_edge("security_gate", END)
 
-    return builder.compile()
+    return builder.compile(checkpointer=checkpointer)

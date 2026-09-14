@@ -11,7 +11,7 @@ rather than re-serializing them into arbitrary dicts.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import TypedDict
 
 from iac_agent.domain.plan import PlanSummary
 from iac_agent.domain.security import PolicyEvaluation, SecurityGateResult
@@ -26,11 +26,15 @@ class WorkflowState(TypedDict, total=False):
     initial invocation; every other field is populated progressively by
     the graph's nodes.
 
-    ``terraform_plan_json`` is a deliberately transient handoff between
-    ``terraform_execute`` and ``plan_analysis`` — the latter clears it
-    (sets it back to ``None``) once ``PlanSummary`` has been derived, so
-    raw Terraform plan JSON never survives into a completed workflow's
-    final state.
+    There is deliberately no raw-Terraform-plan-JSON field here (no
+    ``terraform_plan_json`` or equivalent). Since Batch 12 durably
+    checkpoints every superstep of this state to SQLite, any such field
+    would mean a raw Terraform plan could persist to disk even for a
+    request whose *final* state never shows it. Instead,
+    ``plan_analysis`` reads the raw ``terraform show -json`` result into
+    a local variable, derives ``plan_summary`` from it, and returns only
+    ``plan_summary`` as a state update — the raw dict never becomes part
+    of ``WorkflowState`` at any point, checkpointed or not.
     """
 
     request_id: str
@@ -39,7 +43,6 @@ class WorkflowState(TypedDict, total=False):
     workspace: Path
     generated_files: dict[str, str] | None
 
-    terraform_plan_json: dict[str, Any] | None
     plan_summary: PlanSummary | None
 
     platform_evaluation: PolicyEvaluation | None

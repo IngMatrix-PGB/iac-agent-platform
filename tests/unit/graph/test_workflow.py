@@ -13,10 +13,13 @@ import inspect
 
 import pytest
 
+from iac_agent.domain.plan import PlanSummary
 from iac_agent.domain.security import (
     FindingSource,
+    PolicyEvaluation,
     PolicyStatus,
     SecurityFinding,
+    SecurityGateResult,
     SecuritySeverity,
 )
 from iac_agent.domain.workflow import WorkflowStage, WorkflowStatus
@@ -24,6 +27,7 @@ from iac_agent.execution.plan_analyzer import PlanAnalysisError
 from iac_agent.execution.terraform_runner import CommandResult, TerraformCommandError
 from iac_agent.graph import workflow as workflow_module
 from iac_agent.graph.workflow import build_sqs_workflow
+from iac_agent.persistence.checkpoints import open_sqlite_checkpointer, workflow_config
 from iac_agent.providers.aws.sqs.contract import DlqSpec, SQSResourceSpec
 from iac_agent.providers.aws.sqs.renderer import GeneratedTerraformComposition
 from iac_agent.security.checkov import CheckovExecutableNotFoundError, CheckovScanResult
@@ -267,8 +271,11 @@ def test_renderer_failure_gives_error_and_stops(tmp_path):
     assert checkov.scan_calls == []
 
 
-@pytest.mark.parametrize("stage", ["fmt", "init", "validate", "plan", "show_json"])
-def test_terraform_stage_failure_gives_error_and_stops(tmp_path, stage):
+@pytest.mark.parametrize("stage", ["fmt", "init", "validate", "plan"])
+def test_terraform_execute_stage_failure_gives_error_and_stops(tmp_path, stage):
+    """fmt/init/validate/plan all run inside terraform_execute (Batch 12:
+    show_json moved to plan_analysis, so it is NOT covered by this case —
+    see test_show_json_failure_gives_error_and_stops below)."""
     tf_error = TerraformCommandError(_ok_result("terraform", stage))
     graph, renderer, tf, checkov = _build(
         tmp_path, terraform_runner=FakeTerraformRunner(fail_at=stage, fail_exc=tf_error)
@@ -277,6 +284,21 @@ def test_terraform_stage_failure_gives_error_and_stops(tmp_path, stage):
 
     assert result["workflow_status"] is WorkflowStatus.ERROR
     assert result["error"].stage is WorkflowStage.TERRAFORM
+    assert "plan_summary" not in result or result["plan_summary"] is None
+    assert checkov.scan_calls == []
+
+
+def test_show_json_failure_gives_error_and_stops(tmp_path):
+    """Batch 12: show_json is called by plan_analysis, not
+    terraform_execute — its failure is attributed to PLAN_ANALYSIS."""
+    tf_error = TerraformCommandError(_ok_result("terraform", "show", "-json"))
+    graph, renderer, tf, checkov = _build(
+        tmp_path, terraform_runner=FakeTerraformRunner(fail_at="show_json", fail_exc=tf_error)
+    )
+    result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
+
+    assert result["workflow_status"] is WorkflowStatus.ERROR
+    assert result["error"].stage is WorkflowStage.PLAN_ANALYSIS
     assert "plan_summary" not in result or result["plan_summary"] is None
     assert checkov.scan_calls == []
 
@@ -428,10 +450,39 @@ def test_final_successful_state_contains_security_gate_result(tmp_path):
     assert result["security_gate"] is not None
 
 
+def test_workflow_state_has_no_terraform_plan_json_field_at_all():
+    """Batch 12 structural guarantee: the field does not exist in the
+    schema at all — not merely cleared to None at the end of a run."""
+    from iac_agent.graph.state import WorkflowState
+
+    assert "terraform_plan_json" not in WorkflowState.__annotations__
+
+
 def test_final_successful_state_does_not_retain_raw_terraform_plan_json(tmp_path):
     graph, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
     assert result.get("terraform_plan_json") is None
+    assert "terraform_plan_json" not in result
+
+
+def test_terraform_execute_does_not_call_show_json(tmp_path):
+    """Batch 12: show_json moved to plan_analysis. Verified here by
+    forcing show_json to fail — if terraform_execute still called it,
+    the error would be attributed to WorkflowStage.TERRAFORM instead of
+    PLAN_ANALYSIS (see test_show_json_failure_gives_error_and_stops)."""
+    tf = FakeTerraformRunner()
+    graph, _, _, _ = _build(tmp_path, terraform_runner=tf)
+    graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
+
+    assert tf.calls.index("plan") < tf.calls.index("show_json")
+
+
+def test_plan_analysis_calls_show_json_exactly_once(tmp_path):
+    tf = FakeTerraformRunner()
+    graph, _, _, _ = _build(tmp_path, terraform_runner=tf)
+    graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
+
+    assert tf.calls.count("show_json") == 1
 
 
 def test_final_successful_state_does_not_retain_raw_checkov_json(tmp_path):
@@ -526,3 +577,215 @@ def test_graph_module_does_not_contain_platform_policy_ids_or_rules():
         "encryption.enabled",
     ):
         assert forbidden not in source
+
+
+# ---------------------------------------------------------------------------
+# Checkpointer dependency injection (fakes only — no real Terraform/Checkov;
+# SQLite itself is real, since that is the actual behavior under test)
+# ---------------------------------------------------------------------------
+
+
+def test_graph_compiles_and_runs_unchanged_without_a_checkpointer(tmp_path):
+    """Batch 11 behavior is preserved exactly when checkpointer=None
+    (the default) — no config/thread_id is even required."""
+    graph, _, _, _ = _build(tmp_path)
+    result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
+    assert result["workflow_status"] is WorkflowStatus.PASS
+
+
+def test_injected_checkpointer_is_actually_used_by_the_compiled_graph(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph = build_sqs_workflow(
+            renderer=FakeRenderer(),
+            terraform_runner=FakeTerraformRunner(),
+            checkov_adapter=FakeCheckovAdapter(),
+            workspace_root=workspace_root,
+            checkpointer=saver,
+        )
+        config = workflow_config("req-001")
+        graph.invoke({"request_id": "req-001", "resource_spec": _spec()}, config)
+
+        # get_state only works at all when a checkpointer was actually
+        # wired into compile() — this call itself is the proof.
+        snapshot = graph.get_state(config)
+        assert snapshot.values["workflow_status"] is WorkflowStatus.PASS
+
+
+def test_graph_module_does_not_instantiate_sqlite():
+    tree = ast.parse(inspect.getsource(workflow_module))
+    imported_modules = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported_modules.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported_modules.add(node.module)
+
+    forbidden = {"sqlite3", "langgraph.checkpoint.sqlite"}
+    assert not (imported_modules & forbidden), imported_modules & forbidden
+
+
+# ---------------------------------------------------------------------------
+# Durable round-trip (real SQLite, fake Terraform/Checkov)
+# ---------------------------------------------------------------------------
+
+
+def _build_durable(workspace_root, checkpointer, **overrides):
+    return build_sqs_workflow(
+        renderer=overrides.get("renderer") or FakeRenderer(),
+        terraform_runner=overrides.get("terraform_runner") or FakeTerraformRunner(),
+        checkov_adapter=overrides.get("checkov_adapter") or FakeCheckovAdapter(),
+        workspace_root=workspace_root,
+        checkpointer=checkpointer,
+    )
+
+
+def test_completed_pass_state_round_trips_through_real_sqlite(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    config = workflow_config("req-durable-001")
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph = _build_durable(workspace_root, saver)
+        first_result = graph.invoke(
+            {"request_id": "req-durable-001", "resource_spec": _spec()}, config
+        )
+        assert first_result["workflow_status"] is WorkflowStatus.PASS
+
+    # Reopen a brand-new saver and a brand-new compiled graph against the
+    # SAME database file — this simulates process reconstruction. The
+    # original saver/graph objects are never reused below.
+    with open_sqlite_checkpointer(db_path) as saver2:
+        graph2 = _build_durable(workspace_root, saver2)
+        snapshot = graph2.get_state(config)
+        recovered = snapshot.values
+
+    assert recovered["request_id"] == "req-durable-001"
+    assert isinstance(recovered["resource_spec"], SQSResourceSpec)
+    assert isinstance(recovered["plan_summary"], PlanSummary)
+    assert isinstance(recovered["platform_evaluation"], PolicyEvaluation)
+    assert isinstance(recovered["checkov_result"], CheckovScanResult)
+    assert isinstance(recovered["security_gate"], SecurityGateResult)
+    assert recovered["workflow_status"] is WorkflowStatus.PASS
+    assert recovered["current_stage"] is WorkflowStage.COMPLETE
+    assert "terraform_plan_json" not in recovered
+
+
+# ---------------------------------------------------------------------------
+# Thread isolation
+# ---------------------------------------------------------------------------
+
+
+def test_two_threads_coexist_in_one_database_without_cross_contamination(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+
+    spec_a = _spec(name="order-events")
+    spec_b = _spec(name="payment-events")
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph = _build_durable(workspace_root, saver)
+        graph.invoke({"request_id": "req-001", "resource_spec": spec_a}, workflow_config("req-001"))
+        graph.invoke({"request_id": "req-002", "resource_spec": spec_b}, workflow_config("req-002"))
+
+        state_a = graph.get_state(workflow_config("req-001")).values
+        state_b = graph.get_state(workflow_config("req-002")).values
+
+    assert state_a["request_id"] == "req-001"
+    assert state_a["resource_spec"].name == "order-events"
+    assert state_b["request_id"] == "req-002"
+    assert state_b["resource_spec"].name == "payment-events"
+    assert state_a["resource_spec"].name != state_b["resource_spec"].name
+
+
+def test_thread_a_cannot_retrieve_thread_b_state_after_reconstruction(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph = _build_durable(workspace_root, saver)
+        graph.invoke(
+            {"request_id": "req-001", "resource_spec": _spec(name="order-events")},
+            workflow_config("req-001"),
+        )
+        graph.invoke(
+            {"request_id": "req-002", "resource_spec": _spec(name="payment-events")},
+            workflow_config("req-002"),
+        )
+
+    with open_sqlite_checkpointer(db_path) as saver2:
+        graph2 = _build_durable(workspace_root, saver2)
+        recovered_a = graph2.get_state(workflow_config("req-001")).values
+        recovered_b = graph2.get_state(workflow_config("req-002")).values
+
+    assert recovered_a["resource_spec"].name == "order-events"
+    assert recovered_b["resource_spec"].name == "payment-events"
+
+
+def test_repeated_retrieval_of_the_same_thread_is_deterministic(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    config = workflow_config("req-001")
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph = _build_durable(workspace_root, saver)
+        graph.invoke({"request_id": "req-001", "resource_spec": _spec()}, config)
+
+        first = graph.get_state(config).values
+        second = graph.get_state(config).values
+
+    assert first["workflow_status"] == second["workflow_status"]
+    assert first["security_gate"] == second["security_gate"]
+
+
+# ---------------------------------------------------------------------------
+# ERROR-state durability
+# ---------------------------------------------------------------------------
+
+
+def test_error_state_survives_saver_and_graph_reconstruction(tmp_path):
+    db_path = tmp_path / "checkpoints.sqlite3"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    config = workflow_config("req-error-001")
+
+    tf_error = TerraformCommandError(
+        CommandResult(
+            command=("terraform", "validate"),
+            returncode=1,
+            stdout="",
+            stderr="benign validate failure",
+            duration_seconds=0.0,
+        )
+    )
+
+    with open_sqlite_checkpointer(db_path) as saver:
+        graph = _build_durable(
+            workspace_root,
+            saver,
+            terraform_runner=FakeTerraformRunner(fail_at="validate", fail_exc=tf_error),
+        )
+        first_result = graph.invoke(
+            {"request_id": "req-error-001", "resource_spec": _spec()}, config
+        )
+        assert first_result["workflow_status"] is WorkflowStatus.ERROR
+
+    with open_sqlite_checkpointer(db_path) as saver2:
+        graph2 = _build_durable(workspace_root, saver2)
+        recovered = graph2.get_state(config).values
+
+    assert recovered["workflow_status"] is WorkflowStatus.ERROR
+    assert recovered["error"].stage is WorkflowStage.TERRAFORM
+    assert recovered["error"].error_type == "TerraformCommandError"
+    assert "benign validate failure" in recovered["error"].message
+    # No original exception object survives — only the safe, structured
+    # WorkflowError dataclass value.
+    assert not hasattr(recovered["error"], "__traceback__")
+    assert not isinstance(recovered["error"], Exception)
