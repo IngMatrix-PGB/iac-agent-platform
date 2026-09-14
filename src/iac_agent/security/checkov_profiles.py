@@ -69,10 +69,42 @@ _DYNAMODB_SKIPPED_CHECKS: tuple[str, ...] = (
     "CKV_AWS_119",
 )
 
+#: Verified empirically (2026-09, Checkov 3.3.13, real scan of the
+#: trusted Lambda+IAM module's secure-default baseline — resource_count=4,
+#: passed=36, failed=5, after fixing the one real defect this scan
+#: found — CKV_AWS_338, "at least one year of log retention" — by
+#: raising the contract/module's default `log_retention_days` from 30
+#: to 365): exactly these five checks fail, each corresponding to a
+#: documented Phase 2 Lambda non-goal. Surfaced to the project owner
+#: via `AskUserQuestion` before being added, mirroring the S3/DynamoDB
+#: precedent from Batches 16-17.
+_LAMBDA_SKIPPED_CHECKS: tuple[str, ...] = (
+    # "Ensure that AWS Lambda function is configured inside a VPC" —
+    # VPC configuration is an explicit Phase 2 non-goal.
+    "CKV_AWS_117",
+    # "Ensure that AWS Lambda function is configured for a Dead Letter
+    # Queue(DLQ)" — a DLQ needs a cross-resource target ARN, which is
+    # explicit Batch 19 serverless-composition scope, not this batch's.
+    "CKV_AWS_116",
+    # "Ensure that CloudWatch Log Group is encrypted by KMS" —
+    # customer-managed KMS is a documented Phase 2 non-goal, mirroring
+    # the identical DynamoDB decision.
+    "CKV_AWS_158",
+    # "Check encryption settings for Lambda environmental variable" —
+    # same customer-managed-KMS non-goal, applied to the function's own
+    # environment variables.
+    "CKV_AWS_173",
+    # "Ensure AWS Lambda function is configured to validate code-
+    # signing" — code-signing configuration is a separate, more advanced
+    # feature never in this batch's scope at all.
+    "CKV_AWS_272",
+)
+
 _PROFILES_BY_RESOURCE_TYPE: dict[ResourceType, CheckovScanProfile] = {
     ResourceType.SQS: CheckovScanProfile(skipped_checks=()),
     ResourceType.S3: CheckovScanProfile(skipped_checks=_S3_SKIPPED_CHECKS),
     ResourceType.DYNAMODB: CheckovScanProfile(skipped_checks=_DYNAMODB_SKIPPED_CHECKS),
+    ResourceType.LAMBDA: CheckovScanProfile(skipped_checks=_LAMBDA_SKIPPED_CHECKS),
 }
 
 
