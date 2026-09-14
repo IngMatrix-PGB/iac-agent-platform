@@ -92,7 +92,7 @@ class FakeTerraformRunner:
 
 
 class FakeCheckovAdapter:
-    def scan(self, workspace):
+    def scan(self, workspace, *, profile=None):
         return CheckovScanResult(
             findings=(),
             passed_checks=5,

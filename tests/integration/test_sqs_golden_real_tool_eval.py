@@ -32,13 +32,16 @@ from iac_agent.security.gate import evaluate_security_gate
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TRUSTED_MODULE_DIR = _REPO_ROOT / "terraform" / "modules" / "sqs"
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("terraform") is None or shutil.which("checkov") is None,
-    reason="terraform and/or checkov binary not available on PATH",
-)
+pytestmark = [
+    pytest.mark.real_tool,
+    pytest.mark.skipif(
+        shutil.which("terraform") is None or shutil.which("checkov") is None,
+        reason="terraform and/or checkov binary not available on PATH",
+    ),
+]
 
 
-def test_secure_default_queue_pass_scenario_against_real_tools(tmp_path):
+def test_secure_default_queue_pass_scenario_against_real_tools(tmp_path, terraform_test_env):
     scenarios = load_sqs_golden_dataset(DEFAULT_DATASET_PATH)
     scenario = next(s for s in scenarios if s.id == "secure_default_queue_pass")
 
@@ -48,7 +51,7 @@ def test_secure_default_queue_pass_scenario_against_real_tools(tmp_path):
     composition = TerraformCompositionRenderer().render(spec, module_source=module_source)
     composition.write_to(tmp_path)
 
-    runner = TerraformRunner()
+    runner = TerraformRunner(base_env=terraform_test_env)
     runner.fmt(tmp_path)
     runner.init(tmp_path)
     runner.validate(tmp_path)

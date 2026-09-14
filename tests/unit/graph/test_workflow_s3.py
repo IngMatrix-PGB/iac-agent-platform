@@ -25,6 +25,7 @@ from langgraph.types import Command
 
 from iac_agent.domain.approval import ApprovalDecision
 from iac_agent.domain.plan import PlanSummary
+from iac_agent.domain.resource import ResourceType
 from iac_agent.domain.security import PolicyEvaluation, PolicyStatus, SecurityGateResult
 from iac_agent.domain.source_control import PullRequestResult
 from iac_agent.domain.workflow import WorkflowStage, WorkflowStatus
@@ -41,6 +42,7 @@ from iac_agent.providers.aws.renderer import AWSResourceRenderer
 from iac_agent.providers.aws.s3.contract import S3ResourceSpec
 from iac_agent.providers.aws.terraform_render import GeneratedTerraformComposition
 from iac_agent.security.checkov import CheckovScanResult
+from iac_agent.security.checkov_profiles import checkov_profile_for
 
 # ---------------------------------------------------------------------------
 # Fakes (deliberately duplicated from test_workflow.py rather than shared
@@ -128,10 +130,12 @@ class FakeTerraformRunner:
 class FakeCheckovAdapter:
     def __init__(self, *, result=None):
         self.scan_calls: list = []
+        self.profiles_seen: list = []
         self._result = result if result is not None else _CLEAN_CHECKOV_RESULT
 
-    def scan(self, workspace):
+    def scan(self, workspace, *, profile=None):
         self.scan_calls.append(workspace)
+        self.profiles_seen.append(profile)
         return self._result
 
 
@@ -249,6 +253,25 @@ def test_platform_evaluation_contains_all_three_s3_policies(tmp_path):
         TF_NO_DESTRUCTIVE_CHANGES,
     }
     assert result["platform_evaluation"].overall_status is PolicyStatus.PASS
+
+
+def test_s3_request_gets_the_approved_s3_skip_profile(tmp_path):
+    """Batch 16.5 regression: S3 receives exactly its own approved,
+    documented skip set — no more, no less — selected explicitly via
+    checkov_profile_for(ResourceType.S3), never a hardcoded adapter
+    default."""
+    graph, _, _, checkov, _ = _build(tmp_path)
+    graph.invoke({"request_id": "req-s3-001", "resource_spec": _spec()})
+
+    expected = checkov_profile_for(ResourceType.S3)
+    assert len(checkov.profiles_seen) == 1
+    assert checkov.profiles_seen[0] == expected
+    assert checkov.profiles_seen[0].skipped_checks == (
+        "CKV_AWS_18",
+        "CKV2_AWS_61",
+        "CKV2_AWS_62",
+        "CKV_AWS_144",
+    )
 
 
 def test_versioning_disabled_gives_warn_but_still_routes_to_approval(tmp_path):

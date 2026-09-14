@@ -7,21 +7,28 @@ proven deterministic components:
     terraform_execute   -> TerraformRunner (fmt, init, validate, plan)
     plan_analysis       -> TerraformRunner.show_json + analyze_plan
     platform_policy      -> evaluate_platform_policies
-    checkov_scan         -> CheckovAdapter.scan
+    checkov_scan         -> checkov_profile_for + CheckovAdapter.scan
     security_gate        -> evaluate_security_gate
     approval_gate         -> a durable LangGraph `interrupt()` (Batch 13)
     source_control        -> SourceControlPort (Batch 14)
 
 Batch 16 (Phase 2) generalized this module from SQS-only to any
 supported `AWSResourceSpec` (currently SQS and S3). Nothing about
-`terraform_execute`, `plan_analysis`, `checkov_scan`, `security_gate`,
-`approval_gate`, or the graph's routing needed to change — none of them
-ever inspected the resource spec's type at all. Only `render_terraform`
-(needs the right renderer and trusted-module directory for this
-request's resource type) and the PR/commit text in `source_control`
-(previously hardcoded "SQS") needed to become resource-aware, both via
+`terraform_execute`, `plan_analysis`, `security_gate`, `approval_gate`,
+or the graph's routing needed to change — none of them ever inspected
+the resource spec's type at all. `render_terraform` (needs the right
+renderer and trusted-module directory for this request's resource
+type) and the PR/commit text in `source_control` (previously
+hardcoded "SQS") became resource-aware via
 `iac_agent.providers.aws.resource.resource_type_of`.
 `build_sqs_workflow` remains as a zero-cost backward-compatible alias.
+
+Batch 16.5 made `checkov_scan` resource-aware too: it selects an
+explicit `CheckovScanProfile` via
+`iac_agent.security.checkov_profiles.checkov_profile_for` before
+calling `CheckovAdapter.scan`, rather than the adapter carrying an
+implicit, resource-blind default skip list. `CheckovAdapter` itself
+still has no idea what a "resource type" is.
 
 Each node consumes state, invokes exactly one existing capability, and
 returns only its own state update. None of the underlying business
@@ -115,6 +122,7 @@ from iac_agent.providers.aws.renderer import AWSResourceRenderer
 from iac_agent.providers.aws.resource import AWSResourceSpec, resource_type_of
 from iac_agent.providers.aws.sqs.renderer import TerraformCompositionRenderer
 from iac_agent.security.checkov import CheckovAdapter, CheckovError
+from iac_agent.security.checkov_profiles import checkov_profile_for
 from iac_agent.security.gate import SecurityGateError, evaluate_security_gate
 
 #: Repository root, computed relative to this installed package
@@ -343,7 +351,15 @@ def build_iac_workflow(
 
     def checkov_scan(state: WorkflowState) -> dict:
         try:
-            checkov_result = checkov_adapter.scan(state["workspace"])
+            profile = checkov_profile_for(resource_type_of(state["resource_spec"]))
+        except Exception as exc:  # noqa: BLE001 - a pure deterministic lookup
+            # should never raise for a spec that already reached this node
+            # (render_terraform already validated the resource type), but
+            # fail closed rather than crash the graph.
+            return _error_update(WorkflowStage.CHECKOV, exc)
+
+        try:
+            checkov_result = checkov_adapter.scan(state["workspace"], profile=profile)
         except CheckovError as exc:
             return _error_update(WorkflowStage.CHECKOV, exc)
 

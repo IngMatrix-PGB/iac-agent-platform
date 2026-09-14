@@ -33,3 +33,6 @@ select = ["E", "F", "I", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "real_tool: exercises the real Terraform and/or Checkov binary (not a fake/mock) — classification only, does not affect default collection (Batch 16.5).",
+]

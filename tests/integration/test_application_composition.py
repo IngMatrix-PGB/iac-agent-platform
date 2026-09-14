@@ -30,10 +30,22 @@ from iac_agent.persistence.checkpoints import (
 )
 from iac_agent.providers.aws.sqs.contract import DlqSpec, SQSResourceSpec
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("terraform") is None or shutil.which("checkov") is None,
-    reason="terraform and/or checkov binary not available on PATH",
-)
+pytestmark = [
+    pytest.mark.real_tool,
+    pytest.mark.skipif(
+        shutil.which("terraform") is None or shutil.which("checkov") is None,
+        reason="terraform and/or checkov binary not available on PATH",
+    ),
+]
+
+# Note (Batch 16.5): unlike the other real-tool tests in this
+# directory, these two do NOT use `terraform_test_env` /
+# `TF_PLUGIN_CACHE_DIR` — `open_application` (the real composition
+# root) constructs its own `TerraformRunner()` internally with no
+# test-injection seam for its environment, and adding one purely to
+# satisfy a test would be a production-code change this batch is
+# explicitly scoped to avoid. These two therefore still download their
+# own provider binary copy each run.
 
 _FAKE_TOKEN = SecretStr("fake-test-token-not-real")
 

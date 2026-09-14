@@ -75,7 +75,7 @@ class FakeCheckovAdapter:
     def __init__(self, *, block=False):
         self._block = block
 
-    def scan(self, workspace):
+    def scan(self, workspace, *, profile=None):
         if self._block:
             return CheckovScanResult(
                 findings=(
