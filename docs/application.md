@@ -162,3 +162,14 @@ GitHub verification (see `docs/source-control.md`).
 Nothing in this layer changes that: `TerraformRunner` still has no
 `apply` method, and a GitHub pull request remains Phase 1's terminal
 artifact.
+
+## Live validation record
+
+`scripts/live_github_smoke.py` was run once, through
+`Phase1Application` end to end (`submit` → `resume(APPROVE)`), against
+the project's real repository. It reached `PR_CREATED` with a real,
+still-open pull request. See `docs/source-control.md` for the full
+record (request ID, branch convention, artifact-exclusion result). No
+AWS resource was ever created — the plan stayed credential-free — and
+`state.db` for that run was independently checked afterward to contain
+no token and no raw Terraform/Checkov JSON.
