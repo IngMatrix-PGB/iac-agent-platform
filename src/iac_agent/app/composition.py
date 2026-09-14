@@ -18,6 +18,7 @@ from langgraph.graph.state import CompiledStateGraph
 from pydantic import SecretStr
 
 from iac_agent.app.config import ApplicationConfig
+from iac_agent.domain.source_control import GitCommitIdentity
 from iac_agent.execution.terraform_runner import TerraformRunner
 from iac_agent.git.github import GitHubRepository, GitHubSourceControl, HttpTransport
 from iac_agent.graph.workflow import build_sqs_workflow
@@ -66,6 +67,9 @@ def open_application(
         source_control_port = GitHubSourceControl(
             repository=GitHubRepository(owner=config.github_owner, name=config.github_repository),
             token=github_token.get_secret_value(),
+            commit_identity=GitCommitIdentity(
+                name=config.github_commit_author_name, email=config.github_commit_author_email
+            ),
             transport=github_transport,
         )
         graph = build_sqs_workflow(

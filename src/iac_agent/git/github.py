@@ -12,9 +12,16 @@ CLI).
 
 This module never imports LangGraph, `WorkflowState`, `TerraformRunner`,
 `CheckovAdapter`, or the security gate — it receives only explicit,
-already-resolved source-control inputs (a repository, a token, a file
-mapping, commit/PR text) and knows nothing about the workflow that
-produced them.
+already-resolved source-control inputs (a repository, a token, a
+commit identity, a file mapping, commit/PR text) and knows nothing
+about the workflow that produced them.
+
+Batch 15.5: every commit created here carries an explicit `author` and
+`committer` (from the required `commit_identity` constructor argument)
+in its Git Data API payload — never left to GitHub's default of
+attributing the commit to whichever identity owns the token. This
+module never hardcodes any specific person's name/email; the caller
+(the application composition layer) supplies it.
 """
 
 from __future__ import annotations
@@ -25,7 +32,11 @@ import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from iac_agent.domain.source_control import PullRequestResult, resolve_generated_file_path
+from iac_agent.domain.source_control import (
+    GitCommitIdentity,
+    PullRequestResult,
+    resolve_generated_file_path,
+)
 from iac_agent.git.port import SourceControlConflictError, SourceControlError
 
 #: Verified against https://docs.github.com/en/rest/git (2026-09-13) —
@@ -154,6 +165,12 @@ class GitHubSourceControl:
     private attribute, and never appears in `__repr__`, in any
     `PullRequestResult`, in any raised error, or anywhere else this
     adapter writes output.
+
+    `commit_identity` is required and explicit — this adapter never
+    hardcodes any specific person's name/email, and never lets GitHub's
+    Git Data API silently default a commit's author/committer to
+    whichever identity happens to own the token (see `publish_change`).
+    A caller (the application composition layer) supplies it.
     """
 
     def __init__(
@@ -161,12 +178,14 @@ class GitHubSourceControl:
         *,
         repository: GitHubRepository,
         token: str,
+        commit_identity: GitCommitIdentity,
         transport: HttpTransport | None = None,
     ) -> None:
         if not token:
             raise ValueError("token must not be empty")
         self._repository = repository
         self._token = token
+        self._commit_identity = commit_identity
         self._transport = transport if transport is not None else UrllibHttpTransport()
 
     def __repr__(self) -> str:  # pragma: no cover - trivial, but excludes the token deliberately
@@ -296,10 +315,22 @@ class GitHubSourceControl:
         )
         tree_sha = _require_field(tree, ("sha",), "tree")
 
+        identity = {"name": self._commit_identity.name, "email": self._commit_identity.email}
         commit = self._request_json(
             "POST",
             "/git/commits",
-            json_body={"message": commit_message, "tree": tree_sha, "parents": [base_commit_sha]},
+            json_body={
+                "message": commit_message,
+                "tree": tree_sha,
+                "parents": [base_commit_sha],
+                # Explicit author/committer — never left to GitHub's
+                # "default to the authenticated user" behavior, which
+                # would silently attribute the commit to whichever
+                # identity owns the token rather than this project's
+                # own canonical, explicit commit identity.
+                "author": identity,
+                "committer": identity,
+            },
         )
         commit_sha = _require_field(commit, ("sha",), "commit")
 

@@ -45,11 +45,19 @@ ApplicationConfig(
 | `IAC_AGENT_STATE_DB` | no | `<workspace_root>/state.db` |
 | `GITHUB_OWNER` | **yes** | none |
 | `GITHUB_REPOSITORY` | **yes** | none |
+| `GITHUB_COMMIT_AUTHOR_NAME` | **yes** | none |
+| `GITHUB_COMMIT_AUTHOR_EMAIL` | **yes** | none |
 | `GITHUB_BASE_BRANCH` | no | `main` |
 
-`GITHUB_OWNER` and `GITHUB_REPOSITORY` have no default and raise
-`MissingConfigurationError` if absent — this project never silently
-defaults to a real user or repository.
+`GITHUB_OWNER`, `GITHUB_REPOSITORY`, and the commit-author variables
+have no default and raise `MissingConfigurationError` if absent — this
+project never silently defaults to a real user, repository, or commit
+identity. `GITHUB_COMMIT_AUTHOR_NAME`/`GITHUB_COMMIT_AUTHOR_EMAIL` are
+public metadata (any commit's author is visible in the published
+history) — unlike the token, they are ordinary `ApplicationConfig`
+fields, and `GitHubSourceControl` sends them explicitly on every
+generated commit rather than letting GitHub default a commit's
+author/committer to whichever identity owns the token.
 
 ## The GitHub token stays outside `ApplicationConfig`
 

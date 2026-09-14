@@ -16,7 +16,7 @@ import json
 
 import pytest
 
-from iac_agent.domain.source_control import PullRequestResult
+from iac_agent.domain.source_control import GitCommitIdentity, PullRequestResult
 from iac_agent.git import github as github_module
 from iac_agent.git.github import (
     GitHubApiError,
@@ -32,6 +32,7 @@ from iac_agent.git.port import SourceControlConflictError, SourceControlError
 
 _REPO = GitHubRepository(owner="example-user", name="iac-agent-platform")
 _TOKEN = "fake-test-token-not-real"  # noqa: S105 - deliberately fake, never a real credential
+_COMMIT_IDENTITY = GitCommitIdentity(name="Example Bot", email="example-bot@example.invalid")
 
 
 def _json(status: int, payload: object) -> HttpResponse:
@@ -83,7 +84,9 @@ def _happy_path_responses(*, branch_name: str, file_count: int = 2) -> list[Http
 
 def test_publish_change_happy_path_returns_pull_request_result():
     transport = QueueTransport(_happy_path_responses(branch_name="iac-agent/req-001"))
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     result = adapter.publish_change(
         request_id="req-001",
@@ -105,7 +108,9 @@ def test_publish_change_happy_path_returns_pull_request_result():
 
 def test_publish_change_calls_urls_scoped_to_owner_and_repo():
     transport = QueueTransport(_happy_path_responses(branch_name="iac-agent/req-001", file_count=1))
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     adapter.publish_change(
         request_id="req-001",
@@ -125,7 +130,9 @@ def test_publish_change_calls_urls_scoped_to_owner_and_repo():
 
 def test_publish_change_checks_branch_existence_before_any_write():
     transport = QueueTransport(_happy_path_responses(branch_name="iac-agent/req-001", file_count=1))
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     adapter.publish_change(
         request_id="req-001",
@@ -144,7 +151,9 @@ def test_publish_change_checks_branch_existence_before_any_write():
 
 def test_publish_change_looks_up_base_ref():
     transport = QueueTransport(_happy_path_responses(branch_name="iac-agent/req-001", file_count=1))
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     adapter.publish_change(
         request_id="req-001",
@@ -163,7 +172,9 @@ def test_publish_change_looks_up_base_ref():
 
 def test_publish_change_creates_one_blob_per_file():
     transport = QueueTransport(_happy_path_responses(branch_name="iac-agent/req-001"))
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     adapter.publish_change(
         request_id="req-001",
@@ -183,7 +194,9 @@ def test_publish_change_creates_one_blob_per_file():
 
 def test_publish_change_creates_tree_with_resolved_generated_paths():
     transport = QueueTransport(_happy_path_responses(branch_name="iac-agent/req-001"))
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     adapter.publish_change(
         request_id="req-001",
@@ -206,7 +219,9 @@ def test_publish_change_creates_tree_with_resolved_generated_paths():
 
 def test_publish_change_creates_commit_with_message_and_parent():
     transport = QueueTransport(_happy_path_responses(branch_name="iac-agent/req-001", file_count=1))
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     adapter.publish_change(
         request_id="req-001",
@@ -223,12 +238,47 @@ def test_publish_change_creates_commit_with_message_and_parent():
         "message": "feat(iac): add SQS proposal req-001",
         "tree": "new-tree-sha",
         "parents": ["base-commit-sha"],
+        "author": {"name": "Example Bot", "email": "example-bot@example.invalid"},
+        "committer": {"name": "Example Bot", "email": "example-bot@example.invalid"},
+    }
+
+
+def test_publish_change_commit_payload_uses_the_injected_identity_not_a_default():
+    """A different `commit_identity` must produce a different author/
+    committer payload — proving the adapter actually uses the injected
+    value rather than any hardcoded or GitHub-inferred default."""
+    other_identity = GitCommitIdentity(name="Someone Else", email="someone-else@example.invalid")
+    transport = QueueTransport(_happy_path_responses(branch_name="iac-agent/req-001", file_count=1))
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=other_identity, transport=transport
+    )
+
+    adapter.publish_change(
+        request_id="req-001",
+        base_branch="main",
+        branch_name="iac-agent/req-001",
+        files={"main.tf": "x"},
+        commit_message="m",
+        pr_title="t",
+        pr_body="b",
+    )
+
+    commit_call = next(c for c in transport.calls if c["url"].endswith("/git/commits"))
+    assert commit_call["json_body"]["author"] == {
+        "name": "Someone Else",
+        "email": "someone-else@example.invalid",
+    }
+    assert commit_call["json_body"]["committer"] == {
+        "name": "Someone Else",
+        "email": "someone-else@example.invalid",
     }
 
 
 def test_publish_change_creates_branch_ref():
     transport = QueueTransport(_happy_path_responses(branch_name="iac-agent/req-001", file_count=1))
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     adapter.publish_change(
         request_id="req-001",
@@ -247,7 +297,9 @@ def test_publish_change_creates_branch_ref():
 
 def test_publish_change_creates_pull_request_with_title_head_base_body():
     transport = QueueTransport(_happy_path_responses(branch_name="iac-agent/req-001", file_count=1))
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     adapter.publish_change(
         request_id="req-001",
@@ -270,7 +322,9 @@ def test_publish_change_creates_pull_request_with_title_head_base_body():
 
 def test_every_request_carries_authorization_header():
     transport = QueueTransport(_happy_path_responses(branch_name="iac-agent/req-001", file_count=1))
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     adapter.publish_change(
         request_id="req-001",
@@ -288,7 +342,9 @@ def test_every_request_carries_authorization_header():
 
 def test_every_request_carries_expected_api_version_and_accept_headers():
     transport = QueueTransport(_happy_path_responses(branch_name="iac-agent/req-001", file_count=1))
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     adapter.publish_change(
         request_id="req-001",
@@ -313,7 +369,9 @@ def test_every_request_carries_expected_api_version_and_accept_headers():
 
 def test_existing_branch_raises_conflict_before_any_write():
     transport = QueueTransport([_json(200, {"object": {"sha": "existing-sha"}})])
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     with pytest.raises(SourceControlConflictError):
         adapter.publish_change(
@@ -333,7 +391,9 @@ def test_existing_branch_raises_conflict_before_any_write():
 
 def test_conflict_error_is_a_source_control_conflict_error():
     transport = QueueTransport([_json(200, {"object": {"sha": "existing-sha"}})])
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     with pytest.raises(GitHubConflictError) as excinfo:
         adapter.publish_change(
@@ -356,7 +416,9 @@ def test_conflict_error_is_a_source_control_conflict_error():
 @pytest.mark.parametrize("status", [401, 403])
 def test_401_403_raise_authentication_error(status):
     transport = QueueTransport([_json(status, {"message": "Bad credentials"})])
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     with pytest.raises(GitHubAuthenticationError):
         adapter._request_json("GET", "/git/ref/heads/main")
@@ -364,7 +426,9 @@ def test_401_403_raise_authentication_error(status):
 
 def test_404_on_a_required_lookup_raises_api_error():
     transport = QueueTransport([_json(404, {"message": "Not Found"})])
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     with pytest.raises(GitHubApiError):
         adapter._request_json("GET", "/git/commits/deadbeef")
@@ -373,7 +437,9 @@ def test_404_on_a_required_lookup_raises_api_error():
 @pytest.mark.parametrize("status", [409, 422])
 def test_409_422_raise_conflict_error(status):
     transport = QueueTransport([_json(status, {"message": "Reference already exists"})])
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     with pytest.raises(GitHubConflictError):
         adapter._request_json("POST", "/git/refs", json_body={"ref": "x", "sha": "y"})
@@ -382,7 +448,9 @@ def test_409_422_raise_conflict_error(status):
 @pytest.mark.parametrize("status", [429, 500, 502, 503])
 def test_429_5xx_raise_api_error_without_retry(status):
     transport = QueueTransport([_json(status, {"message": "rate limited or server error"})])
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     with pytest.raises(GitHubApiError):
         adapter._request_json("GET", "/git/ref/heads/main")
@@ -393,7 +461,9 @@ def test_429_5xx_raise_api_error_without_retry(status):
 
 def test_malformed_json_raises_response_error():
     transport = QueueTransport([HttpResponse(status=201, body=b"not json{{{")])
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     with pytest.raises(GitHubResponseError):
         adapter._request_json("POST", "/git/blobs", json_body={"content": "x", "encoding": "utf-8"})
@@ -405,7 +475,9 @@ def test_missing_expected_field_raises_response_error():
     responses = _happy_path_responses(branch_name="iac-agent/req-001", file_count=1)
     responses[3] = _json(201, {"url": "https://example.invalid/blob/1"})
     transport = QueueTransport(responses)
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     with pytest.raises(GitHubResponseError):
         adapter.publish_change(
@@ -421,7 +493,9 @@ def test_missing_expected_field_raises_response_error():
 
 def test_transport_error_raises_source_control_error():
     transport = RaisingTransport(ConnectionError("connection refused"))
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     with pytest.raises(SourceControlError):
         adapter._request_json("GET", "/git/ref/heads/main")
@@ -433,13 +507,20 @@ def test_transport_error_raises_source_control_error():
 
 
 def test_token_never_appears_in_repr():
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=QueueTransport([]))
+    adapter = GitHubSourceControl(
+        repository=_REPO,
+        token=_TOKEN,
+        commit_identity=_COMMIT_IDENTITY,
+        transport=QueueTransport([]),
+    )
     assert _TOKEN not in repr(adapter)
 
 
 def test_token_never_appears_in_a_raised_error_message():
     transport = QueueTransport([_json(401, {"message": "Bad credentials"})])
-    adapter = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     with pytest.raises(GitHubAuthenticationError) as excinfo:
         adapter._request_json("GET", "/git/ref/heads/main")
@@ -448,7 +529,12 @@ def test_token_never_appears_in_a_raised_error_message():
 
 def test_empty_token_is_rejected_at_construction():
     with pytest.raises(ValueError):
-        GitHubSourceControl(repository=_REPO, token="", transport=QueueTransport([]))
+        GitHubSourceControl(
+            repository=_REPO,
+            token="",
+            commit_identity=_COMMIT_IDENTITY,
+            transport=QueueTransport([]),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -482,3 +568,48 @@ def test_github_adapter_does_not_import_langgraph_or_workflow_internals():
 def test_github_adapter_does_not_hardcode_the_real_repository():
     source = inspect.getsource(github_module)
     assert "IngMatrix-PGB" not in source
+
+
+def test_github_adapter_does_not_hardcode_any_commit_identity():
+    """No specific person's name/email is ever hardcoded here — every
+    commit's author/committer comes only from the injected
+    `GitCommitIdentity` (see the constructor and `publish_change`)."""
+    source = inspect.getsource(github_module)
+    for forbidden in ("IngMatrix-PGB", "Claude", "anthropic.com", "Pablo"):
+        assert forbidden not in source
+
+
+def test_github_adapter_generates_no_co_authored_by_trailer():
+    source = inspect.getsource(github_module)
+    assert "Co-authored-by" not in source
+    assert "Co-Authored-By" not in source
+
+
+def test_publish_change_never_omits_author_or_committer_from_commit_payload():
+    """Defense-in-depth: even if a future edit forgot to thread
+    `commit_identity` through, this test would fail — the commit
+    payload must always carry explicit author and committer, never
+    leaving GitHub to default them to the authenticated token's own
+    identity."""
+    transport = QueueTransport(_happy_path_responses(branch_name="iac-agent/req-001", file_count=1))
+    adapter = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
+
+    adapter.publish_change(
+        request_id="req-001",
+        base_branch="main",
+        branch_name="iac-agent/req-001",
+        files={"main.tf": "x"},
+        commit_message="m",
+        pr_title="t",
+        pr_body="b",
+    )
+
+    commit_call = next(c for c in transport.calls if c["url"].endswith("/git/commits"))
+    assert "author" in commit_call["json_body"]
+    assert "committer" in commit_call["json_body"]
+    assert commit_call["json_body"]["author"]["name"]
+    assert commit_call["json_body"]["author"]["email"]
+    assert commit_call["json_body"]["committer"]["name"]
+    assert commit_call["json_body"]["committer"]["email"]

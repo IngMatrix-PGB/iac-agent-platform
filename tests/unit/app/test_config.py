@@ -24,6 +24,8 @@ _FULL_ENV = {
     "GITHUB_REPOSITORY": "iac-agent-platform",
     "GITHUB_BASE_BRANCH": "main",
     "GITHUB_TOKEN": "fake-token-not-real",  # noqa: S105 - deliberately fake
+    "GITHUB_COMMIT_AUTHOR_NAME": "Example Bot",
+    "GITHUB_COMMIT_AUTHOR_EMAIL": "example-bot@example.invalid",
 }
 
 
@@ -35,6 +37,8 @@ def test_config_loader_reads_all_supported_variables():
     assert config.github_owner == "example-user"
     assert config.github_repository == "iac-agent-platform"
     assert config.github_base_branch == "main"
+    assert config.github_commit_author_name == "Example Bot"
+    assert config.github_commit_author_email == "example-bot@example.invalid"
 
 
 def test_config_loader_defaults_state_db_under_workspace_root():
@@ -78,6 +82,30 @@ def test_missing_github_repository_is_rejected():
 def test_empty_github_owner_is_rejected():
     env = dict(_FULL_ENV)
     env["GITHUB_OWNER"] = ""
+    with pytest.raises(MissingConfigurationError):
+        load_application_config_from_env(env)
+
+
+def test_missing_github_commit_author_name_is_rejected():
+    env = dict(_FULL_ENV)
+    del env["GITHUB_COMMIT_AUTHOR_NAME"]
+    with pytest.raises(MissingConfigurationError):
+        load_application_config_from_env(env)
+
+
+def test_missing_github_commit_author_email_is_rejected():
+    env = dict(_FULL_ENV)
+    del env["GITHUB_COMMIT_AUTHOR_EMAIL"]
+    with pytest.raises(MissingConfigurationError):
+        load_application_config_from_env(env)
+
+
+def test_config_loader_never_defaults_commit_author_to_a_real_person():
+    """No safe default exists for commit-author identity — every
+    caller must state it explicitly, exactly like GitHub owner/repo."""
+    env = dict(_FULL_ENV)
+    del env["GITHUB_COMMIT_AUTHOR_NAME"]
+    del env["GITHUB_COMMIT_AUTHOR_EMAIL"]
     with pytest.raises(MissingConfigurationError):
         load_application_config_from_env(env)
 

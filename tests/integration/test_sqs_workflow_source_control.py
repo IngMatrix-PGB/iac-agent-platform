@@ -27,7 +27,7 @@ from pathlib import Path
 from langgraph.types import Command
 
 from iac_agent.domain.approval import ApprovalDecision
-from iac_agent.domain.source_control import PullRequestResult
+from iac_agent.domain.source_control import GitCommitIdentity, PullRequestResult
 from iac_agent.domain.workflow import WorkflowStage, WorkflowStatus
 from iac_agent.execution.terraform_runner import CommandResult
 from iac_agent.git.github import GitHubRepository, GitHubSourceControl, HttpResponse, HttpTransport
@@ -39,6 +39,7 @@ from iac_agent.security.checkov import CheckovScanResult
 
 _REPO = GitHubRepository(owner="example-user", name="iac-agent-platform")
 _TOKEN = "fake-test-token-not-real"  # noqa: S105 - deliberately fake
+_COMMIT_IDENTITY = GitCommitIdentity(name="Example Bot", email="example-bot@example.invalid")
 
 _PLAN_JSON = {
     "resource_changes": [
@@ -153,7 +154,9 @@ def test_real_github_adapter_publishes_approved_change_through_the_graph(tmp_pat
     config = workflow_config(request_id)
 
     transport = QueueGitHubTransport(_fake_github_responses(branch_name))
-    source_control = GitHubSourceControl(repository=_REPO, token=_TOKEN, transport=transport)
+    source_control = GitHubSourceControl(
+        repository=_REPO, token=_TOKEN, commit_identity=_COMMIT_IDENTITY, transport=transport
+    )
 
     with open_sqlite_checkpointer(db_path) as saver:
         graph = _build_graph(workspace_root, saver, source_control)

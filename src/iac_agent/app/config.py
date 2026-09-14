@@ -51,13 +51,15 @@ _ENV_GITHUB_OWNER = "GITHUB_OWNER"
 _ENV_GITHUB_REPOSITORY = "GITHUB_REPOSITORY"
 _ENV_GITHUB_BASE_BRANCH = "GITHUB_BASE_BRANCH"
 _ENV_GITHUB_TOKEN = "GITHUB_TOKEN"
+_ENV_GITHUB_COMMIT_AUTHOR_NAME = "GITHUB_COMMIT_AUTHOR_NAME"
+_ENV_GITHUB_COMMIT_AUTHOR_EMAIL = "GITHUB_COMMIT_AUTHOR_EMAIL"
 
 
 class MissingConfigurationError(ValueError):
     """A required configuration value has no safe default and was not
-    supplied — GitHub owner/repository, or (for GitHub-enabled runtime)
-    the token. This project never silently defaults to a real user or
-    repository."""
+    supplied — GitHub owner/repository/commit-author identity, or (for
+    GitHub-enabled runtime) the token. This project never silently
+    defaults to a real user, repository, or commit identity."""
 
 
 @dataclass(frozen=True)
@@ -68,6 +70,13 @@ class ApplicationConfig:
     separately (see `load_github_token_from_env` and
     `iac_agent.app.composition.open_application`) so that no code path
     can accidentally serialize or print it via this object.
+
+    `github_commit_author_name`/`github_commit_author_email` ARE public
+    metadata (any commit's author is always visible in the published
+    history) and safe to hold here — unlike the token, there is no
+    reason to keep them out of a repr. They still have no default:
+    this project never silently attributes a generated commit to any
+    specific person.
     """
 
     workspace_root: Path
@@ -75,6 +84,8 @@ class ApplicationConfig:
     terraform_module_path: Path
     github_owner: str
     github_repository: str
+    github_commit_author_name: str
+    github_commit_author_email: str
     github_base_branch: str = DEFAULT_GITHUB_BASE_BRANCH
 
 
@@ -82,11 +93,13 @@ def load_application_config_from_env(env: Mapping[str, str] | None = None) -> Ap
     """Build `ApplicationConfig` from environment variables.
 
     Supported variables:
-        IAC_AGENT_WORKSPACE_ROOT  (default: "artifacts")
-        IAC_AGENT_STATE_DB        (default: "<workspace_root>/state.db")
-        GITHUB_OWNER              (required, no default)
-        GITHUB_REPOSITORY         (required, no default)
-        GITHUB_BASE_BRANCH        (default: "main")
+        IAC_AGENT_WORKSPACE_ROOT      (default: "artifacts")
+        IAC_AGENT_STATE_DB            (default: "<workspace_root>/state.db")
+        GITHUB_OWNER                  (required, no default)
+        GITHUB_REPOSITORY             (required, no default)
+        GITHUB_COMMIT_AUTHOR_NAME     (required, no default)
+        GITHUB_COMMIT_AUTHOR_EMAIL    (required, no default)
+        GITHUB_BASE_BRANCH            (default: "main")
 
     `env` defaults to `os.environ`; tests inject a plain dict instead of
     mutating the real process environment.
@@ -113,6 +126,20 @@ def load_application_config_from_env(env: Mapping[str, str] | None = None) -> Ap
             "GitHub repository"
         )
 
+    commit_author_name = env.get(_ENV_GITHUB_COMMIT_AUTHOR_NAME)
+    if not commit_author_name:
+        raise MissingConfigurationError(
+            f"{_ENV_GITHUB_COMMIT_AUTHOR_NAME} must be set explicitly — there is no default "
+            "commit author name"
+        )
+
+    commit_author_email = env.get(_ENV_GITHUB_COMMIT_AUTHOR_EMAIL)
+    if not commit_author_email:
+        raise MissingConfigurationError(
+            f"{_ENV_GITHUB_COMMIT_AUTHOR_EMAIL} must be set explicitly — there is no default "
+            "commit author email"
+        )
+
     github_base_branch = env.get(_ENV_GITHUB_BASE_BRANCH, DEFAULT_GITHUB_BASE_BRANCH)
 
     return ApplicationConfig(
@@ -121,6 +148,8 @@ def load_application_config_from_env(env: Mapping[str, str] | None = None) -> Ap
         terraform_module_path=_DEFAULT_TERRAFORM_MODULE_PATH,
         github_owner=github_owner,
         github_repository=github_repository,
+        github_commit_author_name=commit_author_name,
+        github_commit_author_email=commit_author_email,
         github_base_branch=github_base_branch,
     )
 

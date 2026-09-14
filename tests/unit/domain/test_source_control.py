@@ -1,7 +1,8 @@
 """Unit tests for the source-control domain model and naming/path rules
-(Batch 14): `PullRequestResult`, `derive_branch_name`, and
-`resolve_generated_file_path`. No HTTP, no Git, no GitHub adapter —
-those are covered in tests/unit/git/test_github.py.
+(Batches 14-15.5): `PullRequestResult`, `GitCommitIdentity`,
+`derive_branch_name`, and `resolve_generated_file_path`. No HTTP, no
+Git, no GitHub adapter — those are covered in
+tests/unit/git/test_github.py.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import pytest
 
 from iac_agent.domain.source_control import (
     GENERATED_FILES_ROOT,
+    GitCommitIdentity,
     PullRequestResult,
     derive_branch_name,
     resolve_generated_file_path,
@@ -140,3 +142,40 @@ def test_resolve_generated_file_path_rejects_backslash_path():
 def test_resolve_generated_file_path_rejects_unsafe_request_id():
     with pytest.raises(ValueError):
         resolve_generated_file_path("../escape", "main.tf")
+
+
+# ---------------------------------------------------------------------------
+# GitCommitIdentity (Batch 15.5)
+# ---------------------------------------------------------------------------
+
+
+def test_git_commit_identity_fields():
+    identity = GitCommitIdentity(name="Example Bot", email="bot@example.invalid")
+    assert identity.name == "Example Bot"
+    assert identity.email == "bot@example.invalid"
+
+
+def test_git_commit_identity_is_immutable():
+    identity = GitCommitIdentity(name="Example Bot", email="bot@example.invalid")
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        identity.name = "Someone Else"  # type: ignore[misc]
+
+
+def test_git_commit_identity_rejects_empty_name():
+    with pytest.raises(ValueError, match="name"):
+        GitCommitIdentity(name="", email="bot@example.invalid")
+
+
+def test_git_commit_identity_rejects_empty_email():
+    with pytest.raises(ValueError, match="email"):
+        GitCommitIdentity(name="Example Bot", email="")
+
+
+def test_git_commit_identity_rejects_email_without_at_sign():
+    with pytest.raises(ValueError, match="email"):
+        GitCommitIdentity(name="Example Bot", email="not-an-email")
+
+
+def test_git_commit_identity_has_no_token_field():
+    field_names = {f.name for f in dataclasses.fields(GitCommitIdentity)}
+    assert field_names == {"name", "email"}

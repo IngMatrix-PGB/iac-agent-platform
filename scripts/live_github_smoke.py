@@ -58,6 +58,13 @@ _EXPECTED_BASE_BRANCH = "main"
 _EXPECTED_LOCAL_BRANCH = "feat/phase-1-sqs-vertical-slice"
 _REQUEST_ID = "phase1-sqs-live-smoke"
 
+# Public commit metadata (not a secret) for this specific authorized live
+# target only — GitHubSourceControl itself remains generic and never
+# hardcodes this; see iac_agent.app.config for the generic
+# GITHUB_COMMIT_AUTHOR_NAME/GITHUB_COMMIT_AUTHOR_EMAIL configuration.
+_COMMIT_AUTHOR_NAME = "IngMatrix-PGB"
+_COMMIT_AUTHOR_EMAIL = "167713460+IngMatrix-PGB@users.noreply.github.com"
+
 _API_BASE = "https://api.github.com"
 _API_VERSION = "2026-03-10"
 
@@ -195,6 +202,8 @@ def main() -> int:
         terraform_module_path=_REPO_ROOT / "terraform" / "modules" / "sqs",
         github_owner=_EXPECTED_OWNER,
         github_repository=_EXPECTED_REPOSITORY,
+        github_commit_author_name=_COMMIT_AUTHOR_NAME,
+        github_commit_author_email=_COMMIT_AUTHOR_EMAIL,
         github_base_branch=_EXPECTED_BASE_BRANCH,
     )
 

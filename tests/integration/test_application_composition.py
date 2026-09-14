@@ -73,6 +73,8 @@ def _config(tmp_path) -> ApplicationConfig:
         "GITHUB_OWNER": "example-user",
         "GITHUB_REPOSITORY": "iac-agent-platform",
         "GITHUB_BASE_BRANCH": "main",
+        "GITHUB_COMMIT_AUTHOR_NAME": "Example Bot",
+        "GITHUB_COMMIT_AUTHOR_EMAIL": "example-bot@example.invalid",
     }
     return load_application_config_from_env(env)
 

@@ -53,6 +53,30 @@ class PullRequestResult:
     base_branch: str
 
 
+@dataclass(frozen=True)
+class GitCommitIdentity:
+    """The explicit author/committer identity for a published change's
+    Git commit(s).
+
+    Public metadata (a commit author name/email is always visible in
+    the published history) — never a secret, and never the same thing
+    as the GitHub token. `GitHubSourceControl` never infers this from
+    whichever identity happens to own the token: every commit it
+    creates states this explicitly, on purpose, so a proposal's
+    authorship is never left to GitHub's own "default to the
+    authenticated user" behavior.
+    """
+
+    name: str
+    email: str
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("name must not be empty")
+        if not self.email or "@" not in self.email:
+            raise ValueError(f"email must look like an email address, got {self.email!r}")
+
+
 def derive_branch_name(request_id: str) -> str:
     """Deterministically derive the feature branch name for `request_id`.
 
