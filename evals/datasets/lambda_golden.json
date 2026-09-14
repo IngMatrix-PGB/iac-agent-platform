@@ -1,0 +1,451 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "secure_basic_function",
+      "description": "A minimal valid function using only the name and handler, with every other field left at its safe default (arm64, 256 MB, 30 s timeout, tracing Active, 365-day log retention).",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler"
+      },
+      "expected": {
+        "valid": true,
+        "function_name": "orders-processor",
+        "handler": "app.handler",
+        "architecture": "arm64",
+        "memory_size_mb": 256,
+        "timeout_seconds": 30,
+        "reserved_concurrency": null,
+        "tracing_mode": "Active",
+        "overall_security_status": "warn"
+      }
+    },
+    {
+      "id": "architecture_x86_64",
+      "description": "A function explicitly configured for the x86_64 architecture.",
+      "input": {
+        "name": "legacy-processor",
+        "handler": "app.handler",
+        "architecture": "x86_64",
+        "reserved_concurrency": 5
+      },
+      "expected": {
+        "valid": true,
+        "function_name": "legacy-processor",
+        "handler": "app.handler",
+        "architecture": "x86_64",
+        "memory_size_mb": 256,
+        "timeout_seconds": 30,
+        "reserved_concurrency": 5,
+        "tracing_mode": "Active",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "architecture_arm64_explicit",
+      "description": "A function explicitly configured for the arm64 architecture (the default), still passing.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "architecture": "arm64",
+        "reserved_concurrency": 5
+      },
+      "expected": {
+        "valid": true,
+        "function_name": "orders-processor",
+        "handler": "app.handler",
+        "architecture": "arm64",
+        "memory_size_mb": 256,
+        "timeout_seconds": 30,
+        "reserved_concurrency": 5,
+        "tracing_mode": "Active",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "valid_minimum_memory",
+      "description": "The smallest memory size Lambda itself allows (128 MB).",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "memory_size_mb": 128,
+        "reserved_concurrency": 5
+      },
+      "expected": {
+        "valid": true,
+        "function_name": "orders-processor",
+        "handler": "app.handler",
+        "architecture": "arm64",
+        "memory_size_mb": 128,
+        "timeout_seconds": 30,
+        "reserved_concurrency": 5,
+        "tracing_mode": "Active",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "valid_maximum_memory",
+      "description": "The largest memory size Lambda itself allows (10,240 MB), per the canonical Lambda quotas documentation.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "memory_size_mb": 10240,
+        "reserved_concurrency": 5
+      },
+      "expected": {
+        "valid": true,
+        "function_name": "orders-processor",
+        "handler": "app.handler",
+        "architecture": "arm64",
+        "memory_size_mb": 10240,
+        "timeout_seconds": 30,
+        "reserved_concurrency": 5,
+        "tracing_mode": "Active",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "invalid_memory_below_minimum",
+      "description": "A memory size one below the 128 MB minimum, which must be rejected.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "memory_size_mb": 127
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_memory_above_maximum",
+      "description": "A memory size one above the 10,240 MB maximum, which must be rejected.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "memory_size_mb": 10241
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "valid_minimum_timeout",
+      "description": "The smallest timeout Lambda itself allows (1 second).",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "timeout_seconds": 1,
+        "reserved_concurrency": 5
+      },
+      "expected": {
+        "valid": true,
+        "function_name": "orders-processor",
+        "handler": "app.handler",
+        "architecture": "arm64",
+        "memory_size_mb": 256,
+        "timeout_seconds": 1,
+        "reserved_concurrency": 5,
+        "tracing_mode": "Active",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "valid_maximum_timeout",
+      "description": "The largest timeout Lambda itself allows (900 seconds / 15 minutes).",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "timeout_seconds": 900,
+        "reserved_concurrency": 5
+      },
+      "expected": {
+        "valid": true,
+        "function_name": "orders-processor",
+        "handler": "app.handler",
+        "architecture": "arm64",
+        "memory_size_mb": 256,
+        "timeout_seconds": 900,
+        "reserved_concurrency": 5,
+        "tracing_mode": "Active",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "invalid_timeout_above_maximum",
+      "description": "A timeout one above the 900-second maximum, which must be rejected.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "timeout_seconds": 901
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_timeout_zero",
+      "description": "A timeout of zero seconds, below the 1-second minimum, which must be rejected.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "timeout_seconds": 0
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "tracing_active_explicit",
+      "description": "X-Ray tracing explicitly set to Active (the default), passing the tracing policy.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "tracing_mode": "Active",
+        "reserved_concurrency": 5
+      },
+      "expected": {
+        "valid": true,
+        "function_name": "orders-processor",
+        "handler": "app.handler",
+        "architecture": "arm64",
+        "memory_size_mb": 256,
+        "timeout_seconds": 30,
+        "reserved_concurrency": 5,
+        "tracing_mode": "Active",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "tracing_pass_through_warns",
+      "description": "A valid function with X-Ray tracing set to PassThrough — a legitimate but risk-flagged configuration, proving WARN is a real non-blocking Lambda outcome, exactly as it is for SQS/S3/DynamoDB.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "tracing_mode": "PassThrough",
+        "reserved_concurrency": 5
+      },
+      "expected": {
+        "valid": true,
+        "function_name": "orders-processor",
+        "handler": "app.handler",
+        "architecture": "arm64",
+        "memory_size_mb": 256,
+        "timeout_seconds": 30,
+        "reserved_concurrency": 5,
+        "tracing_mode": "PassThrough",
+        "overall_security_status": "warn"
+      }
+    },
+    {
+      "id": "reserved_concurrency_set",
+      "description": "A function with an explicit reserved-concurrency limit, passing the reserved-concurrency policy.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "reserved_concurrency": 10
+      },
+      "expected": {
+        "valid": true,
+        "function_name": "orders-processor",
+        "handler": "app.handler",
+        "architecture": "arm64",
+        "memory_size_mb": 256,
+        "timeout_seconds": 30,
+        "reserved_concurrency": 10,
+        "tracing_mode": "Active",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "reserved_concurrency_zero_is_distinct_from_omitted",
+      "description": "Reserved concurrency explicitly set to zero (fully throttled) is a distinct, legitimate configured value from omitting it entirely — it still counts as 'explicitly configured' for the recommendation policy.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "reserved_concurrency": 0
+      },
+      "expected": {
+        "valid": true,
+        "function_name": "orders-processor",
+        "handler": "app.handler",
+        "architecture": "arm64",
+        "memory_size_mb": 256,
+        "timeout_seconds": 30,
+        "reserved_concurrency": 0,
+        "tracing_mode": "Active",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "reserved_concurrency_omitted_warns",
+      "description": "A valid function with reserved concurrency left unset (the default) — a legitimate choice for some workloads, surfaced as WARN, never force-corrected.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler"
+      },
+      "expected": {
+        "valid": true,
+        "function_name": "orders-processor",
+        "handler": "app.handler",
+        "architecture": "arm64",
+        "memory_size_mb": 256,
+        "timeout_seconds": 30,
+        "reserved_concurrency": null,
+        "tracing_mode": "Active",
+        "overall_security_status": "warn"
+      }
+    },
+    {
+      "id": "invalid_negative_reserved_concurrency",
+      "description": "A negative reserved-concurrency value, which must be rejected.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "reserved_concurrency": -1
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "valid_environment_variables",
+      "description": "A valid function carrying non-reserved environment variables.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "environment_variables": {"LOG_LEVEL": "INFO", "STAGE": "production"},
+        "reserved_concurrency": 5
+      },
+      "expected": {
+        "valid": true,
+        "function_name": "orders-processor",
+        "handler": "app.handler",
+        "architecture": "arm64",
+        "memory_size_mb": 256,
+        "timeout_seconds": 30,
+        "reserved_concurrency": 5,
+        "tracing_mode": "Active",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "invalid_reserved_environment_variable_name",
+      "description": "An attempt to set an environment variable using a name reserved by the Lambda runtime itself (AWS_REGION), which must be rejected.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "environment_variables": {"AWS_REGION": "us-east-1"}
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_environment_variable_name_pattern",
+      "description": "An environment variable name that does not start with a letter, which must be rejected.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "environment_variables": {"1LEVEL": "INFO"}
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_handler_format",
+      "description": "A handler string missing the required 'module.function' dot-separated form, which must be rejected.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "not-a-valid-handler"
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "valid_tags",
+      "description": "A valid function carrying explicit tags — tags are metadata-only and must never affect security evaluation.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "tags": {"Service": "orders", "Environment": "production"},
+        "reserved_concurrency": 5
+      },
+      "expected": {
+        "valid": true,
+        "function_name": "orders-processor",
+        "handler": "app.handler",
+        "architecture": "arm64",
+        "memory_size_mb": 256,
+        "timeout_seconds": 30,
+        "reserved_concurrency": 5,
+        "tracing_mode": "Active",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "custom_log_retention",
+      "description": "A function with an explicit, non-default (but valid) CloudWatch Logs retention value.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "log_retention_days": 90,
+        "reserved_concurrency": 5
+      },
+      "expected": {
+        "valid": true,
+        "function_name": "orders-processor",
+        "handler": "app.handler",
+        "architecture": "arm64",
+        "memory_size_mb": 256,
+        "timeout_seconds": 30,
+        "reserved_concurrency": 5,
+        "tracing_mode": "Active",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "invalid_log_retention_value",
+      "description": "A log retention value outside CloudWatch Logs' own enumerated retentionInDays set, which must be rejected.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler",
+        "log_retention_days": 45
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_function_name_too_long",
+      "description": "A function name above the 64-character maximum, which must be rejected.",
+      "input": {
+        "name": "a-function-name-that-is-far-too-long-to-be-a-valid-lambda-function-name-at-all",
+        "handler": "app.handler"
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "deterministic_defaults",
+      "description": "Constructing the same minimal input twice must yield identical field values — the deterministic-defaults counterpart to the SQS/S3/DynamoDB golden datasets' equivalent scenario.",
+      "input": {
+        "name": "orders-processor",
+        "handler": "app.handler"
+      },
+      "expected": {
+        "valid": true,
+        "function_name": "orders-processor",
+        "handler": "app.handler",
+        "architecture": "arm64",
+        "memory_size_mb": 256,
+        "timeout_seconds": 30,
+        "reserved_concurrency": null,
+        "tracing_mode": "Active",
+        "overall_security_status": "warn"
+      }
+    }
+  ]
+}
