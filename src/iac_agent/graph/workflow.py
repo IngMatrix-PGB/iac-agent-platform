@@ -1,15 +1,27 @@
-"""Deterministic LangGraph orchestration of the SQS pipeline.
+"""Deterministic LangGraph orchestration of the Phase 1/2 AWS pipeline.
 
-`build_sqs_workflow` wires seven narrow nodes around the already-
+`build_iac_workflow` wires eight narrow nodes around the already-
 proven deterministic components:
 
-    render_terraform   -> TerraformCompositionRenderer
+    render_terraform   -> AWSResourceRenderer (dispatches SQS/S3)
     terraform_execute   -> TerraformRunner (fmt, init, validate, plan)
     plan_analysis       -> TerraformRunner.show_json + analyze_plan
     platform_policy      -> evaluate_platform_policies
     checkov_scan         -> CheckovAdapter.scan
     security_gate        -> evaluate_security_gate
     approval_gate         -> a durable LangGraph `interrupt()` (Batch 13)
+    source_control        -> SourceControlPort (Batch 14)
+
+Batch 16 (Phase 2) generalized this module from SQS-only to any
+supported `AWSResourceSpec` (currently SQS and S3). Nothing about
+`terraform_execute`, `plan_analysis`, `checkov_scan`, `security_gate`,
+`approval_gate`, or the graph's routing needed to change — none of them
+ever inspected the resource spec's type at all. Only `render_terraform`
+(needs the right renderer and trusted-module directory for this
+request's resource type) and the PR/commit text in `source_control`
+(previously hardcoded "SQS") needed to become resource-aware, both via
+`iac_agent.providers.aws.resource.resource_type_of`.
+`build_sqs_workflow` remains as a zero-cost backward-compatible alias.
 
 Each node consumes state, invokes exactly one existing capability, and
 returns only its own state update. None of the underlying business
@@ -71,6 +83,7 @@ independent layer of the same protection).
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from pathlib import Path
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -84,6 +97,7 @@ from iac_agent.domain.approval import (
     parse_approval_decision,
 )
 from iac_agent.domain.plan import PlanSummary
+from iac_agent.domain.resource import ResourceType
 from iac_agent.domain.security import PolicyStatus, SecurityGateResult
 from iac_agent.domain.source_control import derive_branch_name
 from iac_agent.domain.workflow import (
@@ -97,15 +111,22 @@ from iac_agent.execution.terraform_runner import TerraformError, TerraformRunner
 from iac_agent.git.port import SourceControlError, SourceControlPort
 from iac_agent.graph.state import WorkflowState
 from iac_agent.policies.platform import evaluate_platform_policies
+from iac_agent.providers.aws.renderer import AWSResourceRenderer
+from iac_agent.providers.aws.resource import AWSResourceSpec, resource_type_of
 from iac_agent.providers.aws.sqs.renderer import TerraformCompositionRenderer
 from iac_agent.security.checkov import CheckovAdapter, CheckovError
 from iac_agent.security.gate import SecurityGateError, evaluate_security_gate
 
-#: Default location of the trusted SQS module, computed relative to
-#: this installed package (src/iac_agent/graph/workflow.py -> repo
-#: root -> terraform/modules/sqs). Overridable at construction time;
-#: never inferred from the process working directory.
-_DEFAULT_TRUSTED_MODULE_DIR = Path(__file__).resolve().parents[3] / "terraform" / "modules" / "sqs"
+#: Repository root, computed relative to this installed package
+#: (src/iac_agent/graph/workflow.py -> repo root).
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+#: Default trusted-module directory per resource type. Overridable at
+#: construction time; never inferred from the process working directory.
+_DEFAULT_TRUSTED_MODULE_DIRS: dict[ResourceType, Path] = {
+    ResourceType.SQS: _REPO_ROOT / "terraform" / "modules" / "sqs",
+    ResourceType.S3: _REPO_ROOT / "terraform" / "modules" / "s3",
+}
 
 #: Placeholder-only credentials for the credential-free Terraform plan
 #: design proven in Batches 3-9 — never real, never logged, never
@@ -217,6 +238,7 @@ def _pr_body(state: WorkflowState) -> str:
 
     return (
         f"Request ID: {state['request_id']}\n"
+        f"Resource type: {resource_type_of(state['resource_spec']).value}\n"
         f"Resource: {state['resource_spec'].name}\n"
         f"Security status: {gate_result.overall_status.value}\n"
         f"Plan: {plan_summary.add_count} to add, {plan_summary.change_count} to change, "
@@ -225,18 +247,18 @@ def _pr_body(state: WorkflowState) -> str:
     )
 
 
-def build_sqs_workflow(
+def build_iac_workflow(
     *,
-    renderer: TerraformCompositionRenderer,
+    renderer: AWSResourceRenderer,
     terraform_runner: TerraformRunner,
     checkov_adapter: CheckovAdapter,
     source_control_port: SourceControlPort,
     workspace_root: Path,
-    trusted_module_dir: Path = _DEFAULT_TRUSTED_MODULE_DIR,
+    trusted_module_dirs: Mapping[ResourceType, Path] = _DEFAULT_TRUSTED_MODULE_DIRS,
     base_branch: str = "main",
     checkpointer: BaseCheckpointSaver | None = None,
 ) -> CompiledStateGraph:
-    """Build and compile the deterministic SQS workflow graph.
+    """Build and compile the deterministic AWS resource workflow graph.
 
     All external boundaries are injected — no hidden global singletons,
     no real Terraform/Checkov/GitHub requirement for callers who inject
@@ -256,9 +278,11 @@ def build_sqs_workflow(
 
     def render_terraform(state: WorkflowState) -> dict:
         try:
+            spec: AWSResourceSpec = state["resource_spec"]
+            trusted_module_dir = trusted_module_dirs[resource_type_of(spec)]
             workspace = _resolve_request_workspace(workspace_root, state["request_id"])
             module_source = os.path.relpath(trusted_module_dir, start=workspace)
-            composition = renderer.render(state["resource_spec"], module_source=module_source)
+            composition = renderer.render(spec, module_source=module_source)
             composition.write_to(workspace)
         except Exception as exc:  # noqa: BLE001 - sanitized below; KeyboardInterrupt/
             # SystemExit are BaseException subclasses and are never caught here.
@@ -331,7 +355,9 @@ def build_sqs_workflow(
     def security_gate(state: WorkflowState) -> dict:
         try:
             gate_result = evaluate_security_gate(
-                state["platform_evaluation"], state["checkov_result"]
+                state["platform_evaluation"],
+                state["checkov_result"],
+                resource_type=resource_type_of(state["resource_spec"]),
             )
         except SecurityGateError as exc:
             return _error_update(WorkflowStage.SECURITY_GATE, exc)
@@ -397,12 +423,13 @@ def build_sqs_workflow(
         request_id = state["request_id"]
         try:
             branch_name = derive_branch_name(request_id)
+            resource_kind = resource_type_of(state["resource_spec"]).value.upper()
             pr_result = source_control_port.publish_change(
                 request_id=request_id,
                 base_branch=base_branch,
                 branch_name=branch_name,
                 files=state.get("generated_files") or {},
-                commit_message=f"feat(iac): add SQS proposal {request_id}",
+                commit_message=f"feat(iac): add {resource_kind} proposal {request_id}",
                 pr_title=f"IaC proposal: {request_id}",
                 pr_body=_pr_body(state),
             )
@@ -450,3 +477,39 @@ def build_sqs_workflow(
     builder.add_edge("source_control", END)
 
     return builder.compile(checkpointer=checkpointer)
+
+
+def build_sqs_workflow(
+    *,
+    renderer: TerraformCompositionRenderer,
+    terraform_runner: TerraformRunner,
+    checkov_adapter: CheckovAdapter,
+    source_control_port: SourceControlPort,
+    workspace_root: Path,
+    trusted_module_dir: Path = _DEFAULT_TRUSTED_MODULE_DIRS[ResourceType.SQS],
+    base_branch: str = "main",
+    checkpointer: BaseCheckpointSaver | None = None,
+) -> CompiledStateGraph:
+    """Backward-compatible, SQS-only entry point — a thin wrapper around
+    `build_iac_workflow`, kept because every call site through Batch 15
+    passes a bare SQS renderer and a single `trusted_module_dir`. Prefer
+    `build_iac_workflow` directly for new code (S3 or otherwise); this
+    wrapper never becomes aware of S3 itself, it just constructs an
+    `AWSResourceRenderer` around the given SQS renderer plus a real S3
+    renderer (never exercised unless an S3 spec is actually submitted
+    through this same graph).
+    """
+    dispatch_renderer = AWSResourceRenderer(sqs_renderer=renderer)
+    trusted_module_dirs = dict(_DEFAULT_TRUSTED_MODULE_DIRS)
+    trusted_module_dirs[ResourceType.SQS] = trusted_module_dir
+
+    return build_iac_workflow(
+        renderer=dispatch_renderer,
+        terraform_runner=terraform_runner,
+        checkov_adapter=checkov_adapter,
+        source_control_port=source_control_port,
+        workspace_root=workspace_root,
+        trusted_module_dirs=trusted_module_dirs,
+        base_branch=base_branch,
+        checkpointer=checkpointer,
+    )
