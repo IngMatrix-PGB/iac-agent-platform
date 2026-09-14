@@ -9,7 +9,7 @@ Golden dataset: 14 scenarios / 38 evaluations, 100% pass rate. No
 `terraform apply`, no AWS mutation, ever. See `docs/application.md`,
 `docs/hitl.md`, `docs/source-control.md`.
 
-## Phase 2 — S3 (in progress)
+## Phase 2 — S3 (complete)
 
 **Goal:** prove the Phase 1 design generalizes to a second AWS resource
 type without duplicating the platform — not "add S3" as an end in
@@ -55,23 +55,76 @@ Delivered so far:
   (`evals/evaluators/s3.py`, `evals/scenarios/s3_loader.py`,
   `evals/scenarios/s3_runner.py`).
 
+## Phase 2 — DynamoDB (complete)
+
+**Goal:** prove that adding a *third* resource type is mostly additive
+— a small, bounded set of registration touchpoints, not a redesign of
+anything shared. See `docs/resources/dynamodb.md` for the full
+DynamoDB contract, module, policy, and Checkov-scope write-up.
+
+DynamoDB registration touchpoints (discovered via read-only inspection
+before implementation, confirmed accurate afterward):
+
+- `ResourceType` (`iac_agent.domain.resource`) — one new member,
+  `DYNAMODB = "dynamodb"`.
+- `AWSResourceSpec` union + `resource_type_of` (`iac_agent.providers.
+  aws.resource`) — one new union arm, one new `match`/`case` arm.
+- `AWSResourceRenderer` (`iac_agent.providers.aws.renderer`) — one new
+  constructor parameter (`dynamodb_renderer`), one new `case`.
+- `REQUIRED_PLATFORM_POLICY_IDS_BY_RESOURCE_TYPE` and three new
+  `_evaluate_dynamodb_*` policy functions (`iac_agent.policies.
+  platform`) — no changes to the SQS/S3 policy functions or the shared
+  destructive-change policy.
+- `checkov_profile_for` mapping (`iac_agent.security.
+  checkov_profiles`) — one new resource-type entry.
+- `_DEFAULT_TRUSTED_MODULE_DIRS` (`iac_agent.graph.workflow`) — one new
+  resource-type entry.
+- `_ALLOWED_WORKFLOW_TYPES` serializer allowlist (`iac_agent.
+  persistence.checkpoints`) — five new (module, qualname) entries for
+  the new contract/enum types.
+- One genuine non-mechanical fix, found and reported before changing:
+  the PR/commit "resource kind" display text in `iac_agent.graph.
+  workflow` derived from `resource_type_of(spec).value.upper()`, which
+  happened to be correct for SQS/S3 (both already-correct all-caps
+  acronyms) but would have produced "DYNAMODB" instead of "DynamoDB".
+  Fixed with a small explicit `ResourceType`-keyed display-name
+  mapping — not a broader redesign.
+
+No changes were needed to: `terraform_execute`, `plan_analysis`,
+`security_gate`, `approval_gate`, graph routing, `PlanAnalyzer`,
+`SecurityGate`'s aggregation logic (only its already-generic
+`resource_type`-keyed required-ID lookup, unchanged since Batch 16.5),
+or the application/composition layer (DynamoDB does not go through
+that layer in this batch — see "Known naming debt" below).
+
+One deferred feature, decided via explicit project-owner approval
+(not unilaterally): customer-managed KMS encryption for DynamoDB. A
+real `terraform plan` failure ("invalid ARN: arn: invalid prefix")
+showed `aws_dynamodb_table.server_side_encryption.kms_key_arn`
+requires a full ARN, rejecting the bare alias/key-ID forms the shared
+KMS validator accepts for SQS/S3 — so `DynamoDBEncryptionSpec` has no
+`kms_key_id` field at all this phase. The one resulting real Checkov
+finding (`CKV_AWS_119`, customer-managed CMK) was added to the
+DynamoDB `CheckovScanProfile` only after being surfaced via
+`AskUserQuestion` — see `docs/resources/dynamodb.md`.
+
 ## Known naming debt (tracked, not yet resolved)
 
 `iac_agent.app.service.Phase1Application` and the surrounding
 composition layer (`iac_agent.app.composition`,
-`iac_agent.app.config`) are still SQS-only as of Batch 16 — they
+`iac_agent.app.config`) are still SQS-only as of Batch 17 — they
 construct `build_sqs_workflow` and a single SQS trusted-module path
-directly, never `build_iac_workflow` or an S3-capable renderer. This is
-a real gap (the graph layer one level below is already resource-neutral)
-but a full generalization here would need `ApplicationConfig` to carry
-a *mapping* of trusted module directories rather than one path, and
-`submit()`'s type hint widened from `SQSResourceSpec` to
-`AWSResourceSpec` — more churn than this batch's scope, and deferred
-rather than rushed. Tracked here explicitly so it is not forgotten;
-revisit when a third resource type or the first real caller (FastAPI
-adapter, CLI) makes the gap unavoidable.
+directly, never `build_iac_workflow` or an S3/DynamoDB-capable
+renderer. This is a real gap (the graph layer one level below has been
+resource-neutral since Batch 16) but a full generalization here would
+need `ApplicationConfig` to carry a *mapping* of trusted module
+directories rather than one path, and `submit()`'s type hint widened
+from `SQSResourceSpec` to `AWSResourceSpec` — more churn than either
+batch's scope, and deferred rather than rushed both times. Tracked
+here explicitly so it is not forgotten; revisit when the first real
+caller (FastAPI adapter, CLI) makes the gap unavoidable.
 
 ## Not yet started
 
-DynamoDB, Lambda, IAM, a FastAPI/HTTP adapter, and any UI remain
-entirely out of scope until a future phase is explicitly approved.
+Lambda, IAM, a FastAPI/HTTP adapter, and any UI remain entirely out of
+scope until a future phase is explicitly approved.
