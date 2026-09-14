@@ -5,6 +5,11 @@ from __future__ import annotations
 import pytest
 
 from iac_agent.domain.resource import ResourceType
+from iac_agent.providers.aws.dynamodb.contract import (
+    DynamoDBKeySpec,
+    DynamoDBKeyType,
+    DynamoDBResourceSpec,
+)
 from iac_agent.providers.aws.resource import resource_type_of
 from iac_agent.providers.aws.s3.contract import S3ResourceSpec
 from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
@@ -18,6 +23,13 @@ def test_sqs_spec_classified_as_sqs():
 def test_s3_spec_classified_as_s3():
     spec = S3ResourceSpec(name="my-example-bucket")
     assert resource_type_of(spec) is ResourceType.S3
+
+
+def test_dynamodb_spec_classified_as_dynamodb():
+    spec = DynamoDBResourceSpec(
+        name="orders-table", partition_key=DynamoDBKeySpec(name="pk", type=DynamoDBKeyType.STRING)
+    )
+    assert resource_type_of(spec) is ResourceType.DYNAMODB
 
 
 def test_unsupported_spec_type_fails_closed():
