@@ -7,6 +7,7 @@ import typing
 from langgraph.graph import MessagesState
 
 from iac_agent.graph.state import WorkflowState
+from iac_agent.providers.aws.dynamodb.contract import DynamoDBResourceSpec
 from iac_agent.providers.aws.resource import AWSResourceSpec
 from iac_agent.providers.aws.s3.contract import S3ResourceSpec
 from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
@@ -21,12 +22,12 @@ def test_workflow_state_is_not_messages_state_derived():
 
 
 def test_workflow_state_declares_request_id_and_resource_spec():
-    """Batch 16 (Phase 2): `resource_spec` widened from `SQSResourceSpec`
-    alone to the `AWSResourceSpec` union (currently SQS or S3)."""
+    """Batch 16 (Phase 2) widened `resource_spec` from `SQSResourceSpec`
+    alone to the `AWSResourceSpec` union; Batch 17 added DynamoDB to it."""
     resolved = typing.get_type_hints(WorkflowState)
     assert resolved["request_id"] is str
     assert resolved["resource_spec"] is AWSResourceSpec
-    assert resolved["resource_spec"] == (SQSResourceSpec | S3ResourceSpec)
+    assert resolved["resource_spec"] == (SQSResourceSpec | S3ResourceSpec | DynamoDBResourceSpec)
 
 
 def test_workflow_state_declares_explicit_workflow_facts():
