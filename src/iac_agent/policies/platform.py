@@ -1,21 +1,26 @@
-"""Phase 2 deterministic platform policies for SQS, S3, and DynamoDB
-requests.
+"""Phase 2 deterministic platform policies for SQS, S3, DynamoDB, and
+Lambda requests.
 
 `evaluate_platform_policies` is a pure function of two already-validated
-facts — a resource spec (`SQSResourceSpec`, `S3ResourceSpec`, or
-`DynamoDBResourceSpec`) and a `PlanSummary` — and nothing else. It
-never touches raw Terraform plan JSON, the Terraform CLI, Checkov, the
-AWS API, or an LLM. Given the same spec and plan summary, it always
-returns an equal `PolicyEvaluation`.
+facts — a resource spec (`SQSResourceSpec`, `S3ResourceSpec`,
+`DynamoDBResourceSpec`, or `LambdaResourceSpec`) and a `PlanSummary` —
+and nothing else. It never touches raw Terraform plan JSON, the
+Terraform CLI, Checkov, the AWS API, or an LLM. Given the same spec and
+plan summary, it always returns an equal `PolicyEvaluation`.
 
 Resource-specific policies stay resource-specific (SQS encryption/DLQ
 checks only ever run for `SQSResourceSpec`; S3 encryption/public-access/
 versioning checks only ever run for `S3ResourceSpec`; DynamoDB
 encryption/PITR/deletion-protection checks only ever run for
-`DynamoDBResourceSpec`). `TF_NO_DESTRUCTIVE_CHANGES` is platform-wide —
-it never touches the resource spec at all, only the plan summary — so
-it is evaluated exactly once, for every resource type, rather than
-duplicated per resource.
+`DynamoDBResourceSpec`; Lambda tracing/reserved-concurrency/log-
+retention checks only ever run for `LambdaResourceSpec`).
+`TF_NO_DESTRUCTIVE_CHANGES` is platform-wide — it never touches the
+resource spec at all, only the plan summary — so it is evaluated
+exactly once, for every resource type, rather than duplicated per
+resource. There is deliberately no separate IAM platform policy: the
+Lambda execution role's safety (trust principal, permission scope) is
+a trusted-module invariant and a Checkov concern, not something this
+layer re-evaluates from typed input.
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ from iac_agent.domain.security import (
     SecuritySeverity,
 )
 from iac_agent.providers.aws.dynamodb.contract import DynamoDBResourceSpec
+from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec, LambdaTracingMode
 from iac_agent.providers.aws.resource import AWSResourceSpec
 from iac_agent.providers.aws.s3.contract import S3ResourceSpec
 from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
@@ -42,6 +48,9 @@ S3_VERSIONING_RECOMMENDED = "S3_VERSIONING_RECOMMENDED"
 DDB_ENCRYPTION_REQUIRED = "DDB_ENCRYPTION_REQUIRED"
 DDB_PITR_RECOMMENDED = "DDB_PITR_RECOMMENDED"
 DDB_DELETION_PROTECTION_RECOMMENDED = "DDB_DELETION_PROTECTION_RECOMMENDED"
+LAMBDA_TRACING_RECOMMENDED = "LAMBDA_TRACING_RECOMMENDED"
+LAMBDA_RESERVED_CONCURRENCY_RECOMMENDED = "LAMBDA_RESERVED_CONCURRENCY_RECOMMENDED"
+LAMBDA_LOG_RETENTION_REQUIRED = "LAMBDA_LOG_RETENTION_REQUIRED"
 TF_NO_DESTRUCTIVE_CHANGES = "TF_NO_DESTRUCTIVE_CHANGES"
 
 #: The complete set of platform-policy IDs `evaluate_platform_policies`
@@ -63,6 +72,12 @@ REQUIRED_PLATFORM_POLICY_IDS_BY_RESOURCE_TYPE: dict[ResourceType, tuple[str, ...
         DDB_ENCRYPTION_REQUIRED,
         DDB_PITR_RECOMMENDED,
         DDB_DELETION_PROTECTION_RECOMMENDED,
+        TF_NO_DESTRUCTIVE_CHANGES,
+    ),
+    ResourceType.LAMBDA: (
+        LAMBDA_TRACING_RECOMMENDED,
+        LAMBDA_RESERVED_CONCURRENCY_RECOMMENDED,
+        LAMBDA_LOG_RETENTION_REQUIRED,
         TF_NO_DESTRUCTIVE_CHANGES,
     ),
 }
@@ -96,6 +111,12 @@ def evaluate_platform_policies(
                 _evaluate_dynamodb_encryption_policy(spec),
                 _evaluate_dynamodb_pitr_policy(spec),
                 _evaluate_dynamodb_deletion_protection_policy(spec),
+            )
+        case LambdaResourceSpec():
+            resource_findings = (
+                _evaluate_lambda_tracing_policy(spec),
+                _evaluate_lambda_reserved_concurrency_policy(spec),
+                _evaluate_lambda_log_retention_policy(spec),
             )
         case _:
             raise ValueError(f"unsupported resource spec type: {type(spec).__name__}")
@@ -304,6 +325,81 @@ def _evaluate_dynamodb_deletion_protection_policy(spec: DynamoDBResourceSpec) ->
         status=PolicyStatus.WARN,
         resource=spec.name,
         message="DynamoDB deletion protection is disabled; review accidental-deletion risk.",
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Lambda policies
+# ---------------------------------------------------------------------------
+
+
+def _evaluate_lambda_tracing_policy(spec: LambdaResourceSpec) -> SecurityFinding:
+    """LAMBDA_TRACING_RECOMMENDED — a warning, not a block. Disabling
+    active X-Ray tracing (PassThrough) is a legitimate choice for some
+    workloads, mirroring the SQS DLQ / S3 versioning WARN-not-BLOCK
+    precedent."""
+    if spec.tracing_mode is LambdaTracingMode.ACTIVE:
+        return SecurityFinding(
+            policy_id=LAMBDA_TRACING_RECOMMENDED,
+            severity=SecuritySeverity.MEDIUM,
+            status=PolicyStatus.PASS,
+            resource=spec.name,
+            message="Lambda X-Ray tracing is active.",
+            source=FindingSource.PLATFORM_POLICY,
+        )
+    return SecurityFinding(
+        policy_id=LAMBDA_TRACING_RECOMMENDED,
+        severity=SecuritySeverity.MEDIUM,
+        status=PolicyStatus.WARN,
+        resource=spec.name,
+        message="Lambda X-Ray tracing is pass-through (not active); review observability needs.",
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+def _evaluate_lambda_reserved_concurrency_policy(spec: LambdaResourceSpec) -> SecurityFinding:
+    """LAMBDA_RESERVED_CONCURRENCY_RECOMMENDED — a warning, not a
+    block. An explicit reserved-concurrency limit reduces runaway-
+    invocation/cost risk, but omitting it is a legitimate choice for
+    some workloads (mirrors the SQS DLQ / S3 versioning / DynamoDB PITR
+    WARN-not-BLOCK precedent)."""
+    if spec.reserved_concurrency is not None:
+        return SecurityFinding(
+            policy_id=LAMBDA_RESERVED_CONCURRENCY_RECOMMENDED,
+            severity=SecuritySeverity.MEDIUM,
+            status=PolicyStatus.PASS,
+            resource=spec.name,
+            message="Lambda reserved concurrency is explicitly configured.",
+            source=FindingSource.PLATFORM_POLICY,
+        )
+    return SecurityFinding(
+        policy_id=LAMBDA_RESERVED_CONCURRENCY_RECOMMENDED,
+        severity=SecuritySeverity.MEDIUM,
+        status=PolicyStatus.WARN,
+        resource=spec.name,
+        message="Lambda reserved concurrency is not set; review runaway-invocation/cost risk.",
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+def _evaluate_lambda_log_retention_policy(spec: LambdaResourceSpec) -> SecurityFinding:
+    """LAMBDA_LOG_RETENTION_REQUIRED — evidence only, always PASS.
+
+    The Pydantic contract already restricts `log_retention_days` to
+    CloudWatch Logs' own enumerated positive values (no indefinite-
+    retention path exists at all), so there is no invalid value this
+    policy could ever observe here — this exists so later UI/eval
+    consumers have positive evidence that log retention was actually
+    evaluated, mirroring the encryption policies' defense-in-depth
+    pattern rather than inventing fake policy complexity.
+    """
+    return SecurityFinding(
+        policy_id=LAMBDA_LOG_RETENTION_REQUIRED,
+        severity=SecuritySeverity.MEDIUM,
+        status=PolicyStatus.PASS,
+        resource=spec.name,
+        message=f"Lambda log retention is configured ({spec.log_retention_days} days).",
         source=FindingSource.PLATFORM_POLICY,
     )
 

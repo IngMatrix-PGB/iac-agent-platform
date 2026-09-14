@@ -3,7 +3,7 @@
 `build_iac_workflow` wires eight narrow nodes around the already-
 proven deterministic components:
 
-    render_terraform   -> AWSResourceRenderer (dispatches SQS/S3/DynamoDB)
+    render_terraform   -> AWSResourceRenderer (dispatches SQS/S3/DynamoDB/Lambda)
     terraform_execute   -> TerraformRunner (fmt, init, validate, plan)
     plan_analysis       -> TerraformRunner.show_json + analyze_plan
     platform_policy      -> evaluate_platform_policies
@@ -13,8 +13,12 @@ proven deterministic components:
     source_control        -> SourceControlPort (Batch 14)
 
 Batch 16 (Phase 2) generalized this module from SQS-only to any
-supported `AWSResourceSpec` (Batch 17 added DynamoDB alongside SQS and
-S3). Nothing about
+supported `AWSResourceSpec` (Batch 18 added Lambda alongside SQS, S3,
+and DynamoDB from Batches 16-17). Batch 18's Lambda function and its
+IAM execution role/CloudWatch log group are all owned internally by
+the trusted `terraform/modules/lambda` module — there is no separate
+top-level IAM resource type, and no new graph node was needed for the
+multi-resource relationship. Nothing about
 `terraform_execute`, `plan_analysis`, `security_gate`, `approval_gate`,
 or the graph's routing needed to change — none of them ever inspected
 the resource spec's type at all. `render_terraform` (needs the right
@@ -136,6 +140,7 @@ _DEFAULT_TRUSTED_MODULE_DIRS: dict[ResourceType, Path] = {
     ResourceType.SQS: _REPO_ROOT / "terraform" / "modules" / "sqs",
     ResourceType.S3: _REPO_ROOT / "terraform" / "modules" / "s3",
     ResourceType.DYNAMODB: _REPO_ROOT / "terraform" / "modules" / "dynamodb",
+    ResourceType.LAMBDA: _REPO_ROOT / "terraform" / "modules" / "lambda",
 }
 
 #: Human-readable resource-kind label for commit/PR text. Batch 16's
@@ -149,6 +154,7 @@ _RESOURCE_KIND_DISPLAY_NAMES: dict[ResourceType, str] = {
     ResourceType.SQS: "SQS",
     ResourceType.S3: "S3",
     ResourceType.DYNAMODB: "DynamoDB",
+    ResourceType.LAMBDA: "Lambda",
 }
 
 #: Placeholder-only credentials for the credential-free Terraform plan

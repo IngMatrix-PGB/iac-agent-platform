@@ -39,16 +39,35 @@ def test_dynamodb_profile_has_exactly_the_one_approved_skip():
     assert profile.skipped_checks == ("CKV_AWS_119",)
 
 
-def test_s3_profile_never_leaks_into_sqs_profile():
-    sqs_profile = checkov_profile_for(ResourceType.SQS)
-    s3_profile = checkov_profile_for(ResourceType.S3)
-    assert set(sqs_profile.skipped_checks).isdisjoint(s3_profile.skipped_checks)
+def test_lambda_profile_has_exactly_the_five_approved_skips():
+    """Batch 18: a real Checkov scan of the trusted Lambda+IAM module's
+    secure baseline reported exactly five findings (after fixing the
+    one real defect — CKV_AWS_338 log retention — by raising the
+    default to 365 days), each corresponding to a documented Phase 2
+    Lambda non-goal, approved via AskUserQuestion before being added."""
+    profile = checkov_profile_for(ResourceType.LAMBDA)
+    assert isinstance(profile, CheckovScanProfile)
+    assert profile.skipped_checks == (
+        "CKV_AWS_117",
+        "CKV_AWS_116",
+        "CKV_AWS_158",
+        "CKV_AWS_173",
+        "CKV_AWS_272",
+    )
 
 
-def test_s3_profile_never_leaks_into_dynamodb_profile():
-    s3_profile = checkov_profile_for(ResourceType.S3)
-    dynamodb_profile = checkov_profile_for(ResourceType.DYNAMODB)
-    assert set(s3_profile.skipped_checks).isdisjoint(dynamodb_profile.skipped_checks)
+def test_all_four_resource_profiles_are_pairwise_disjoint():
+    """Proves isolation across every registered resource type at once —
+    no skip check ever leaks from one resource's profile into
+    another's."""
+    profiles = {
+        resource_type: set(checkov_profile_for(resource_type).skipped_checks)
+        for resource_type in ResourceType
+    }
+    resource_types = list(profiles)
+    for i, a in enumerate(resource_types):
+        for b in resource_types[i + 1 :]:
+            assert profiles[a].isdisjoint(profiles[b]), (a, b, profiles[a], profiles[b])
 
 
 def test_every_registered_resource_type_has_a_profile():
