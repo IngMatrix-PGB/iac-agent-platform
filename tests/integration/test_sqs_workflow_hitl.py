@@ -91,7 +91,7 @@ def _build_real_graph(workspace_root: Path, checkpointer, source_control_port):
 
 def test_real_pipeline_durable_approval_survives_reconstruction_and_resume(tmp_path):
     # 1-3: create DB, open checkpointer, build graph with checkpointer.
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
 

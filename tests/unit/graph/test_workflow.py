@@ -673,7 +673,7 @@ def test_graph_compiles_and_runs_unchanged_without_a_checkpointer(tmp_path):
 
 
 def test_injected_checkpointer_is_actually_used_by_the_compiled_graph(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
 
@@ -725,7 +725,7 @@ def _build_durable(workspace_root, checkpointer, **overrides):
 
 
 def test_interrupted_pass_state_round_trips_through_real_sqlite(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     config = workflow_config("req-durable-001")
@@ -826,7 +826,7 @@ def test_error_routes_to_error_and_end_with_no_interrupt(tmp_path):
 
 
 def test_block_never_reaches_interrupt_checked_via_pending_tasks(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     config = workflow_config("req-block-001")
@@ -845,7 +845,7 @@ def test_block_never_reaches_interrupt_checked_via_pending_tasks(tmp_path):
 
 
 def test_error_never_reaches_interrupt_checked_via_pending_tasks(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     config = workflow_config("req-error-001")
@@ -956,7 +956,7 @@ def test_approve_resume_gives_approved_status(tmp_path):
     resume immediately proceeds through source_control to PR_CREATED
     (see the "IMPORTANT RESUME BEHAVIOR" requirement: no second
     invocation is needed). `approval_decision` still reflects APPROVE."""
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
 
@@ -971,7 +971,7 @@ def test_approve_resume_gives_approved_status(tmp_path):
 
 
 def test_reject_resume_gives_rejected_status(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
 
@@ -985,7 +985,7 @@ def test_reject_resume_gives_rejected_status(tmp_path):
 
 
 def test_reject_is_not_error_and_not_blocked(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
 
@@ -999,7 +999,7 @@ def test_reject_is_not_error_and_not_blocked(tmp_path):
 
 
 def test_security_gate_result_preserved_unchanged_after_approve(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
 
@@ -1011,7 +1011,7 @@ def test_security_gate_result_preserved_unchanged_after_approve(tmp_path):
 
 
 def test_security_gate_result_preserved_unchanged_after_reject(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
 
@@ -1045,7 +1045,7 @@ def test_warn_gate_approve_resume_gives_approved_with_warn_preserved(tmp_path):
     """Batch 14: a WARN result can be human-approved and published —
     the final workflow reaches PR_CREATED, and the security result is
     still inspectable as WARN, never rewritten to look like PASS."""
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
 
@@ -1076,7 +1076,7 @@ def test_warn_gate_approve_resume_gives_approved_with_warn_preserved(tmp_path):
     ],
 )
 def test_invalid_resume_value_gives_error_not_approved(tmp_path, bad_value):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
 
@@ -1095,7 +1095,7 @@ def test_invalid_resume_value_gives_error_not_approved(tmp_path, bad_value):
 
 
 def test_block_thread_cannot_be_approved(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     config = workflow_config("req-block-approve")
@@ -1119,7 +1119,7 @@ def test_block_thread_cannot_be_approved(tmp_path):
 
 
 def test_error_thread_cannot_be_approved(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     config = workflow_config("req-error-approve")
@@ -1141,7 +1141,7 @@ def test_error_thread_cannot_be_approved(tmp_path):
 
 
 def test_no_approval_decision_field_exists_on_blocked_state(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     config = workflow_config("req-block-field")
@@ -1158,7 +1158,7 @@ def test_no_approval_decision_field_exists_on_blocked_state(tmp_path):
 
 
 def test_no_approval_decision_field_exists_on_error_state(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     config = workflow_config("req-error-field")
@@ -1179,7 +1179,7 @@ def test_no_approval_decision_field_exists_on_error_state(tmp_path):
 
 
 def test_approve_resume_works_after_saver_and_graph_reconstruction(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     config = workflow_config("req-durable-approve")
@@ -1200,7 +1200,7 @@ def test_approve_resume_works_after_saver_and_graph_reconstruction(tmp_path):
 
 
 def test_final_approved_state_is_durable_across_a_third_reconstruction(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     config = workflow_config("req-durable-approve-2")
@@ -1227,7 +1227,7 @@ def test_final_approved_state_is_durable_across_a_third_reconstruction(tmp_path)
 
 
 def test_final_rejected_state_is_durable_across_reconstruction(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     config = workflow_config("req-durable-reject")
@@ -1250,7 +1250,7 @@ def test_final_rejected_state_is_durable_across_reconstruction(tmp_path):
 
 
 def test_same_thread_id_preserved_through_interrupt_and_resume(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     request_id = "req-durable-thread-id"
@@ -1275,7 +1275,7 @@ def _approve(graph, config):
 
 
 def test_approve_routes_to_source_control(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     source_control = FakeSourceControl()
@@ -1290,7 +1290,7 @@ def test_approve_routes_to_source_control(tmp_path):
 
 
 def test_source_control_port_called_exactly_once(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     source_control = FakeSourceControl()
@@ -1306,7 +1306,7 @@ def test_source_control_port_called_exactly_once(tmp_path):
 
 
 def test_reject_never_calls_source_control(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     source_control = FakeSourceControl()
@@ -1321,7 +1321,7 @@ def test_reject_never_calls_source_control(tmp_path):
 
 
 def test_block_never_calls_source_control(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     source_control = FakeSourceControl()
@@ -1342,7 +1342,7 @@ def test_block_never_calls_source_control(tmp_path):
 
 
 def test_error_never_calls_source_control(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     source_control = FakeSourceControl()
@@ -1364,7 +1364,7 @@ def test_error_never_calls_source_control(tmp_path):
 
 
 def test_invalid_resume_value_never_calls_source_control(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     source_control = FakeSourceControl()
@@ -1379,7 +1379,7 @@ def test_invalid_resume_value_never_calls_source_control(tmp_path):
 
 
 def test_source_control_success_gives_pr_created_status(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
 
@@ -1392,7 +1392,7 @@ def test_source_control_success_gives_pr_created_status(tmp_path):
 
 
 def test_source_control_success_stores_pull_request_result(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
 
@@ -1407,7 +1407,7 @@ def test_source_control_success_stores_pull_request_result(tmp_path):
 
 
 def test_source_control_error_gives_error_status(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     source_control = FakeSourceControl(raise_exc=SourceControlError("simulated GitHub failure"))
@@ -1424,7 +1424,7 @@ def test_source_control_error_gives_error_status(tmp_path):
 
 
 def test_source_control_error_preserves_approval_decision(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     source_control = FakeSourceControl(raise_exc=SourceControlError("simulated GitHub failure"))
@@ -1439,7 +1439,7 @@ def test_source_control_error_preserves_approval_decision(tmp_path):
 
 
 def test_source_control_error_preserves_security_gate_result(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     source_control = FakeSourceControl(raise_exc=SourceControlError("simulated GitHub failure"))
@@ -1481,7 +1481,7 @@ def test_generated_file_allowlist_is_exact(tmp_path):
     """Only the renderer's own two output files are ever published —
     never a tfplan, a SQLite DB, a .terraform artifact, or anything
     else that might exist in the local workspace directory."""
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     source_control = FakeSourceControl()
@@ -1494,12 +1494,12 @@ def test_generated_file_allowlist_is_exact(tmp_path):
 
     published_files = source_control.calls[0]["files"]
     assert set(published_files) == {"main.tf", "versions.tf"}
-    for forbidden in ("tfplan", "terraform.tfstate", "checkpoints.sqlite3", ".terraform"):
+    for forbidden in ("tfplan", "terraform.tfstate", "state.db", ".terraform"):
         assert forbidden not in published_files
 
 
 def test_no_tfplan_or_state_or_terraform_dir_ever_reaches_source_control(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     source_control = FakeSourceControl()
@@ -1517,7 +1517,7 @@ def test_no_tfplan_or_state_or_terraform_dir_ever_reaches_source_control(tmp_pat
     call = source_control.calls[0]
     for key in ("files", "commit_message", "pr_title", "pr_body"):
         serialized = str(call[key])
-        for forbidden in ("tfplan", ".terraform", "checkpoints.sqlite3", str(workspace_root)):
+        for forbidden in ("tfplan", ".terraform", "state.db", str(workspace_root)):
             assert forbidden not in serialized
 
 
@@ -1526,7 +1526,7 @@ def test_replayed_invocation_of_a_published_thread_does_not_call_source_control_
     `pull_request` field is already set, so a second pass through
     `source_control` (however it were triggered) must not call the
     adapter again."""
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     source_control = FakeSourceControl()
@@ -1551,7 +1551,7 @@ def test_replayed_invocation_of_a_published_thread_does_not_call_source_control_
 
 
 def test_two_threads_coexist_in_one_database_without_cross_contamination(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
 
@@ -1574,7 +1574,7 @@ def test_two_threads_coexist_in_one_database_without_cross_contamination(tmp_pat
 
 
 def test_thread_a_cannot_retrieve_thread_b_state_after_reconstruction(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
 
@@ -1599,7 +1599,7 @@ def test_thread_a_cannot_retrieve_thread_b_state_after_reconstruction(tmp_path):
 
 
 def test_repeated_retrieval_of_the_same_thread_is_deterministic(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     config = workflow_config("req-001")
@@ -1621,7 +1621,7 @@ def test_repeated_retrieval_of_the_same_thread_is_deterministic(tmp_path):
 
 
 def test_error_state_survives_saver_and_graph_reconstruction(tmp_path):
-    db_path = tmp_path / "checkpoints.sqlite3"
+    db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
     workspace_root.mkdir()
     config = workflow_config("req-error-001")
