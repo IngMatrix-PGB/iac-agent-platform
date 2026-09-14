@@ -108,23 +108,79 @@ finding (`CKV_AWS_119`, customer-managed CMK) was added to the
 DynamoDB `CheckovScanProfile` only after being surfaced via
 `AskUserQuestion` — see `docs/resources/dynamodb.md`.
 
+## Phase 2 — Lambda + execution IAM (complete)
+
+**Goal:** prove the platform can represent a small, deterministic
+*multi-resource relationship* — a function, its IAM execution role, an
+inline CloudWatch Logs permission policy, and a log group — as **one**
+top-level resource spec, without becoming a generic IAM policy
+generator. See `docs/resources/lambda.md` for the full Lambda contract,
+module, IAM design, policy, and Checkov-scope write-up.
+
+Lambda registration touchpoints (mirroring DynamoDB's exact pattern):
+
+- `ResourceType` (`iac_agent.domain.resource`) — one new member,
+  `LAMBDA = "lambda"`. No `ResourceType.IAM` was added, or ever
+  planned — the execution role is a trusted-module implementation
+  detail, never an independently requestable resource type.
+- `AWSResourceSpec` union + `resource_type_of` (`iac_agent.providers.
+  aws.resource`) — one new union arm, one new `match`/`case` arm.
+- `AWSResourceRenderer` (`iac_agent.providers.aws.renderer`) — one new
+  constructor parameter (`lambda_renderer`), one new `case`.
+- `REQUIRED_PLATFORM_POLICY_IDS_BY_RESOURCE_TYPE` and three new
+  `_evaluate_lambda_*` policy functions (`iac_agent.policies.
+  platform`) — no changes to the SQS/S3/DynamoDB policy functions or
+  the shared destructive-change policy, and deliberately no separate
+  IAM platform policy at all.
+- `checkov_profile_for` mapping (`iac_agent.security.
+  checkov_profiles`) — one new resource-type entry (five skips).
+- `_DEFAULT_TRUSTED_MODULE_DIRS` and `_RESOURCE_KIND_DISPLAY_NAMES`
+  (`iac_agent.graph.workflow`) — one new resource-type entry each; no
+  new graph node.
+- `_ALLOWED_WORKFLOW_TYPES` serializer allowlist (`iac_agent.
+  persistence.checkpoints`) — four new (module, qualname) entries for
+  the new contract/enum types.
+- A new architecture regression test,
+  `tests/unit/test_resource_registration_consistency.py`, mechanically
+  proving every one of the touchpoints above is wired consistently for
+  every current `ResourceType` — see `docs/resources/lambda.md`.
+
+One genuinely fixable Checkov defect (`CKV_AWS_338`, log retention
+under one year) was resolved directly by raising the contract/module
+default from 30 to 365 days. Five further findings, each corresponding
+to a documented Phase 2 non-goal (VPC, DLQ, log-group KMS, env-var KMS,
+code signing), were surfaced via `AskUserQuestion` before being added
+as skips — the project owner explicitly approved all five, mirroring
+the S3/DynamoDB decision-gate precedent exactly.
+
+No new Terraform provider was added: the deployment package strategy
+uses a single checked-in trusted fixture zip
+(`terraform/modules/lambda/fixtures/placeholder.zip`), avoiding
+`hashicorp/archive`/`archive_file` entirely — see
+`docs/resources/lambda.md`.
+
+**Next: Serverless composition** (Batch 19) — API Gateway, EventBridge,
+SNS, DLQ wiring, and the FastAPI/HTTP adapter/UI work this and every
+prior batch have deliberately deferred.
+
 ## Known naming debt (tracked, not yet resolved)
 
 `iac_agent.app.service.Phase1Application` and the surrounding
 composition layer (`iac_agent.app.composition`,
-`iac_agent.app.config`) are still SQS-only as of Batch 17 — they
+`iac_agent.app.config`) are still SQS-only as of Batch 18 — they
 construct `build_sqs_workflow` and a single SQS trusted-module path
-directly, never `build_iac_workflow` or an S3/DynamoDB-capable
+directly, never `build_iac_workflow` or an S3/DynamoDB/Lambda-capable
 renderer. This is a real gap (the graph layer one level below has been
 resource-neutral since Batch 16) but a full generalization here would
 need `ApplicationConfig` to carry a *mapping* of trusted module
 directories rather than one path, and `submit()`'s type hint widened
-from `SQSResourceSpec` to `AWSResourceSpec` — more churn than either
-batch's scope, and deferred rather than rushed both times. Tracked
-here explicitly so it is not forgotten; revisit when the first real
-caller (FastAPI adapter, CLI) makes the gap unavoidable.
+from `SQSResourceSpec` to `AWSResourceSpec` — more churn than any of
+these batches' scope, and deferred rather than rushed each time.
+Tracked here explicitly so it is not forgotten; revisit when the first
+real caller (FastAPI adapter, CLI) makes the gap unavoidable.
 
 ## Not yet started
 
-Lambda, IAM, a FastAPI/HTTP adapter, and any UI remain entirely out of
-scope until a future phase is explicitly approved.
+Serverless composition (API Gateway, EventBridge, SNS, DLQ wiring), a
+FastAPI/HTTP adapter, and any UI remain entirely out of scope until a
+future phase is explicitly approved.
