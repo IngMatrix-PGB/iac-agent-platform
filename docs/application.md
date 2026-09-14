@@ -171,6 +171,23 @@ Nothing in this layer changes that: `TerraformRunner` still has no
 `apply` method, and a GitHub pull request remains Phase 1's terminal
 artifact.
 
+## Phase 2 note: this layer is still SQS-only (known naming debt)
+
+Batch 16 (Phase 2) generalized the graph layer
+(`iac_agent.graph.workflow.build_iac_workflow`, the `AWSResourceSpec`
+union) to support S3 alongside SQS, but deliberately did **not**
+generalize this composition layer in the same batch:
+`iac_agent.app.composition` still constructs `build_sqs_workflow` and a
+single SQS trusted-module path directly, and `Phase1Application.submit`
+still type-hints its `spec` parameter as `SQSResourceSpec`, not the
+`AWSResourceSpec` union. `Phase1Application`'s name is consequently
+potentially stale, but renaming it (to, say, `IacApplication`) without
+also widening `ApplicationConfig`'s single `terraform_module_path` to a
+per-resource-type mapping would be a rename in name only. This gap is
+tracked as explicit naming debt in `docs/roadmap.md` rather than
+rushed — revisit once a third resource type or the first real caller
+(FastAPI adapter, CLI) makes it unavoidable.
+
 ## Live validation record
 
 `scripts/live_github_smoke.py` was run once, through
