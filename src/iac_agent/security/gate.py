@@ -23,29 +23,15 @@ exactly as it already prevents a `CheckovScanResult` from existing.
 
 from __future__ import annotations
 
+from iac_agent.domain.resource import ResourceType
 from iac_agent.domain.security import (
     FindingSource,
     PolicyEvaluation,
     SecurityFinding,
     SecurityGateResult,
 )
-from iac_agent.policies.platform import (
-    SQS_DLQ_RECOMMENDED,
-    SQS_ENCRYPTION_REQUIRED,
-    TF_NO_DESTRUCTIVE_CHANGES,
-)
+from iac_agent.policies.platform import REQUIRED_PLATFORM_POLICY_IDS_BY_RESOURCE_TYPE
 from iac_agent.security.checkov import CheckovScanResult
-
-#: The Phase 1 first-party platform policies that must each contribute
-#: exactly one PLATFORM_POLICY-sourced finding before the gate will
-#: aggregate anything. Absence, duplication, or a mismatched source for
-#: any of these means platform policy evaluation was incomplete —
-#: "no finding" must never be silently read as "policy passed".
-_REQUIRED_PLATFORM_POLICY_IDS = (
-    SQS_ENCRYPTION_REQUIRED,
-    SQS_DLQ_RECOMMENDED,
-    TF_NO_DESTRUCTIVE_CHANGES,
-)
 
 
 class SecurityGateError(Exception):
@@ -64,14 +50,21 @@ class SecurityGateError(Exception):
 def evaluate_security_gate(
     platform: PolicyEvaluation,
     checkov: CheckovScanResult,
+    *,
+    resource_type: ResourceType = ResourceType.SQS,
 ) -> SecurityGateResult:
     """Combine platform-policy and Checkov findings into one aggregate result.
 
-    Pure function: given the same two inputs, always returns an equal
+    Pure function: given the same three inputs, always returns an equal
     `SecurityGateResult`, regardless of the order of findings within
-    either input.
+    either input. `resource_type` defaults to `ResourceType.SQS` to
+    preserve every Phase 1 call site's exact behavior unchanged; Batch
+    16 callers evaluating an S3 request must pass `resource_type=
+    ResourceType.S3` explicitly (see `iac_agent.graph.workflow`, which
+    derives it from the request's own resource spec via
+    `resource_type_of`, never a hardcoded default).
     """
-    _require_complete_platform_policies(platform)
+    _require_complete_platform_policies(platform, resource_type)
     _require_consistent_checkov_result(checkov)
 
     combined = platform.findings + checkov.findings
@@ -79,12 +72,15 @@ def evaluate_security_gate(
     return SecurityGateResult(findings=deduplicated)
 
 
-def _require_complete_platform_policies(platform: PolicyEvaluation) -> None:
+def _require_complete_platform_policies(
+    platform: PolicyEvaluation, resource_type: ResourceType
+) -> None:
     findings_by_policy_id: dict[str, list[SecurityFinding]] = {}
     for finding in platform.findings:
         findings_by_policy_id.setdefault(finding.policy_id, []).append(finding)
 
-    for required_id in _REQUIRED_PLATFORM_POLICY_IDS:
+    required_ids = REQUIRED_PLATFORM_POLICY_IDS_BY_RESOURCE_TYPE[resource_type]
+    for required_id in required_ids:
         matches = findings_by_policy_id.get(required_id, [])
 
         if not matches:

@@ -1,15 +1,24 @@
-"""Phase 1 deterministic platform policies for SQS requests.
+"""Phase 2 deterministic platform policies for SQS and S3 requests.
 
 `evaluate_platform_policies` is a pure function of two already-validated
-facts — an `SQSResourceSpec` and a `PlanSummary` — and nothing else. It
-never touches raw Terraform plan JSON, the Terraform CLI, Checkov, the
-AWS API, or an LLM. Given the same spec and plan summary, it always
-returns an equal `PolicyEvaluation`.
+facts — a resource spec (`SQSResourceSpec` or `S3ResourceSpec`) and a
+`PlanSummary` — and nothing else. It never touches raw Terraform plan
+JSON, the Terraform CLI, Checkov, the AWS API, or an LLM. Given the same
+spec and plan summary, it always returns an equal `PolicyEvaluation`.
+
+Resource-specific policies stay resource-specific (SQS encryption/DLQ
+checks only ever run for `SQSResourceSpec`; S3 encryption/public-access/
+versioning checks only ever run for `S3ResourceSpec`).
+`TF_NO_DESTRUCTIVE_CHANGES` is platform-wide — it never touches the
+resource spec at all, only the plan summary — so it is evaluated
+exactly once, for every resource type, rather than duplicated per
+resource.
 """
 
 from __future__ import annotations
 
 from iac_agent.domain.plan import PlanSummary
+from iac_agent.domain.resource import ResourceType
 from iac_agent.domain.security import (
     FindingSource,
     PolicyEvaluation,
@@ -17,32 +26,71 @@ from iac_agent.domain.security import (
     SecurityFinding,
     SecuritySeverity,
 )
+from iac_agent.providers.aws.resource import AWSResourceSpec
+from iac_agent.providers.aws.s3.contract import S3ResourceSpec
 from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
 
 SQS_ENCRYPTION_REQUIRED = "SQS_ENCRYPTION_REQUIRED"
 SQS_DLQ_RECOMMENDED = "SQS_DLQ_RECOMMENDED"
+S3_ENCRYPTION_REQUIRED = "S3_ENCRYPTION_REQUIRED"
+S3_PUBLIC_ACCESS_BLOCK_REQUIRED = "S3_PUBLIC_ACCESS_BLOCK_REQUIRED"
+S3_VERSIONING_RECOMMENDED = "S3_VERSIONING_RECOMMENDED"
 TF_NO_DESTRUCTIVE_CHANGES = "TF_NO_DESTRUCTIVE_CHANGES"
+
+#: The complete set of platform-policy IDs `evaluate_platform_policies`
+#: guarantees to emit for a request of each resource type — the single
+#: source of truth `iac_agent.security.gate.evaluate_security_gate`
+#: reads to check that platform-policy evaluation was complete before
+#: aggregating, rather than that module hardcoding its own resource-
+#: specific list (which is what let a Phase 1 SQS-only list silently
+#: reject every S3 request until Batch 16 fixed it).
+REQUIRED_PLATFORM_POLICY_IDS_BY_RESOURCE_TYPE: dict[ResourceType, tuple[str, ...]] = {
+    ResourceType.SQS: (SQS_ENCRYPTION_REQUIRED, SQS_DLQ_RECOMMENDED, TF_NO_DESTRUCTIVE_CHANGES),
+    ResourceType.S3: (
+        S3_ENCRYPTION_REQUIRED,
+        S3_PUBLIC_ACCESS_BLOCK_REQUIRED,
+        S3_VERSIONING_RECOMMENDED,
+        TF_NO_DESTRUCTIVE_CHANGES,
+    ),
+}
 
 
 def evaluate_platform_policies(
-    spec: SQSResourceSpec,
+    spec: AWSResourceSpec,
     plan_summary: PlanSummary,
 ) -> PolicyEvaluation:
-    """Evaluate every Phase 1 platform policy and return the aggregate result.
+    """Evaluate every applicable Phase 2 platform policy and return the
+    aggregate result.
 
-    One finding is always emitted per policy, including PASS — later
-    UI/eval consumers need positive evidence that a policy actually ran,
-    rather than inferring "no finding means pass".
+    One finding is always emitted per applicable policy, including
+    PASS — later UI/eval consumers need positive evidence that a policy
+    actually ran, rather than inferring "no finding means pass".
     """
-    findings = (
-        _evaluate_encryption_policy(spec),
-        _evaluate_dlq_policy(spec),
-        _evaluate_destructive_policy(plan_summary),
-    )
+    match spec:
+        case SQSResourceSpec():
+            resource_findings: tuple[SecurityFinding, ...] = (
+                _evaluate_sqs_encryption_policy(spec),
+                _evaluate_sqs_dlq_policy(spec),
+            )
+        case S3ResourceSpec():
+            resource_findings = (
+                _evaluate_s3_encryption_policy(spec),
+                _evaluate_s3_public_access_policy(spec),
+                _evaluate_s3_versioning_policy(spec),
+            )
+        case _:
+            raise ValueError(f"unsupported resource spec type: {type(spec).__name__}")
+
+    findings = (*resource_findings, _evaluate_destructive_policy(plan_summary))
     return PolicyEvaluation(findings=findings)
 
 
-def _evaluate_encryption_policy(spec: SQSResourceSpec) -> SecurityFinding:
+# ---------------------------------------------------------------------------
+# SQS policies
+# ---------------------------------------------------------------------------
+
+
+def _evaluate_sqs_encryption_policy(spec: SQSResourceSpec) -> SecurityFinding:
     """SQS_ENCRYPTION_REQUIRED — defense in depth.
 
     The Pydantic contract and the trusted Terraform module already make
@@ -69,7 +117,7 @@ def _evaluate_encryption_policy(spec: SQSResourceSpec) -> SecurityFinding:
     )
 
 
-def _evaluate_dlq_policy(spec: SQSResourceSpec) -> SecurityFinding:
+def _evaluate_sqs_dlq_policy(spec: SQSResourceSpec) -> SecurityFinding:
     """SQS_DLQ_RECOMMENDED — a warning, not a block.
 
     A disabled DLQ is a legitimate choice for some workloads, but the
@@ -92,6 +140,84 @@ def _evaluate_dlq_policy(spec: SQSResourceSpec) -> SecurityFinding:
         message="Dead-letter queue is disabled; review retry/failure handling.",
         source=FindingSource.PLATFORM_POLICY,
     )
+
+
+# ---------------------------------------------------------------------------
+# S3 policies
+# ---------------------------------------------------------------------------
+
+
+def _evaluate_s3_encryption_policy(spec: S3ResourceSpec) -> SecurityFinding:
+    """S3_ENCRYPTION_REQUIRED — defense in depth, mirroring the SQS
+    encryption policy exactly: the Pydantic contract and the trusted
+    Terraform module already make an unencrypted bucket unconstructible."""
+    if spec.encryption.enabled:
+        return SecurityFinding(
+            policy_id=S3_ENCRYPTION_REQUIRED,
+            severity=SecuritySeverity.HIGH,
+            status=PolicyStatus.PASS,
+            resource=spec.name,
+            message="S3 encryption is enabled.",
+            source=FindingSource.PLATFORM_POLICY,
+        )
+    return SecurityFinding(
+        policy_id=S3_ENCRYPTION_REQUIRED,
+        severity=SecuritySeverity.HIGH,
+        status=PolicyStatus.BLOCK,
+        resource=spec.name,
+        message="S3 encryption is disabled; this request cannot proceed.",
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+def _evaluate_s3_public_access_policy(spec: S3ResourceSpec) -> SecurityFinding:
+    """S3_PUBLIC_ACCESS_BLOCK_REQUIRED — defense in depth: the Pydantic
+    contract already makes `block_public_access=False` unconstructible."""
+    if spec.block_public_access:
+        return SecurityFinding(
+            policy_id=S3_PUBLIC_ACCESS_BLOCK_REQUIRED,
+            severity=SecuritySeverity.CRITICAL,
+            status=PolicyStatus.PASS,
+            resource=spec.name,
+            message="S3 public access is blocked.",
+            source=FindingSource.PLATFORM_POLICY,
+        )
+    return SecurityFinding(
+        policy_id=S3_PUBLIC_ACCESS_BLOCK_REQUIRED,
+        severity=SecuritySeverity.CRITICAL,
+        status=PolicyStatus.BLOCK,
+        resource=spec.name,
+        message="S3 public access block is disabled; this request cannot proceed.",
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+def _evaluate_s3_versioning_policy(spec: S3ResourceSpec) -> SecurityFinding:
+    """S3_VERSIONING_RECOMMENDED — a warning, not a block. Disabled
+    versioning is a legitimate choice for some workloads (mirrors the
+    SQS DLQ policy's WARN-not-BLOCK precedent)."""
+    if spec.versioning:
+        return SecurityFinding(
+            policy_id=S3_VERSIONING_RECOMMENDED,
+            severity=SecuritySeverity.MEDIUM,
+            status=PolicyStatus.PASS,
+            resource=spec.name,
+            message="S3 object versioning is enabled.",
+            source=FindingSource.PLATFORM_POLICY,
+        )
+    return SecurityFinding(
+        policy_id=S3_VERSIONING_RECOMMENDED,
+        severity=SecuritySeverity.MEDIUM,
+        status=PolicyStatus.WARN,
+        resource=spec.name,
+        message="S3 object versioning is disabled; review data-recovery requirements.",
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Platform-wide policy (resource-agnostic)
+# ---------------------------------------------------------------------------
 
 
 def _evaluate_destructive_policy(plan_summary: PlanSummary) -> SecurityFinding:
