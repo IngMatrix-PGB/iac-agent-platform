@@ -342,8 +342,28 @@ always identical to `build_sqs_workflow`'s own default), not merely
 undocumented; see `docs/compositions/api-lambda.md` for the full
 evaluation and its regression tests.
 
-**Next: not automatically implemented.** Candidate Batch 21 direction:
-natural-language architecture intent, or a full async API composition
+**Batch 21 (structured architecture intent) is implemented.** A new
+`iac_agent.intent` package adds the platform's first probabilistic
+boundary: `IntentInterpreterPort.interpret()` turns natural language
+into a validated `ArchitectureIntent` (a closed semantic vocabulary —
+`workload_type`/`interaction_pattern`/`capabilities` — never a
+resource/composition choice), and the pure, deterministic
+`ArchitectureResolver.resolve()` maps that intent onto exactly one of
+three existing, unchanged targets (`ApiLambdaSpec`,
+`ServerlessWorkerSpec`, `S3ResourceSpec`) via a closed, fail-closed
+allowlist — or returns `ClarificationRequired`/`UnsupportedArchitecture`
+instead of ever approximating. `IntentResolutionService` sits *in front
+of* the unchanged `IacApplication`/`build_iac_workflow`; a resolved
+architecture becomes simply another value handed to the same
+`IacApplication.submit()` every existing caller already uses. No LLM
+adapter, no LangChain, and no new runtime dependency were added this
+batch — see `docs/superpowers/specs/2026-09-15-structured-architecture-
+intent-design.md` and `docs/superpowers/plans/2026-09-15-structured-
+architecture-intent.md` for the full design and implementation record.
+
+**Next: not automatically implemented.** Candidate Batch 22 direction:
+a real natural-language-to-`ArchitectureIntent` provider adapter
+(Layer 2 of Batch 21's eval strategy), or a full async API composition
 (API Gateway → Lambda → SQS → Lambda → DynamoDB) — a design review is
 expected before either is started; this project is not yet a full
 serverless platform.
@@ -352,6 +372,6 @@ serverless platform.
 
 EventBridge, SNS, a second Lambda in one composition, chaining the two
 existing compositions together, Cognito/JWT/Lambda authorizers, WAF,
-custom domains, a FastAPI/HTTP adapter, natural-language/LLM-driven
-intent parsing, and any UI remain entirely out of scope until a future
-phase is explicitly approved.
+custom domains, a FastAPI/HTTP adapter, a real LLM-backed
+`IntentInterpreterPort` adapter, and any UI remain entirely out of
+scope until a future phase is explicitly approved.

@@ -39,6 +39,14 @@ AWS resource spec (SQS queue, S3 bucket, DynamoDB table, Lambda function, or API
   → GitHub pull request
 ```
 
+An `IntentResolutionService` (Batch 21) optionally sits in front of
+this pipeline, accepting natural language and resolving it — via a
+closed, deterministic allowlist, never an LLM choice — to one of the
+same typed requests above; it never introduces a new resource,
+composition, or terminal artifact, and unresolved or unsupported
+requests never reach Terraform at all. See
+`docs/superpowers/specs/2026-09-15-structured-architecture-intent-design.md`.
+
 A request is only ever *proposed* as a reviewable pull request — it is
 never deployed. See `docs/application.md`, `docs/hitl.md`,
 `docs/source-control.md`, `docs/resources/s3.md`,
