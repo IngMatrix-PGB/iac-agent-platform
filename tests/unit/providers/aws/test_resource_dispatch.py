@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from iac_agent.domain.resource import ResourceType
+from iac_agent.providers.aws.api_gateway.contract import ApiGatewayResourceSpec
 from iac_agent.providers.aws.dynamodb.contract import (
     DynamoDBKeySpec,
     DynamoDBKeyType,
@@ -36,6 +37,11 @@ def test_dynamodb_spec_classified_as_dynamodb():
 def test_lambda_spec_classified_as_lambda():
     spec = LambdaResourceSpec(name="orders-processor", handler="app.handler")
     assert resource_type_of(spec) is ResourceType.LAMBDA
+
+
+def test_api_gateway_spec_classified_as_api_gateway():
+    spec = ApiGatewayResourceSpec(name="orders-api")
+    assert resource_type_of(spec) is ResourceType.API_GATEWAY
 
 
 def test_unsupported_spec_type_fails_closed():

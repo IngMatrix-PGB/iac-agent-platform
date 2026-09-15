@@ -22,3 +22,4 @@ class ResourceType(StrEnum):
     S3 = "s3"
     DYNAMODB = "dynamodb"
     LAMBDA = "lambda"
+    API_GATEWAY = "api_gateway"

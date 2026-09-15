@@ -13,6 +13,8 @@ than silently defaulting to SQS.
 
 from __future__ import annotations
 
+from iac_agent.providers.aws.api_gateway.contract import ApiGatewayResourceSpec
+from iac_agent.providers.aws.api_gateway.renderer import ApiGatewayTerraformCompositionRenderer
 from iac_agent.providers.aws.dynamodb.contract import DynamoDBResourceSpec
 from iac_agent.providers.aws.dynamodb.renderer import DynamoDBTerraformCompositionRenderer
 from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec
@@ -39,6 +41,7 @@ class AWSResourceRenderer:
         s3_renderer: S3TerraformCompositionRenderer | None = None,
         dynamodb_renderer: DynamoDBTerraformCompositionRenderer | None = None,
         lambda_renderer: LambdaTerraformCompositionRenderer | None = None,
+        api_gateway_renderer: ApiGatewayTerraformCompositionRenderer | None = None,
     ) -> None:
         self._sqs_renderer = (
             sqs_renderer if sqs_renderer is not None else TerraformCompositionRenderer()
@@ -54,6 +57,11 @@ class AWSResourceRenderer:
         self._lambda_renderer = (
             lambda_renderer if lambda_renderer is not None else LambdaTerraformCompositionRenderer()
         )
+        self._api_gateway_renderer = (
+            api_gateway_renderer
+            if api_gateway_renderer is not None
+            else ApiGatewayTerraformCompositionRenderer()
+        )
 
     def render(self, spec: AWSResourceSpec, *, module_source: str) -> GeneratedTerraformComposition:
         match spec:
@@ -65,4 +73,6 @@ class AWSResourceRenderer:
                 return self._dynamodb_renderer.render(spec, module_source=module_source)
             case LambdaResourceSpec():
                 return self._lambda_renderer.render(spec, module_source=module_source)
+            case ApiGatewayResourceSpec():
+                return self._api_gateway_renderer.render(spec, module_source=module_source)
         raise ValueError(f"unsupported resource spec type: {type(spec).__name__}")

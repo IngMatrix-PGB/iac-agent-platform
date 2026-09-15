@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from iac_agent.providers.aws.api_gateway.contract import ApiGatewayResourceSpec
 from iac_agent.providers.aws.dynamodb.contract import (
     DynamoDBKeySpec,
     DynamoDBKeyType,
@@ -30,6 +31,7 @@ def _dispatcher(**overrides):
         "s3_renderer": _RecordingRenderer(),
         "dynamodb_renderer": _RecordingRenderer(),
         "lambda_renderer": _RecordingRenderer(),
+        "api_gateway_renderer": _RecordingRenderer(),
     }
     defaults.update(overrides)
     return AWSResourceRenderer(**defaults), defaults
@@ -47,6 +49,7 @@ def test_sqs_spec_dispatches_to_sqs_renderer():
     assert renderers["s3_renderer"].calls == []
     assert renderers["dynamodb_renderer"].calls == []
     assert renderers["lambda_renderer"].calls == []
+    assert renderers["api_gateway_renderer"].calls == []
 
 
 def test_s3_spec_dispatches_to_s3_renderer():
@@ -61,6 +64,7 @@ def test_s3_spec_dispatches_to_s3_renderer():
     assert renderers["sqs_renderer"].calls == []
     assert renderers["dynamodb_renderer"].calls == []
     assert renderers["lambda_renderer"].calls == []
+    assert renderers["api_gateway_renderer"].calls == []
 
 
 def test_dynamodb_spec_dispatches_to_dynamodb_renderer():
@@ -77,6 +81,7 @@ def test_dynamodb_spec_dispatches_to_dynamodb_renderer():
     assert renderers["sqs_renderer"].calls == []
     assert renderers["s3_renderer"].calls == []
     assert renderers["lambda_renderer"].calls == []
+    assert renderers["api_gateway_renderer"].calls == []
 
 
 def test_lambda_spec_dispatches_to_lambda_renderer():
@@ -91,6 +96,22 @@ def test_lambda_spec_dispatches_to_lambda_renderer():
     assert renderers["sqs_renderer"].calls == []
     assert renderers["s3_renderer"].calls == []
     assert renderers["dynamodb_renderer"].calls == []
+    assert renderers["api_gateway_renderer"].calls == []
+
+
+def test_api_gateway_spec_dispatches_to_api_gateway_renderer():
+    dispatcher, renderers = _dispatcher()
+
+    spec = ApiGatewayResourceSpec(name="orders-api")
+    result = dispatcher.render(spec, module_source="../../terraform/modules/api_gateway")
+
+    assert result == "rendered"
+    assert len(renderers["api_gateway_renderer"].calls) == 1
+    assert renderers["api_gateway_renderer"].calls[0]["spec"] is spec
+    assert renderers["sqs_renderer"].calls == []
+    assert renderers["s3_renderer"].calls == []
+    assert renderers["dynamodb_renderer"].calls == []
+    assert renderers["lambda_renderer"].calls == []
 
 
 def test_unsupported_spec_type_fails_closed_never_defaults_to_sqs():
@@ -103,6 +124,7 @@ def test_unsupported_spec_type_fails_closed_never_defaults_to_sqs():
     assert renderers["s3_renderer"].calls == []
     assert renderers["dynamodb_renderer"].calls == []
     assert renderers["lambda_renderer"].calls == []
+    assert renderers["api_gateway_renderer"].calls == []
 
 
 def test_default_construction_uses_real_renderers():
