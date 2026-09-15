@@ -1,19 +1,24 @@
-"""Unit tests for the request-level rendering dispatch boundary (Batch 19).
+"""Unit tests for the request-level rendering dispatch boundary
+(Batches 19-20).
 
 Mirrors tests/unit/providers/aws/test_renderer_dispatch.py's discipline:
 proves `IacRenderer` dispatches an `AWSResourceSpec` to
-`AWSResourceRenderer` and a `ServerlessWorkerSpec` to
-`ServerlessWorkerTerraformRenderer`, computing the right module-source
-shape for each from the same `trusted_module_dirs` mapping.
+`AWSResourceRenderer`, a `ServerlessWorkerSpec` to
+`ServerlessWorkerTerraformRenderer`, and an `ApiLambdaSpec` to
+`ApiLambdaTerraformRenderer`, computing the right module-source shape
+for each from the same `trusted_module_dirs` mapping.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
+from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec, HttpMethod, RouteSpec
+from iac_agent.compositions.api_lambda.renderer import ApiLambdaModuleSources
 from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
 from iac_agent.compositions.serverless_worker.renderer import ServerlessWorkerModuleSources
 from iac_agent.domain.resource import ResourceType
+from iac_agent.providers.aws.api_gateway.contract import ApiGatewayResourceSpec
 from iac_agent.providers.aws.dynamodb.contract import DynamoDBKeySpec, DynamoDBResourceSpec
 from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec
 from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
@@ -38,11 +43,21 @@ class _FakeServerlessWorkerRenderer:
         return "composition-rendered"
 
 
+class _FakeApiLambdaRenderer:
+    def __init__(self):
+        self.calls: list[tuple] = []
+
+    def render(self, spec, *, module_sources):
+        self.calls.append((spec, module_sources))
+        return "api-lambda-rendered"
+
+
 _TRUSTED_MODULE_DIRS = {
     ResourceType.SQS: Path("/repo/terraform/modules/sqs"),
     ResourceType.S3: Path("/repo/terraform/modules/s3"),
     ResourceType.DYNAMODB: Path("/repo/terraform/modules/dynamodb"),
     ResourceType.LAMBDA: Path("/repo/terraform/modules/lambda"),
+    ResourceType.API_GATEWAY: Path("/repo/terraform/modules/api_gateway"),
 }
 
 
@@ -93,8 +108,40 @@ def test_serverless_worker_spec_dispatches_to_the_composition_renderer():
     )
 
 
+def test_api_lambda_spec_dispatches_to_the_api_lambda_renderer():
+    fake_aws = _FakeAWSResourceRenderer()
+    fake_serverless_worker = _FakeServerlessWorkerRenderer()
+    fake_api_lambda = _FakeApiLambdaRenderer()
+    renderer = IacRenderer(
+        aws_renderer=fake_aws,
+        serverless_worker_renderer=fake_serverless_worker,
+        api_lambda_renderer=fake_api_lambda,
+    )
+
+    spec = ApiLambdaSpec(
+        name="orders-api-worker",
+        api=ApiGatewayResourceSpec(name="orders-api"),
+        function=LambdaResourceSpec(name="orders-handler", handler="app.handler"),
+        route=RouteSpec(method=HttpMethod.POST, path="/orders"),
+    )
+    workspace = Path("/repo/artifacts/req-3")
+
+    result = renderer.render(spec, trusted_module_dirs=_TRUSTED_MODULE_DIRS, workspace=workspace)
+
+    assert result == "api-lambda-rendered"
+    assert fake_aws.calls == []
+    assert fake_serverless_worker.calls == []
+    assert len(fake_api_lambda.calls) == 1
+    called_spec, module_sources = fake_api_lambda.calls[0]
+    assert called_spec is spec
+    assert module_sources == ApiLambdaModuleSources(
+        api="../../terraform/modules/api_gateway",
+        function="../../terraform/modules/lambda",
+    )
+
+
 def test_default_construction_builds_real_renderers():
     # No fakes injected — proves the default-construction path works
-    # (both concrete renderers are cheap, stateless, real objects).
+    # (all concrete renderers are cheap, stateless, real objects).
     renderer = IacRenderer()
     assert renderer is not None

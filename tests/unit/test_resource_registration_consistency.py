@@ -21,6 +21,7 @@ from iac_agent.policies.platform import (
     TF_NO_DESTRUCTIVE_CHANGES,
     evaluate_platform_policies,
 )
+from iac_agent.providers.aws.api_gateway.contract import ApiGatewayResourceSpec
 from iac_agent.providers.aws.dynamodb.contract import (
     DynamoDBKeySpec,
     DynamoDBKeyType,
@@ -44,6 +45,7 @@ _EXAMPLE_SPECS: dict[ResourceType, AWSResourceSpec] = {
         name="orders-table", partition_key=DynamoDBKeySpec(name="pk", type=DynamoDBKeyType.STRING)
     ),
     ResourceType.LAMBDA: LambdaResourceSpec(name="orders-processor", handler="app.handler"),
+    ResourceType.API_GATEWAY: ApiGatewayResourceSpec(name="orders-api"),
 }
 
 

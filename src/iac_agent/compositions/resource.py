@@ -10,10 +10,11 @@ mirroring `resource_type_of` exactly.
 
 from __future__ import annotations
 
+from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec
 from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
 from iac_agent.domain.composition import CompositionType
 
-CompositionSpec = ServerlessWorkerSpec
+CompositionSpec = ServerlessWorkerSpec | ApiLambdaSpec
 
 
 def composition_type_of(spec: CompositionSpec) -> CompositionType:
@@ -26,4 +27,6 @@ def composition_type_of(spec: CompositionSpec) -> CompositionType:
     match spec:
         case ServerlessWorkerSpec():
             return CompositionType.SQS_LAMBDA_DYNAMODB
+        case ApiLambdaSpec():
+            return CompositionType.API_GATEWAY_LAMBDA
     raise ValueError(f"unsupported composition spec type: {type(spec).__name__}")
