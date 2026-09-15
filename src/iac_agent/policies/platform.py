@@ -34,6 +34,7 @@ from iac_agent.domain.security import (
     SecurityFinding,
     SecuritySeverity,
 )
+from iac_agent.policies.shared import TF_NO_DESTRUCTIVE_CHANGES, evaluate_destructive_policy
 from iac_agent.providers.aws.dynamodb.contract import DynamoDBResourceSpec
 from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec, LambdaTracingMode
 from iac_agent.providers.aws.resource import AWSResourceSpec
@@ -51,7 +52,9 @@ DDB_DELETION_PROTECTION_RECOMMENDED = "DDB_DELETION_PROTECTION_RECOMMENDED"
 LAMBDA_TRACING_RECOMMENDED = "LAMBDA_TRACING_RECOMMENDED"
 LAMBDA_RESERVED_CONCURRENCY_RECOMMENDED = "LAMBDA_RESERVED_CONCURRENCY_RECOMMENDED"
 LAMBDA_LOG_RETENTION_REQUIRED = "LAMBDA_LOG_RETENTION_REQUIRED"
-TF_NO_DESTRUCTIVE_CHANGES = "TF_NO_DESTRUCTIVE_CHANGES"
+#: Re-exported from `iac_agent.policies.shared` so every existing call
+#: site importing `TF_NO_DESTRUCTIVE_CHANGES` from this module keeps
+#: working unchanged — the constant object is identical either way.
 
 #: The complete set of platform-policy IDs `evaluate_platform_policies`
 #: guarantees to emit for a request of each resource type — the single
@@ -109,19 +112,19 @@ def evaluate_platform_policies(
         case DynamoDBResourceSpec():
             resource_findings = (
                 _evaluate_dynamodb_encryption_policy(spec),
-                _evaluate_dynamodb_pitr_policy(spec),
-                _evaluate_dynamodb_deletion_protection_policy(spec),
+                evaluate_dynamodb_pitr_policy(spec),
+                evaluate_dynamodb_deletion_protection_policy(spec),
             )
         case LambdaResourceSpec():
             resource_findings = (
-                _evaluate_lambda_tracing_policy(spec),
-                _evaluate_lambda_reserved_concurrency_policy(spec),
+                evaluate_lambda_tracing_policy(spec),
+                evaluate_lambda_reserved_concurrency_policy(spec),
                 _evaluate_lambda_log_retention_policy(spec),
             )
         case _:
             raise ValueError(f"unsupported resource spec type: {type(spec).__name__}")
 
-    findings = (*resource_findings, _evaluate_destructive_policy(plan_summary))
+    findings = (*resource_findings, evaluate_destructive_policy(plan_summary))
     return PolicyEvaluation(findings=findings)
 
 
@@ -283,7 +286,7 @@ def _evaluate_dynamodb_encryption_policy(spec: DynamoDBResourceSpec) -> Security
     )
 
 
-def _evaluate_dynamodb_pitr_policy(spec: DynamoDBResourceSpec) -> SecurityFinding:
+def evaluate_dynamodb_pitr_policy(spec: DynamoDBResourceSpec) -> SecurityFinding:
     """DDB_PITR_RECOMMENDED — a warning, not a block. Disabled
     point-in-time recovery is a legitimate choice for some workloads
     (mirrors the SQS DLQ / S3 versioning WARN-not-BLOCK precedent)."""
@@ -306,7 +309,7 @@ def _evaluate_dynamodb_pitr_policy(spec: DynamoDBResourceSpec) -> SecurityFindin
     )
 
 
-def _evaluate_dynamodb_deletion_protection_policy(spec: DynamoDBResourceSpec) -> SecurityFinding:
+def evaluate_dynamodb_deletion_protection_policy(spec: DynamoDBResourceSpec) -> SecurityFinding:
     """DDB_DELETION_PROTECTION_RECOMMENDED — a warning, not a block:
     users may legitimately need an ephemeral/demo table, so this is
     never force-corrected back to True, only flagged."""
@@ -334,7 +337,7 @@ def _evaluate_dynamodb_deletion_protection_policy(spec: DynamoDBResourceSpec) ->
 # ---------------------------------------------------------------------------
 
 
-def _evaluate_lambda_tracing_policy(spec: LambdaResourceSpec) -> SecurityFinding:
+def evaluate_lambda_tracing_policy(spec: LambdaResourceSpec) -> SecurityFinding:
     """LAMBDA_TRACING_RECOMMENDED — a warning, not a block. Disabling
     active X-Ray tracing (PassThrough) is a legitimate choice for some
     workloads, mirroring the SQS DLQ / S3 versioning WARN-not-BLOCK
@@ -358,7 +361,7 @@ def _evaluate_lambda_tracing_policy(spec: LambdaResourceSpec) -> SecurityFinding
     )
 
 
-def _evaluate_lambda_reserved_concurrency_policy(spec: LambdaResourceSpec) -> SecurityFinding:
+def evaluate_lambda_reserved_concurrency_policy(spec: LambdaResourceSpec) -> SecurityFinding:
     """LAMBDA_RESERVED_CONCURRENCY_RECOMMENDED — a warning, not a
     block. An explicit reserved-concurrency limit reduces runaway-
     invocation/cost risk, but omitting it is a legitimate choice for
@@ -404,35 +407,7 @@ def _evaluate_lambda_log_retention_policy(spec: LambdaResourceSpec) -> SecurityF
     )
 
 
-# ---------------------------------------------------------------------------
-# Platform-wide policy (resource-agnostic)
-# ---------------------------------------------------------------------------
-
-
-def _evaluate_destructive_policy(plan_summary: PlanSummary) -> SecurityFinding:
-    """TF_NO_DESTRUCTIVE_CHANGES — blocks on any destructive plan action.
-
-    A REPLACE is destructive (it contains a delete) exactly as
-    established in Batch 6's PlanSummary semantics; no exception is
-    made for it here. ``resource`` is left None because this finding
-    can summarize more than one resource — the destroyed addresses are
-    named in the message instead, never with raw before/after values.
-    """
-    if not plan_summary.destructive_change_detected:
-        return SecurityFinding(
-            policy_id=TF_NO_DESTRUCTIVE_CHANGES,
-            severity=SecuritySeverity.CRITICAL,
-            status=PolicyStatus.PASS,
-            resource=None,
-            message="Terraform plan contains no destructive changes.",
-            source=FindingSource.PLATFORM_POLICY,
-        )
-    addresses = ", ".join(sorted(plan_summary.resources_to_destroy))
-    return SecurityFinding(
-        policy_id=TF_NO_DESTRUCTIVE_CHANGES,
-        severity=SecuritySeverity.CRITICAL,
-        status=PolicyStatus.BLOCK,
-        resource=None,
-        message=f"Terraform plan contains destructive changes: {addresses}.",
-        source=FindingSource.PLATFORM_POLICY,
-    )
+# Platform-wide policy (resource-agnostic): see
+# `iac_agent.policies.shared.evaluate_destructive_policy` — moved there
+# in Batch 19 once `iac_agent.policies.composition` needed the exact
+# same TF_NO_DESTRUCTIVE_CHANGES logic for composition requests.

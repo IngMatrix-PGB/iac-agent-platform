@@ -9,9 +9,21 @@ existing domain models (``AWSResourceSpec``, ``PlanSummary``,
 dicts.
 
 Batch 16 (Phase 2) widened ``resource_spec`` from ``SQSResourceSpec`` to
-the ``AWSResourceSpec`` union (currently SQS or S3) — a typing-only
-change; nothing about how this ``TypedDict`` is constructed, stored, or
-checkpointed changes.
+the ``AWSResourceSpec`` union (currently SQS, S3, DynamoDB, or Lambda)
+— a typing-only change; nothing about how this ``TypedDict`` is
+constructed, stored, or checkpointed changed.
+
+Batch 19 widens it again to ``IacRequestSpec`` (``AWSResourceSpec |
+ServerlessWorkerSpec``), so one workflow can carry either a single AWS
+resource request or a multi-resource composition request. The field is
+deliberately **not** renamed to ``request_spec``: every graph node,
+every test in this project, and the application layer already spell it
+``resource_spec``, and a composition spec still has exactly the shape
+every current reader of this field needs (a ``.name`` attribute, and a
+type dispatchable via ``iac_agent.request.IacRequestSpec``'s own
+``match``/``case`` handling in ``iac_agent.graph.workflow``) — renaming
+here would be cosmetic churn across dozens of call sites for no
+behavioral benefit, not a fix for an actual type mismatch.
 """
 
 from __future__ import annotations
@@ -24,7 +36,7 @@ from iac_agent.domain.plan import PlanSummary
 from iac_agent.domain.security import PolicyEvaluation, SecurityGateResult
 from iac_agent.domain.source_control import PullRequestResult
 from iac_agent.domain.workflow import WorkflowError, WorkflowStage, WorkflowStatus
-from iac_agent.providers.aws.resource import AWSResourceSpec
+from iac_agent.request import IacRequestSpec
 from iac_agent.security.checkov import CheckovScanResult
 
 
@@ -58,7 +70,7 @@ class WorkflowState(TypedDict, total=False):
     """
 
     request_id: str
-    resource_spec: AWSResourceSpec
+    resource_spec: IacRequestSpec
 
     workspace: Path
     generated_files: dict[str, str] | None
