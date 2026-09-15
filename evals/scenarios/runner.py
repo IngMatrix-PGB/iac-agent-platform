@@ -51,8 +51,14 @@ def run_sqs_golden_evals(dataset_path: Path | str = DEFAULT_DATASET_PATH) -> Eva
     return EvalSuiteResult(results=tuple(results))
 
 
-def format_summary(suite: EvalSuiteResult) -> str:
-    """A deterministic, plain-text summary suitable for CI logs."""
+def format_summary(suite: EvalSuiteResult, *, title: str = "SQS Golden Evals") -> str:
+    """A deterministic, plain-text summary suitable for CI logs.
+
+    `title` defaults to the original SQS-only heading so every existing
+    call site is unaffected; `evals.scenarios.s3_runner` passes
+    `title="S3 Golden Evals"` — this function has no resource-specific
+    logic of its own, only the heading text differs.
+    """
     scenario_order: list[str] = []
     by_scenario: dict[str, list[EvalResult]] = {}
     for result in suite.results:
@@ -62,8 +68,8 @@ def format_summary(suite: EvalSuiteResult) -> str:
         by_scenario[result.scenario_id].append(result)
 
     lines = [
-        "SQS Golden Evals",
-        "----------------",
+        title,
+        "-" * len(title),
         f"Scenarios: {len(scenario_order)}",
         f"Evaluations: {suite.total}",
         f"Passed: {suite.passed}",

@@ -16,6 +16,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from iac_agent.providers.aws.kms import validate_kms_key_id
+
 # -- Queue name -----------------------------------------------------------
 
 _MAX_NAME_LENGTH = 80
@@ -32,18 +34,6 @@ _DELAY_MIN = 0
 _DELAY_MAX = 900
 _MAX_RECEIVE_COUNT_MIN = 1
 _MAX_RECEIVE_COUNT_MAX = 1000
-
-# -- KMS key identifier -----------------------------------------------------
-# Loose, deterministic, offline pattern matching for the shapes AWS actually
-# issues. No network lookup is ever performed against KMS.
-
-_KMS_KEY_ARN = r"arn:aws:kms:[a-z0-9-]+:\d{12}:key/[0-9a-fA-F-]{36}"
-_KMS_ALIAS_ARN = r"arn:aws:kms:[a-z0-9-]+:\d{12}:alias/[A-Za-z0-9/_-]+"
-_KMS_ALIAS_NAME = r"alias/[A-Za-z0-9/_-]+"
-_KMS_BARE_KEY_ID = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
-_KMS_KEY_ID_PATTERN = re.compile(
-    rf"^({_KMS_KEY_ARN}|{_KMS_ALIAS_ARN}|{_KMS_ALIAS_NAME}|{_KMS_BARE_KEY_ID})$"
-)
 
 
 def _validate_queue_name(value: str) -> str:
@@ -117,12 +107,7 @@ class EncryptionSpec(BaseModel):
     def _validate_kms_key_id(cls, value: str | None) -> str | None:
         if value is None:
             return value
-        candidate = value.strip()
-        if not candidate or not _KMS_KEY_ID_PATTERN.match(candidate):
-            raise ValueError(
-                f"kms_key_id {value!r} is not a recognizable KMS key ARN, alias, or key ID"
-            )
-        return candidate
+        return validate_kms_key_id(value)
 
 
 class DlqSpec(BaseModel):

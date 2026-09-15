@@ -1,0 +1,188 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "basic_secure_bucket",
+      "description": "A minimal valid bucket using only the name, with every other field left at its safe default (versioning on, encryption on with no KMS key, public access blocked).",
+      "input": {
+        "name": "basic-reports-bucket"
+      },
+      "expected": {
+        "valid": true,
+        "bucket_name": "basic-reports-bucket",
+        "versioning": true,
+        "encryption_enabled": true,
+        "kms_key_id": null,
+        "block_public_access": true,
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "versioning_explicitly_enabled",
+      "description": "Versioning explicitly set to true (the default), still passing.",
+      "input": {
+        "name": "order-events-bucket",
+        "versioning": true
+      },
+      "expected": {
+        "valid": true,
+        "bucket_name": "order-events-bucket",
+        "versioning": true,
+        "encryption_enabled": true,
+        "kms_key_id": null,
+        "block_public_access": true,
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "versioning_disabled_warn",
+      "description": "A valid bucket with versioning intentionally disabled — a legitimate but risk-flagged configuration, proving WARN is a real non-blocking outcome for S3 exactly as it is for SQS's DLQ policy.",
+      "input": {
+        "name": "order-events-bucket",
+        "versioning": false
+      },
+      "expected": {
+        "valid": true,
+        "bucket_name": "order-events-bucket",
+        "versioning": false,
+        "encryption_enabled": true,
+        "kms_key_id": null,
+        "block_public_access": true,
+        "overall_security_status": "warn"
+      }
+    },
+    {
+      "id": "kms_encrypted_bucket",
+      "description": "A bucket referencing an existing KMS key (SSE-KMS).",
+      "input": {
+        "name": "payment-reports-bucket",
+        "encryption": {
+          "kms_key_id": "alias/aws/s3"
+        }
+      },
+      "expected": {
+        "valid": true,
+        "bucket_name": "payment-reports-bucket",
+        "versioning": true,
+        "encryption_enabled": true,
+        "kms_key_id": "alias/aws/s3",
+        "block_public_access": true,
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "valid_tags_bucket",
+      "description": "A valid bucket carrying explicit tags — tags are metadata-only and must never affect security evaluation.",
+      "input": {
+        "name": "tagged-reports-bucket",
+        "tags": {
+          "Service": "reports",
+          "Environment": "production"
+        }
+      },
+      "expected": {
+        "valid": true,
+        "bucket_name": "tagged-reports-bucket",
+        "versioning": true,
+        "encryption_enabled": true,
+        "kms_key_id": null,
+        "block_public_access": true,
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "invalid_uppercase_name",
+      "description": "A bucket name containing uppercase letters, which S3's naming rules never allow.",
+      "input": {
+        "name": "InvalidBucketName"
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_too_short_name",
+      "description": "A bucket name below the 3-character minimum length.",
+      "input": {
+        "name": "ab"
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_too_long_name",
+      "description": "A bucket name above the 63-character maximum length.",
+      "input": {
+        "name": "a123456789012345678901234567890123456789012345678901234567890123"
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_ipv4_shaped_name",
+      "description": "A bucket name formatted as an IPv4 address, which AWS rejects regardless of whether the octets are in range.",
+      "input": {
+        "name": "192.168.1.1"
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_adjacent_periods_name",
+      "description": "A bucket name containing two adjacent periods, which S3's naming rules never allow.",
+      "input": {
+        "name": "my..reports.bucket"
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_reserved_prefix_name",
+      "description": "A bucket name starting with the reserved 'xn--' prefix (used for directory buckets).",
+      "input": {
+        "name": "xn--reports-bucket"
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_reserved_suffix_name",
+      "description": "A bucket name ending with the reserved '-s3alias' suffix.",
+      "input": {
+        "name": "reports-bucket-s3alias"
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "attempted_encryption_disable",
+      "description": "An attempt to construct a bucket with encryption explicitly disabled — must be rejected at the Pydantic contract boundary before any rendering, planning, or security evaluation occurs.",
+      "input": {
+        "name": "order-events-bucket",
+        "encryption": {
+          "enabled": false
+        }
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "attempted_public_access_unblock",
+      "description": "An attempt to construct a bucket with public access unblocked — must be rejected at the Pydantic contract boundary, mirroring the encryption hard invariant.",
+      "input": {
+        "name": "order-events-bucket",
+        "block_public_access": false
+      },
+      "expected": {
+        "valid": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,244 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "secure_basic_table",
+      "description": "A minimal valid table using only the name and partition key, with every other field left at its safe default (PITR on, deletion protection on, encryption on).",
+      "input": {
+        "name": "basic-orders-table",
+        "partition_key": {"name": "pk", "type": "S"}
+      },
+      "expected": {
+        "valid": true,
+        "table_name": "basic-orders-table",
+        "partition_key_name": "pk",
+        "partition_key_type": "S",
+        "sort_key_name": null,
+        "sort_key_type": null,
+        "point_in_time_recovery": true,
+        "deletion_protection": true,
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "partition_key_string",
+      "description": "A table with an explicit STRING partition key.",
+      "input": {
+        "name": "orders-table",
+        "partition_key": {"name": "order_id", "type": "S"}
+      },
+      "expected": {
+        "valid": true,
+        "table_name": "orders-table",
+        "partition_key_name": "order_id",
+        "partition_key_type": "S",
+        "point_in_time_recovery": true,
+        "deletion_protection": true,
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "partition_key_number",
+      "description": "A table with a NUMBER partition key.",
+      "input": {
+        "name": "events-table",
+        "partition_key": {"name": "event_id", "type": "N"}
+      },
+      "expected": {
+        "valid": true,
+        "table_name": "events-table",
+        "partition_key_name": "event_id",
+        "partition_key_type": "N",
+        "point_in_time_recovery": true,
+        "deletion_protection": true,
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "partition_and_sort_key",
+      "description": "A table with both a partition key and a sort key of different types.",
+      "input": {
+        "name": "orders-table",
+        "partition_key": {"name": "customer_id", "type": "S"},
+        "sort_key": {"name": "order_timestamp", "type": "N"}
+      },
+      "expected": {
+        "valid": true,
+        "table_name": "orders-table",
+        "partition_key_name": "customer_id",
+        "partition_key_type": "S",
+        "sort_key_name": "order_timestamp",
+        "sort_key_type": "N",
+        "point_in_time_recovery": true,
+        "deletion_protection": true,
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "invalid_duplicate_partition_and_sort_key_name",
+      "description": "The partition key and sort key must not share the same attribute name.",
+      "input": {
+        "name": "orders-table",
+        "partition_key": {"name": "id", "type": "S"},
+        "sort_key": {"name": "id", "type": "N"}
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_table_name_too_short",
+      "description": "A table name below the 3-character minimum length.",
+      "input": {
+        "name": "ab",
+        "partition_key": {"name": "pk", "type": "S"}
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_table_name_unsupported_character",
+      "description": "A table name containing a space, which DynamoDB's naming rules never allow.",
+      "input": {
+        "name": "orders table",
+        "partition_key": {"name": "pk", "type": "S"}
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_key_type",
+      "description": "A partition key type outside the S/N/B descriptor set.",
+      "input": {
+        "name": "orders-table",
+        "partition_key": {"name": "pk", "type": "X"}
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "pitr_explicitly_enabled",
+      "description": "Point-in-time recovery explicitly set to true (the default), still passing.",
+      "input": {
+        "name": "orders-table",
+        "partition_key": {"name": "pk", "type": "S"},
+        "point_in_time_recovery": true
+      },
+      "expected": {
+        "valid": true,
+        "table_name": "orders-table",
+        "partition_key_name": "pk",
+        "partition_key_type": "S",
+        "point_in_time_recovery": true,
+        "deletion_protection": true,
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "pitr_disabled_warn",
+      "description": "A valid table with point-in-time recovery intentionally disabled — a legitimate but risk-flagged configuration, proving WARN is a real non-blocking outcome for DynamoDB exactly as it is for SQS/S3.",
+      "input": {
+        "name": "orders-table",
+        "partition_key": {"name": "pk", "type": "S"},
+        "point_in_time_recovery": false
+      },
+      "expected": {
+        "valid": true,
+        "table_name": "orders-table",
+        "partition_key_name": "pk",
+        "partition_key_type": "S",
+        "point_in_time_recovery": false,
+        "deletion_protection": true,
+        "overall_security_status": "warn"
+      }
+    },
+    {
+      "id": "deletion_protection_explicitly_enabled",
+      "description": "Deletion protection explicitly set to true (the default), still passing.",
+      "input": {
+        "name": "orders-table",
+        "partition_key": {"name": "pk", "type": "S"},
+        "deletion_protection": true
+      },
+      "expected": {
+        "valid": true,
+        "table_name": "orders-table",
+        "partition_key_name": "pk",
+        "partition_key_type": "S",
+        "point_in_time_recovery": true,
+        "deletion_protection": true,
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "deletion_protection_disabled_warn",
+      "description": "A valid table with deletion protection intentionally disabled — a legitimate choice for an ephemeral/demo table, surfaced as WARN, never force-corrected back to true.",
+      "input": {
+        "name": "orders-table",
+        "partition_key": {"name": "pk", "type": "S"},
+        "deletion_protection": false
+      },
+      "expected": {
+        "valid": true,
+        "table_name": "orders-table",
+        "partition_key_name": "pk",
+        "partition_key_type": "S",
+        "point_in_time_recovery": true,
+        "deletion_protection": false,
+        "overall_security_status": "warn"
+      }
+    },
+    {
+      "id": "attempted_encryption_disable",
+      "description": "An attempt to construct a table with encryption explicitly disabled — must be rejected at the Pydantic contract boundary before any rendering, planning, or security evaluation occurs.",
+      "input": {
+        "name": "orders-table",
+        "partition_key": {"name": "pk", "type": "S"},
+        "encryption": {"enabled": false}
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "valid_tags_table",
+      "description": "A valid table carrying explicit tags — tags are metadata-only and must never affect security evaluation.",
+      "input": {
+        "name": "orders-table",
+        "partition_key": {"name": "pk", "type": "S"},
+        "tags": {"Service": "orders", "Environment": "production"}
+      },
+      "expected": {
+        "valid": true,
+        "table_name": "orders-table",
+        "partition_key_name": "pk",
+        "partition_key_type": "S",
+        "point_in_time_recovery": true,
+        "deletion_protection": true,
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "deterministic_defaults",
+      "description": "Constructing the same minimal input twice must yield identical field values — the deterministic-defaults counterpart to the SQS/S3 golden datasets' equivalent scenario.",
+      "input": {
+        "name": "orders-table",
+        "partition_key": {"name": "pk", "type": "S"}
+      },
+      "expected": {
+        "valid": true,
+        "table_name": "orders-table",
+        "partition_key_name": "pk",
+        "partition_key_type": "S",
+        "sort_key_name": null,
+        "sort_key_type": null,
+        "point_in_time_recovery": true,
+        "deletion_protection": true,
+        "overall_security_status": "pass"
+      }
+    }
+  ]
+}

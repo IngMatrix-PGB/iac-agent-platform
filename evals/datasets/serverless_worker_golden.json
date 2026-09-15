@@ -1,0 +1,360 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "secure_basic_composition",
+      "description": "A minimal valid SQS -> Lambda -> DynamoDB composition with every field left at its safe default, except an explicit reserved concurrency (needed for a clean PASS).",
+      "input": {
+        "name": "orders-worker",
+        "queue": {"name": "orders-queue"},
+        "function": {"name": "orders-processor", "handler": "app.handler", "reserved_concurrency": 5},
+        "table": {"name": "orders-table", "partition_key": {"name": "pk", "type": "S"}}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-worker",
+        "queue_name": "orders-queue",
+        "function_name": "orders-processor",
+        "table_name": "orders-table",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "custom_queue_name",
+      "description": "A composition with a distinctive, custom queue name.",
+      "input": {
+        "name": "checkout-worker",
+        "queue": {"name": "checkout-events-queue"},
+        "function": {"name": "checkout-processor", "handler": "app.handler", "reserved_concurrency": 5},
+        "table": {"name": "checkout-table", "partition_key": {"name": "pk", "type": "S"}}
+      },
+      "expected": {
+        "valid": true,
+        "name": "checkout-worker",
+        "queue_name": "checkout-events-queue",
+        "function_name": "checkout-processor",
+        "table_name": "checkout-table",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "custom_lambda_name",
+      "description": "A composition with a distinctive, custom Lambda function name.",
+      "input": {
+        "name": "orders-worker",
+        "queue": {"name": "orders-queue"},
+        "function": {"name": "orders-fulfillment-handler", "handler": "app.handler", "reserved_concurrency": 5},
+        "table": {"name": "orders-table", "partition_key": {"name": "pk", "type": "S"}}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-worker",
+        "queue_name": "orders-queue",
+        "function_name": "orders-fulfillment-handler",
+        "table_name": "orders-table",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "custom_table_name",
+      "description": "A composition with a distinctive, custom DynamoDB table name.",
+      "input": {
+        "name": "orders-worker",
+        "queue": {"name": "orders-queue"},
+        "function": {"name": "orders-processor", "handler": "app.handler", "reserved_concurrency": 5},
+        "table": {"name": "fulfilled-orders", "partition_key": {"name": "pk", "type": "S"}}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-worker",
+        "queue_name": "orders-queue",
+        "function_name": "orders-processor",
+        "table_name": "fulfilled-orders",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "arm64_lambda",
+      "description": "A composition whose Lambda function explicitly uses the arm64 architecture (the default), still passing.",
+      "input": {
+        "name": "orders-worker",
+        "queue": {"name": "orders-queue"},
+        "function": {"name": "orders-processor", "handler": "app.handler", "architecture": "arm64", "reserved_concurrency": 5},
+        "table": {"name": "orders-table", "partition_key": {"name": "pk", "type": "S"}}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-worker",
+        "queue_name": "orders-queue",
+        "function_name": "orders-processor",
+        "table_name": "orders-table",
+        "architecture": "arm64",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "x86_64_lambda",
+      "description": "A composition whose Lambda function uses the x86_64 architecture.",
+      "input": {
+        "name": "legacy-worker",
+        "queue": {"name": "legacy-queue"},
+        "function": {"name": "legacy-processor", "handler": "app.handler", "architecture": "x86_64", "reserved_concurrency": 5},
+        "table": {"name": "legacy-table", "partition_key": {"name": "pk", "type": "S"}}
+      },
+      "expected": {
+        "valid": true,
+        "name": "legacy-worker",
+        "queue_name": "legacy-queue",
+        "function_name": "legacy-processor",
+        "table_name": "legacy-table",
+        "architecture": "x86_64",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "tracing_pass_through_warns",
+      "description": "A valid composition whose Lambda function has X-Ray tracing set to PassThrough — a legitimate but risk-flagged configuration, proving WARN propagates from the constituent Lambda's own tracing policy into the composition's overall security status.",
+      "input": {
+        "name": "orders-worker",
+        "queue": {"name": "orders-queue"},
+        "function": {"name": "orders-processor", "handler": "app.handler", "tracing_mode": "PassThrough", "reserved_concurrency": 5},
+        "table": {"name": "orders-table", "partition_key": {"name": "pk", "type": "S"}}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-worker",
+        "queue_name": "orders-queue",
+        "function_name": "orders-processor",
+        "table_name": "orders-table",
+        "tracing_mode": "PassThrough",
+        "overall_security_status": "warn"
+      }
+    },
+    {
+      "id": "no_reserved_concurrency_warns",
+      "description": "A valid composition whose Lambda function omits reserved concurrency (the default) — a legitimate choice for some workloads, proving WARN propagates from the constituent Lambda's own reserved-concurrency policy.",
+      "input": {
+        "name": "orders-worker",
+        "queue": {"name": "orders-queue"},
+        "function": {"name": "orders-processor", "handler": "app.handler"},
+        "table": {"name": "orders-table", "partition_key": {"name": "pk", "type": "S"}}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-worker",
+        "queue_name": "orders-queue",
+        "function_name": "orders-processor",
+        "table_name": "orders-table",
+        "reserved_concurrency": null,
+        "overall_security_status": "warn"
+      }
+    },
+    {
+      "id": "pitr_disabled_warns",
+      "description": "A valid composition whose DynamoDB table has point-in-time recovery intentionally disabled, proving WARN propagates from the constituent DynamoDB's own PITR policy.",
+      "input": {
+        "name": "orders-worker",
+        "queue": {"name": "orders-queue"},
+        "function": {"name": "orders-processor", "handler": "app.handler", "reserved_concurrency": 5},
+        "table": {"name": "orders-table", "partition_key": {"name": "pk", "type": "S"}, "point_in_time_recovery": false}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-worker",
+        "queue_name": "orders-queue",
+        "function_name": "orders-processor",
+        "table_name": "orders-table",
+        "point_in_time_recovery": false,
+        "overall_security_status": "warn"
+      }
+    },
+    {
+      "id": "deletion_protection_disabled_warns",
+      "description": "A valid composition whose DynamoDB table has deletion protection intentionally disabled (a legitimate choice for an ephemeral/demo table), proving WARN propagates from the constituent DynamoDB's own deletion-protection policy.",
+      "input": {
+        "name": "orders-worker",
+        "queue": {"name": "orders-queue"},
+        "function": {"name": "orders-processor", "handler": "app.handler", "reserved_concurrency": 5},
+        "table": {"name": "orders-table", "partition_key": {"name": "pk", "type": "S"}, "deletion_protection": false}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-worker",
+        "queue_name": "orders-queue",
+        "function_name": "orders-processor",
+        "table_name": "orders-table",
+        "deletion_protection": false,
+        "overall_security_status": "warn"
+      }
+    },
+    {
+      "id": "invalid_nested_queue_spec",
+      "description": "An invalid nested queue spec (fifo=true without a '.fifo'-suffixed name) must be rejected at construction, before any composition-level validation runs.",
+      "input": {
+        "name": "orders-worker",
+        "queue": {"name": "orders-queue", "fifo": true},
+        "function": {"name": "orders-processor", "handler": "app.handler"},
+        "table": {"name": "orders-table", "partition_key": {"name": "pk", "type": "S"}}
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_nested_lambda_spec",
+      "description": "An invalid nested Lambda spec (a handler missing the required 'module.function' form) must be rejected at construction.",
+      "input": {
+        "name": "orders-worker",
+        "queue": {"name": "orders-queue"},
+        "function": {"name": "orders-processor", "handler": "not-a-valid-handler"},
+        "table": {"name": "orders-table", "partition_key": {"name": "pk", "type": "S"}}
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_nested_dynamodb_spec",
+      "description": "An invalid nested DynamoDB spec (a table name below the 3-character minimum) must be rejected at construction.",
+      "input": {
+        "name": "orders-worker",
+        "queue": {"name": "orders-queue"},
+        "function": {"name": "orders-processor", "handler": "app.handler"},
+        "table": {"name": "ab", "partition_key": {"name": "pk", "type": "S"}}
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_duplicate_identifiers",
+      "description": "A composition whose queue and function share the same name — this platform never silently renames a resource to force uniqueness, so this must be rejected.",
+      "input": {
+        "name": "orders-worker",
+        "queue": {"name": "orders"},
+        "function": {"name": "orders", "handler": "app.handler"},
+        "table": {"name": "orders-table", "partition_key": {"name": "pk", "type": "S"}}
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "deterministic_defaults",
+      "description": "Constructing the same minimal input twice must yield identical field values — the deterministic-defaults counterpart to the SQS/S3/DynamoDB/Lambda golden datasets' equivalent scenario.",
+      "input": {
+        "name": "orders-worker",
+        "queue": {"name": "orders-queue"},
+        "function": {"name": "orders-processor", "handler": "app.handler", "reserved_concurrency": 5},
+        "table": {"name": "orders-table", "partition_key": {"name": "pk", "type": "S"}}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-worker",
+        "queue_name": "orders-queue",
+        "function_name": "orders-processor",
+        "table_name": "orders-table",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "relationship_iam_scope",
+      "description": "A valid composition exercising a non-default queue/table pairing whose relationship IAM scoping (SQS-consumer permissions scoped to this queue, DynamoDB-write permission scoped to this table) is proven directly against a real Terraform plan in tests/integration/test_serverless_worker_renderer_terraform.py; this scenario proves the same input is also a valid, secure composition end to end.",
+      "input": {
+        "name": "billing-worker",
+        "queue": {"name": "billing-events-queue"},
+        "function": {"name": "billing-processor", "handler": "app.handler", "reserved_concurrency": 3},
+        "table": {"name": "billing-ledger", "partition_key": {"name": "pk", "type": "S"}}
+      },
+      "expected": {
+        "valid": true,
+        "name": "billing-worker",
+        "queue_name": "billing-events-queue",
+        "function_name": "billing-processor",
+        "table_name": "billing-ledger",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "event_source_mapping_present",
+      "description": "A valid composition with an explicit, non-default event-source batch size — the event source mapping binding this queue to this function is proven directly against a real Terraform plan in tests/integration/test_serverless_worker_renderer_terraform.py; this scenario proves the same input still constructs and secures correctly.",
+      "input": {
+        "name": "orders-worker",
+        "queue": {"name": "orders-queue"},
+        "function": {"name": "orders-processor", "handler": "app.handler", "reserved_concurrency": 5},
+        "table": {"name": "orders-table", "partition_key": {"name": "pk", "type": "S"}},
+        "event_source_batch_size": 50,
+        "event_source_maximum_batching_window_seconds": 30
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-worker",
+        "queue_name": "orders-queue",
+        "function_name": "orders-processor",
+        "table_name": "orders-table",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "table_env_var_present",
+      "description": "A valid composition whose Lambda function also carries its own user-supplied environment variables alongside the composition-injected QUEUE_URL/TABLE_NAME — proven directly against a real rendered plan in tests/integration/test_serverless_worker_renderer_terraform.py; this scenario proves the same input still constructs and secures correctly.",
+      "input": {
+        "name": "orders-worker",
+        "queue": {"name": "orders-queue"},
+        "function": {
+          "name": "orders-processor",
+          "handler": "app.handler",
+          "reserved_concurrency": 5,
+          "environment_variables": {"LOG_LEVEL": "INFO"}
+        },
+        "table": {"name": "orders-table", "partition_key": {"name": "pk", "type": "S"}}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-worker",
+        "queue_name": "orders-queue",
+        "function_name": "orders-processor",
+        "table_name": "orders-table",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "valid_tags",
+      "description": "A valid composition carrying explicit composition-level tags — tags are metadata-only and must never affect security evaluation.",
+      "input": {
+        "name": "orders-worker",
+        "tags": {"Owner": "platform"},
+        "queue": {"name": "orders-queue"},
+        "function": {"name": "orders-processor", "handler": "app.handler", "reserved_concurrency": 5},
+        "table": {"name": "orders-table", "partition_key": {"name": "pk", "type": "S"}}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-worker",
+        "queue_name": "orders-queue",
+        "function_name": "orders-processor",
+        "table_name": "orders-table",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "fifo_queue_composition",
+      "description": "A valid composition using a FIFO queue, with a batch size within the FIFO-specific maximum of 10.",
+      "input": {
+        "name": "orders-worker",
+        "queue": {"name": "orders-queue.fifo", "fifo": true},
+        "function": {"name": "orders-processor", "handler": "app.handler", "reserved_concurrency": 5},
+        "table": {"name": "orders-table", "partition_key": {"name": "pk", "type": "S"}},
+        "event_source_batch_size": 10
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-worker",
+        "queue_name": "orders-queue.fifo",
+        "function_name": "orders-processor",
+        "table_name": "orders-table",
+        "overall_security_status": "pass"
+      }
+    }
+  ]
+}
