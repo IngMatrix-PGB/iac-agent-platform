@@ -35,6 +35,7 @@ from iac_agent.domain.security import (
     SecuritySeverity,
 )
 from iac_agent.policies.shared import TF_NO_DESTRUCTIVE_CHANGES, evaluate_destructive_policy
+from iac_agent.providers.aws.api_gateway.contract import ApiGatewayResourceSpec
 from iac_agent.providers.aws.dynamodb.contract import DynamoDBResourceSpec
 from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec, LambdaTracingMode
 from iac_agent.providers.aws.resource import AWSResourceSpec
@@ -83,6 +84,15 @@ REQUIRED_PLATFORM_POLICY_IDS_BY_RESOURCE_TYPE: dict[ResourceType, tuple[str, ...
         LAMBDA_LOG_RETENTION_REQUIRED,
         TF_NO_DESTRUCTIVE_CHANGES,
     ),
+    # A standalone ApiGatewayResourceSpec has no resource-specific
+    # invariant worth a dedicated policy yet (Batch 20 deliberately
+    # keeps the contract to name/description/tags — there is no field
+    # whose value could ever be insecure). Only the shared destructive-
+    # change policy applies. This is a real, honest "nothing else
+    # applies here" — not an omission — and mirrors this project's own
+    # "do not create meaningless always-PASS policies merely to
+    # inflate policy count" discipline.
+    ResourceType.API_GATEWAY: (TF_NO_DESTRUCTIVE_CHANGES,),
 }
 
 
@@ -121,6 +131,8 @@ def evaluate_platform_policies(
                 evaluate_lambda_reserved_concurrency_policy(spec),
                 _evaluate_lambda_log_retention_policy(spec),
             )
+        case ApiGatewayResourceSpec():
+            resource_findings = ()
         case _:
             raise ValueError(f"unsupported resource spec type: {type(spec).__name__}")
 

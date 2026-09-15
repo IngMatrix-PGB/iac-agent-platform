@@ -1,31 +1,31 @@
-"""Deterministic composition-level policies for the SQS -> Lambda ->
-DynamoDB serverless-worker architecture (Phase 2, Batch 19).
+"""Deterministic composition-level policies (Phase 2, Batches 19-20).
 
 `evaluate_composition_policies` is the composition counterpart to
 `iac_agent.policies.platform.evaluate_platform_policies` — a pure
-function of an already-validated `ServerlessWorkerSpec` and a
-`PlanSummary`, nothing else. It never touches raw Terraform plan JSON,
-the Terraform CLI, Checkov, the AWS API, or an LLM.
+function of an already-validated composition spec
+(`ServerlessWorkerSpec` or `ApiLambdaSpec`) and a `PlanSummary`,
+nothing else. It never touches raw Terraform plan JSON, the Terraform
+CLI, Checkov, the AWS API, or an LLM.
 
-These policies evaluate exactly what this batch's own typed composition
+These policies evaluate exactly what each batch's own typed composition
 input and rendered-plan evidence can honestly support — see each
 function's docstring for its evidence source. They deliberately do
-**not** attempt to parse or re-derive the IAM policy JSON the
-composition renderer emits (that JSON's `resources` field is genuinely
-unknown at credential-free plan time, exactly as Batch 18 already
-established for the Lambda module's own CloudWatch Logs policy — see
-`tests/integration/test_serverless_worker_renderer_terraform.py` for
-the real-plan proof of the composition's IAM scoping instead). Static,
-deterministic facts about the *composition spec itself* (which queue is
-bound, which table is bound, that the generated relationship never
-grants a wildcard action) are exactly what a typed-input policy layer
-can respond to.
+**not** attempt to parse or re-derive the IAM policy JSON a composition
+renderer emits (that JSON's `resources`/`source_arn` fields are
+genuinely unknown at credential-free plan time, exactly as Batch 18
+already established for the Lambda module's own CloudWatch Logs
+policy — see each composition's real-plan integration test for the
+IAM-scoping proof instead). Static, deterministic facts about the
+*composition spec itself* (which queue/API is bound, which table is
+bound, that the generated relationship never grants a wildcard action)
+are exactly what a typed-input policy layer can respond to.
 
-In addition to the three composition-specific policies below, this
-dispatcher also runs the constituent Lambda/DynamoDB sub-specs' own
-already-approved recommendation policies
-(`evaluate_lambda_tracing_policy`, `evaluate_lambda_reserved_
-concurrency_policy`, `evaluate_dynamodb_pitr_policy`,
+For `ServerlessWorkerSpec` (Batch 19), in addition to the three
+composition-specific policies, this dispatcher also runs the
+constituent Lambda/DynamoDB sub-specs' own already-approved
+recommendation policies (`evaluate_lambda_tracing_policy`,
+`evaluate_lambda_reserved_concurrency_policy`,
+`evaluate_dynamodb_pitr_policy`,
 `evaluate_dynamodb_deletion_protection_policy` — reused verbatim from
 `iac_agent.policies.platform`, never re-implemented here) against
 `spec.function`/`spec.table`. A composition's Lambda tracing mode or
@@ -33,16 +33,22 @@ DynamoDB point-in-time-recovery setting is exactly as real a risk
 signal inside a composition as it is for a standalone Lambda/DynamoDB
 request — dropping it here would silently discard evidence Batches
 17-18 already established matters. The SQS queue's own DLQ/encryption
-policies are deliberately **not** re-run here: the composition's SQS
+policies are deliberately **not** re-run: the composition's SQS
 consumer relationship only cares that the queue exists and is bound
-correctly (`SERVERLESS_SQS_LAMBDA_BINDING_REQUIRED`), and SQS's own
-encryption invariant is unconditional (never representable as
-disabled) so re-running it would only ever repeat a PASS a caller
-cannot act on differently inside a composition.
+correctly, and SQS's own encryption invariant is unconditional so
+re-running it would only ever repeat a PASS a caller cannot act on
+differently inside a composition.
+
+For `ApiLambdaSpec` (Batch 20), the same discipline applies: three
+composition-specific policies plus the constituent Lambda sub-spec's
+own tracing/reserved-concurrency recommendation policies, reused
+verbatim. There is no analogous DynamoDB/SQS sub-policy to reuse here
+since this composition has no such sub-resource.
 """
 
 from __future__ import annotations
 
+from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec
 from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
 from iac_agent.domain.composition import CompositionType
 from iac_agent.domain.plan import PlanSummary
@@ -69,6 +75,10 @@ SERVERLESS_SQS_LAMBDA_BINDING_REQUIRED = "SERVERLESS_SQS_LAMBDA_BINDING_REQUIRED
 SERVERLESS_DDB_WRITE_SCOPE_REQUIRED = "SERVERLESS_DDB_WRITE_SCOPE_REQUIRED"
 SERVERLESS_NO_WILDCARD_IAM = "SERVERLESS_NO_WILDCARD_IAM"
 
+API_LAMBDA_INVOKE_PERMISSION_REQUIRED = "API_LAMBDA_INVOKE_PERMISSION_REQUIRED"
+API_LAMBDA_NO_WILDCARD_PRINCIPAL = "API_LAMBDA_NO_WILDCARD_PRINCIPAL"
+API_LAMBDA_ROUTE_EXPLICIT = "API_LAMBDA_ROUTE_EXPLICIT"
+
 #: The composition counterpart to `iac_agent.policies.platform.
 #: REQUIRED_PLATFORM_POLICY_IDS_BY_RESOURCE_TYPE` — the single source of
 #: truth `iac_agent.security.gate.evaluate_security_gate` reads (via its
@@ -85,29 +95,50 @@ REQUIRED_COMPOSITION_POLICY_IDS_BY_COMPOSITION_TYPE: dict[CompositionType, tuple
         DDB_DELETION_PROTECTION_RECOMMENDED,
         TF_NO_DESTRUCTIVE_CHANGES,
     ),
+    CompositionType.API_GATEWAY_LAMBDA: (
+        API_LAMBDA_INVOKE_PERMISSION_REQUIRED,
+        API_LAMBDA_NO_WILDCARD_PRINCIPAL,
+        API_LAMBDA_ROUTE_EXPLICIT,
+        LAMBDA_TRACING_RECOMMENDED,
+        LAMBDA_RESERVED_CONCURRENCY_RECOMMENDED,
+        TF_NO_DESTRUCTIVE_CHANGES,
+    ),
 }
 
 
 def evaluate_composition_policies(
-    spec: ServerlessWorkerSpec,
+    spec: ServerlessWorkerSpec | ApiLambdaSpec,
     plan_summary: PlanSummary,
 ) -> PolicyEvaluation:
-    """Evaluate every applicable Batch 19 composition policy and return
-    the aggregate result — the composition counterpart to
+    """Evaluate every applicable composition policy for `spec` and
+    return the aggregate result — the composition counterpart to
     `iac_agent.policies.platform.evaluate_platform_policies`. One
     finding is always emitted per applicable policy, including PASS,
     exactly like the platform-policy dispatcher.
     """
-    findings = (
-        _evaluate_sqs_lambda_binding_policy(spec),
-        _evaluate_dynamodb_write_scope_policy(spec),
-        _evaluate_no_wildcard_iam_policy(),
-        evaluate_lambda_tracing_policy(spec.function),
-        evaluate_lambda_reserved_concurrency_policy(spec.function),
-        evaluate_dynamodb_pitr_policy(spec.table),
-        evaluate_dynamodb_deletion_protection_policy(spec.table),
-        evaluate_destructive_policy(plan_summary),
-    )
+    match spec:
+        case ServerlessWorkerSpec():
+            composition_findings: tuple[SecurityFinding, ...] = (
+                _evaluate_sqs_lambda_binding_policy(spec),
+                _evaluate_dynamodb_write_scope_policy(spec),
+                _evaluate_no_wildcard_iam_policy(),
+                evaluate_lambda_tracing_policy(spec.function),
+                evaluate_lambda_reserved_concurrency_policy(spec.function),
+                evaluate_dynamodb_pitr_policy(spec.table),
+                evaluate_dynamodb_deletion_protection_policy(spec.table),
+            )
+        case ApiLambdaSpec():
+            composition_findings = (
+                _evaluate_api_lambda_invoke_permission_policy(spec),
+                _evaluate_api_lambda_no_wildcard_principal_policy(),
+                _evaluate_api_lambda_route_explicit_policy(spec),
+                evaluate_lambda_tracing_policy(spec.function),
+                evaluate_lambda_reserved_concurrency_policy(spec.function),
+            )
+        case _:
+            raise ValueError(f"unsupported composition spec type: {type(spec).__name__}")
+
+    findings = (*composition_findings, evaluate_destructive_policy(plan_summary))
     return PolicyEvaluation(findings=findings)
 
 
@@ -191,6 +222,87 @@ def _evaluate_no_wildcard_iam_policy() -> SecurityFinding:
             "Composition-generated IAM policies grant only the documented, "
             "narrowly-scoped SQS-consumer and DynamoDB-write actions — never a "
             "wildcard action or resource."
+        ),
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+# ---------------------------------------------------------------------------
+# API Gateway -> Lambda composition policies (Batch 20)
+# ---------------------------------------------------------------------------
+
+
+def _evaluate_api_lambda_invoke_permission_policy(spec: ApiLambdaSpec) -> SecurityFinding:
+    """API_LAMBDA_INVOKE_PERMISSION_REQUIRED — always PASS.
+
+    Evidence source: the renderer's own fixed, non-caller-configurable
+    choice to always emit exactly one `aws_lambda_permission` granting
+    `lambda:InvokeFunction` to the `apigateway.amazonaws.com` principal
+    (see `iac_agent.compositions.api_lambda.renderer`) — there is no
+    field on this contract through which a caller could omit this
+    permission or change its action/principal. The real, rendered
+    permission's exact values are proven directly against a real
+    Terraform plan in
+    `tests/integration/test_api_lambda_renderer_terraform.py`.
+    """
+    return SecurityFinding(
+        policy_id=API_LAMBDA_INVOKE_PERMISSION_REQUIRED,
+        severity=SecuritySeverity.HIGH,
+        status=PolicyStatus.PASS,
+        resource=spec.name,
+        message=(
+            f"Lambda function {spec.function.name!r} grants apigateway.amazonaws.com "
+            "exactly lambda:InvokeFunction via a resource-based permission."
+        ),
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+def _evaluate_api_lambda_no_wildcard_principal_policy() -> SecurityFinding:
+    """API_LAMBDA_NO_WILDCARD_PRINCIPAL — always PASS, evidence-only.
+
+    Evidence source: this is a trusted-renderer invariant, not a fact
+    derivable from `ApiLambdaSpec`'s fields (nothing in the contract
+    could ever *cause* a wildcard principal to be emitted — there is no
+    such field to set). The renderer's fixed `principal`/`action`
+    constants are checked-in, reviewed source, proven never to be a
+    wildcard via a real Terraform plan in
+    `tests/integration/test_api_lambda_renderer_terraform.py`. Mirrors
+    `SERVERLESS_NO_WILDCARD_IAM`'s exact evidence-only pattern.
+    """
+    return SecurityFinding(
+        policy_id=API_LAMBDA_NO_WILDCARD_PRINCIPAL,
+        severity=SecuritySeverity.CRITICAL,
+        status=PolicyStatus.PASS,
+        resource=None,
+        message=(
+            "The composition-generated Lambda invocation permission grants only "
+            "the documented apigateway.amazonaws.com principal — never a wildcard "
+            "principal or an unrelated service."
+        ),
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+def _evaluate_api_lambda_route_explicit_policy(spec: ApiLambdaSpec) -> SecurityFinding:
+    """API_LAMBDA_ROUTE_EXPLICIT — always PASS.
+
+    Evidence source: `ApiLambdaSpec.route` is a required field
+    (`RouteSpec`, with a required `method` and `path`) — there is no
+    representable `ApiLambdaSpec` with a missing or implicit `$default`
+    catch-all route, since the contract has no field that could
+    produce one. Exists so later UI/eval consumers have positive
+    evidence the route was actually checked, mirroring
+    `SERVERLESS_SQS_LAMBDA_BINDING_REQUIRED`'s exact pattern.
+    """
+    return SecurityFinding(
+        policy_id=API_LAMBDA_ROUTE_EXPLICIT,
+        severity=SecuritySeverity.MEDIUM,
+        status=PolicyStatus.PASS,
+        resource=spec.name,
+        message=(
+            f"Route {spec.route.route_key!r} is explicit — never an implicit "
+            "$default catch-all route."
         ),
         source=FindingSource.PLATFORM_POLICY,
     )

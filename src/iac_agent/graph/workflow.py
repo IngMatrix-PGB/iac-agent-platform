@@ -40,6 +40,21 @@ function. `source_control`'s PR/commit text also branches, producing
 naming the composition type plus its queue/function/table, never a raw
 Terraform dump.
 
+Batch 20 adds a second composition, `ApiLambdaSpec` (an API Gateway
+HTTP API bound to a Lambda function via a proxy integration, route, and
+resource-based invocation permission — see
+`iac_agent.compositions.api_lambda`), proving the composition
+architecture generalizes: every `match`/`case` branch Batch 19 added
+above simply widened to `ServerlessWorkerSpec() | ApiLambdaSpec()`
+(the underlying `evaluate_composition_policies`/
+`composition_checkov_profile_for`/`REQUIRED_COMPOSITION_POLICY_IDS_BY_COMPOSITION_TYPE`
+dispatch on the spec's own type internally) — no new node, no second
+gate function, no new `CompositionType`-keyed trusted-module mapping
+(API Gateway's own module directory is registered under
+`ResourceType.API_GATEWAY` exactly like every other resource type).
+`source_control` produces "feat(iac): add API Lambda proposal
+<request_id>" for this composition.
+
 `build_sqs_workflow` remains as a zero-cost backward-compatible alias.
 
 Batch 16.5 made `checkov_scan` resource-aware too: it selects an
@@ -116,6 +131,8 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import interrupt
 
+from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec
+from iac_agent.compositions.api_lambda.renderer import ApiLambdaTerraformRenderer
 from iac_agent.compositions.resource import composition_type_of
 from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
 from iac_agent.compositions.serverless_worker.renderer import ServerlessWorkerTerraformRenderer
@@ -163,6 +180,7 @@ _DEFAULT_TRUSTED_MODULE_DIRS: dict[ResourceType, Path] = {
     ResourceType.S3: _REPO_ROOT / "terraform" / "modules" / "s3",
     ResourceType.DYNAMODB: _REPO_ROOT / "terraform" / "modules" / "dynamodb",
     ResourceType.LAMBDA: _REPO_ROOT / "terraform" / "modules" / "lambda",
+    ResourceType.API_GATEWAY: _REPO_ROOT / "terraform" / "modules" / "api_gateway",
 }
 
 #: Human-readable resource-kind label for commit/PR text. Batch 16's
@@ -177,6 +195,7 @@ _RESOURCE_KIND_DISPLAY_NAMES: dict[ResourceType, str] = {
     ResourceType.S3: "S3",
     ResourceType.DYNAMODB: "DynamoDB",
     ResourceType.LAMBDA: "Lambda",
+    ResourceType.API_GATEWAY: "API Gateway",
 }
 
 #: Placeholder-only credentials for the credential-free Terraform plan
@@ -302,6 +321,13 @@ def _pr_body(state: WorkflowState) -> str:
                 f"Lambda: {spec.function.name}\n"
                 f"DynamoDB: {spec.table.name}\n"
             )
+        case ApiLambdaSpec():
+            identity_lines = (
+                f"Composition type: {composition_type_of(spec).value}\n"
+                f"API: {spec.api.name}\n"
+                f"Route: {spec.route.route_key}\n"
+                f"Lambda: {spec.function.name}\n"
+            )
         case _:
             identity_lines = (
                 f"Resource type: {resource_type_of(spec).value}\nResource: {spec.name}\n"
@@ -328,6 +354,7 @@ def build_iac_workflow(
     base_branch: str = "main",
     checkpointer: BaseCheckpointSaver | None = None,
     serverless_worker_renderer: ServerlessWorkerTerraformRenderer | None = None,
+    api_lambda_renderer: ApiLambdaTerraformRenderer | None = None,
 ) -> CompiledStateGraph:
     """Build and compile the deterministic IaC request workflow graph.
 
@@ -346,17 +373,20 @@ def build_iac_workflow(
     `SourceControlPort` itself always receives it explicitly and never
     assumes a default on its own.
 
-    `serverless_worker_renderer` (Batch 19) is the one new parameter —
-    optional, defaulting to a fresh `ServerlessWorkerTerraformRenderer()`
-    when not supplied, exactly like every existing renderer/adapter
-    parameter's own "construct a real one if you didn't give me one"
-    convention. Every existing caller (which only ever passes
+    `serverless_worker_renderer` (Batch 19) and `api_lambda_renderer`
+    (Batch 20) are both optional, each defaulting to a fresh concrete
+    renderer when not supplied, exactly like every existing renderer/
+    adapter parameter's own "construct a real one if you didn't give me
+    one" convention. Every existing caller (which only ever passes
     `renderer=`) is completely unaffected: `renderer` (the AWS-resource
-    renderer) is never touched, and a `ServerlessWorkerSpec` request
-    simply was not something any pre-Batch-19 caller ever submitted.
+    renderer) is never touched, and neither a `ServerlessWorkerSpec` nor
+    an `ApiLambdaSpec` request was something any pre-Batch-19 caller
+    ever submitted.
     """
     iac_renderer = IacRenderer(
-        aws_renderer=renderer, serverless_worker_renderer=serverless_worker_renderer
+        aws_renderer=renderer,
+        serverless_worker_renderer=serverless_worker_renderer,
+        api_lambda_renderer=api_lambda_renderer,
     )
 
     def render_terraform(state: WorkflowState) -> dict:
@@ -414,7 +444,7 @@ def build_iac_workflow(
         try:
             spec: IacRequestSpec = state["resource_spec"]
             match spec:
-                case ServerlessWorkerSpec():
+                case ServerlessWorkerSpec() | ApiLambdaSpec():
                     platform_evaluation = evaluate_composition_policies(spec, state["plan_summary"])
                 case _:
                     platform_evaluation = evaluate_platform_policies(spec, state["plan_summary"])
@@ -431,7 +461,7 @@ def build_iac_workflow(
         try:
             spec: IacRequestSpec = state["resource_spec"]
             match spec:
-                case ServerlessWorkerSpec():
+                case ServerlessWorkerSpec() | ApiLambdaSpec():
                     profile = composition_checkov_profile_for(composition_type_of(spec))
                 case _:
                     profile = checkov_profile_for(resource_type_of(spec))
@@ -455,7 +485,7 @@ def build_iac_workflow(
         try:
             spec: IacRequestSpec = state["resource_spec"]
             match spec:
-                case ServerlessWorkerSpec():
+                case ServerlessWorkerSpec() | ApiLambdaSpec():
                     gate_result = evaluate_security_gate(
                         state["platform_evaluation"],
                         state["checkov_result"],
@@ -539,6 +569,10 @@ def build_iac_workflow(
                     # Matches the batch's own example verbatim:
                     # "feat(iac): add serverless worker proposal <request_id>".
                     resource_kind = "serverless worker"
+                case ApiLambdaSpec():
+                    # Matches Batch 20's own example verbatim:
+                    # "feat(iac): add API Lambda proposal <request_id>".
+                    resource_kind = "API Lambda"
                 case _:
                     resource_kind = _RESOURCE_KIND_DISPLAY_NAMES[resource_type_of(spec)]
             pr_result = source_control_port.publish_change(

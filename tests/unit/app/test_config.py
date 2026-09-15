@@ -137,3 +137,19 @@ def test_application_config_has_no_token_field():
     field_names = {f for f in ApplicationConfig.__dataclass_fields__}
     assert "github_token" not in field_names
     assert "token" not in field_names
+
+
+def test_application_config_has_no_terraform_module_path_field():
+    """Batch 20: removed as demonstrably dead configuration — it was
+    never read from the environment (always computed from a fixed
+    internal constant identical to `build_sqs_workflow`'s own default),
+    so `open_application` passing it through changed nothing at
+    runtime. Trusted-module-directory resolution lives entirely in
+    `iac_agent.graph.workflow._DEFAULT_TRUSTED_MODULE_DIRS` now."""
+    field_names = {f for f in ApplicationConfig.__dataclass_fields__}
+    assert "terraform_module_path" not in field_names
+
+
+def test_config_loader_output_never_carries_a_terraform_module_path():
+    config = load_application_config_from_env(_FULL_ENV)
+    assert not hasattr(config, "terraform_module_path")
