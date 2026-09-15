@@ -42,10 +42,13 @@ from iac_agent.providers.aws.sqs.contract import DlqSpec, SQSResourceSpec
 from iac_agent.providers.aws.sqs.renderer import TerraformCompositionRenderer
 from iac_agent.security.checkov import CheckovAdapter
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("terraform") is None or shutil.which("checkov") is None,
-    reason="terraform and/or checkov binary not available on PATH",
-)
+pytestmark = [
+    pytest.mark.real_tool,
+    pytest.mark.skipif(
+        shutil.which("terraform") is None or shutil.which("checkov") is None,
+        reason="terraform and/or checkov binary not available on PATH",
+    ),
+]
 
 
 class FakeSourceControl:
@@ -78,10 +81,12 @@ class FakeSourceControl:
         )
 
 
-def _build_real_graph(workspace_root: Path, checkpointer, source_control_port):
+def _build_real_graph(
+    workspace_root: Path, checkpointer, source_control_port, terraform_test_env: dict[str, str]
+):
     return build_sqs_workflow(
         renderer=TerraformCompositionRenderer(),
-        terraform_runner=TerraformRunner(),
+        terraform_runner=TerraformRunner(base_env=terraform_test_env),
         checkov_adapter=CheckovAdapter(),
         source_control_port=source_control_port,
         workspace_root=workspace_root,
@@ -89,7 +94,9 @@ def _build_real_graph(workspace_root: Path, checkpointer, source_control_port):
     )
 
 
-def test_real_pipeline_durable_approval_survives_reconstruction_and_resume(tmp_path):
+def test_real_pipeline_durable_approval_survives_reconstruction_and_resume(
+    tmp_path, terraform_test_env
+):
     # 1-3: create DB, open checkpointer, build graph with checkpointer.
     db_path = tmp_path / "state.db"
     workspace_root = tmp_path / "workspaces"
@@ -105,7 +112,7 @@ def test_real_pipeline_durable_approval_survives_reconstruction_and_resume(tmp_p
     fake_source_control = FakeSourceControl()
 
     with open_sqlite_checkpointer(db_path) as saver:
-        graph = _build_real_graph(workspace_root, saver, fake_source_control)
+        graph = _build_real_graph(workspace_root, saver, fake_source_control, terraform_test_env)
 
         # 4: invoke a valid PASS workflow.
         first_result = graph.invoke({"request_id": request_id, "resource_spec": spec}, config)
@@ -131,7 +138,7 @@ def test_real_pipeline_durable_approval_survives_reconstruction_and_resume(tmp_p
     # 9-11: open a NEW saver against the same DB, build a NEW graph,
     # retrieve the same thread's state.
     with open_sqlite_checkpointer(db_path) as saver2:
-        graph2 = _build_real_graph(workspace_root, saver2, fake_source_control)
+        graph2 = _build_real_graph(workspace_root, saver2, fake_source_control, terraform_test_env)
         snapshot = graph2.get_state(config)
 
         # 12: confirm still awaiting approval.
@@ -167,7 +174,7 @@ def test_real_pipeline_durable_approval_survives_reconstruction_and_resume(tmp_p
     del graph2, saver2
 
     with open_sqlite_checkpointer(db_path) as saver3:
-        graph3 = _build_real_graph(workspace_root, saver3, fake_source_control)
+        graph3 = _build_real_graph(workspace_root, saver3, fake_source_control, terraform_test_env)
 
         # 17: retrieve final state — get_state must not call the port.
         final_snapshot = graph3.get_state(config)

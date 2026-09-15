@@ -26,10 +26,13 @@ from iac_agent.security.checkov import CheckovAdapter, CheckovScanResult
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TRUSTED_MODULE_DIR = _REPO_ROOT / "terraform" / "modules" / "sqs"
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("checkov") is None,
-    reason="checkov binary not available on PATH",
-)
+pytestmark = [
+    pytest.mark.real_tool,
+    pytest.mark.skipif(
+        shutil.which("checkov") is None,
+        reason="checkov binary not available on PATH",
+    ),
+]
 
 
 def test_checkov_scans_real_renderer_output(tmp_path):

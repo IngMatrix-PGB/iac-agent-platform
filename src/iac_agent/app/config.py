@@ -37,14 +37,6 @@ DEFAULT_WORKSPACE_ROOT = Path("artifacts")
 #: default — see `load_application_config_from_env`.
 DEFAULT_GITHUB_BASE_BRANCH = "main"
 
-#: The trusted SQS module lives at this fixed location relative to the
-#: repository root, regardless of which directory the caller supplies
-#: for workspace_root — the same computation `iac_agent.graph.workflow`
-#: uses for its own default, anchored from this file's location instead.
-_DEFAULT_TERRAFORM_MODULE_PATH = (
-    Path(__file__).resolve().parents[3] / "terraform" / "modules" / "sqs"
-)
-
 _ENV_WORKSPACE_ROOT = "IAC_AGENT_WORKSPACE_ROOT"
 _ENV_STATE_DB = "IAC_AGENT_STATE_DB"
 _ENV_GITHUB_OWNER = "GITHUB_OWNER"
@@ -77,11 +69,24 @@ class ApplicationConfig:
     reason to keep them out of a repr. They still have no default:
     this project never silently attributes a generated commit to any
     specific person.
+
+    Batch 20 removed the earlier `terraform_module_path` field: it was
+    demonstrably dead configuration, not merely undocumented — it was
+    never read from the environment (`load_application_config_from_env`
+    always computed it from a fixed internal constant, identical to
+    what `iac_agent.graph.workflow.build_sqs_workflow`'s own
+    `trusted_module_dir` default parameter already resolves to), so
+    passing it through to `build_sqs_workflow` in
+    `iac_agent.app.composition.open_application` changed nothing at
+    runtime. Trusted-module-directory resolution is fully resource/
+    composition-aware in `iac_agent.graph.workflow`'s own
+    `_DEFAULT_TRUSTED_MODULE_DIRS` (Batches 16-20); this config layer
+    has no reason to carry a second, narrower, SQS-only copy of that
+    resolution at all.
     """
 
     workspace_root: Path
     state_db_path: Path
-    terraform_module_path: Path
     github_owner: str
     github_repository: str
     github_commit_author_name: str
@@ -145,7 +150,6 @@ def load_application_config_from_env(env: Mapping[str, str] | None = None) -> Ap
     return ApplicationConfig(
         workspace_root=workspace_root,
         state_db_path=state_db_path,
-        terraform_module_path=_DEFAULT_TERRAFORM_MODULE_PATH,
         github_owner=github_owner,
         github_repository=github_repository,
         github_commit_author_name=commit_author_name,

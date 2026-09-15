@@ -1,4 +1,4 @@
-"""The Phase 1 application service: submit / resume / get_state.
+"""The application service: submit / resume / get_state.
 
 This is the boundary a future FastAPI/CLI layer would call — it never
 constructs Terraform/LangGraph/GitHub objects itself (that is
@@ -6,6 +6,18 @@ constructs Terraform/LangGraph/GitHub objects itself (that is
 `WorkflowState` fields (workspace path, a GitHub token, raw
 Terraform/Checkov JSON, exception objects, SQLite handles) to a caller.
 Every result is a bounded `WorkflowView`.
+
+Batch 19: `submit`'s type hint widens from `SQSResourceSpec` to
+`IacRequestSpec` (`AWSResourceSpec | ServerlessWorkerSpec`) — a purely
+free improvement. `open_application`'s compiled graph already builds
+via the fully request-generalized `build_iac_workflow`
+(`iac_agent.graph.workflow`), so it already accepts a
+`ServerlessWorkerSpec` today; only this service's own type hint was
+still narrower than what the graph beneath it actually supports.
+`Phase1Application` is renamed to `IacApplication` to match (the class
+no longer only runs "the Phase 1 SQS workflow"), with `Phase1Application`
+kept as a zero-cost backward-compatible alias — the same pattern
+`build_sqs_workflow` already established for `build_iac_workflow`.
 """
 
 from __future__ import annotations
@@ -21,7 +33,7 @@ from iac_agent.domain.plan import PlanSummary
 from iac_agent.domain.source_control import PullRequestResult
 from iac_agent.domain.workflow import WorkflowError, WorkflowStage, WorkflowStatus
 from iac_agent.persistence.checkpoints import workflow_config
-from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
+from iac_agent.request import IacRequestSpec
 
 
 @dataclass(frozen=True)
@@ -61,8 +73,10 @@ def _to_view(request_id: str, values: dict) -> WorkflowView:
     )
 
 
-class Phase1Application:
-    """The controlled entry point for running the Phase 1 SQS workflow.
+class IacApplication:
+    """The controlled entry point for running the IaC request workflow
+    — a single AWS resource, or (Batch 19) a serverless-worker
+    composition.
 
     Holds only a compiled graph — no global/module-level state, so two
     independently constructed instances never share anything, even
@@ -74,10 +88,10 @@ class Phase1Application:
         self._graph = graph
 
     @classmethod
-    def from_application(cls, application: Application) -> Phase1Application:
+    def from_application(cls, application: Application) -> IacApplication:
         return cls(application.graph)
 
-    def submit(self, *, request_id: str, spec: SQSResourceSpec) -> WorkflowView:
+    def submit(self, *, request_id: str, spec: IacRequestSpec) -> WorkflowView:
         """Invoke the workflow for a new request. For a secure valid
         request, the returned view's `workflow_status` is
         `AWAITING_APPROVAL`."""
@@ -100,3 +114,9 @@ class Phase1Application:
         config = workflow_config(request_id)
         snapshot = self._graph.get_state(config)
         return _to_view(request_id, snapshot.values)
+
+
+#: Zero-cost backward-compatible alias — mirrors `build_sqs_workflow`
+#: remaining alongside `build_iac_workflow`. Every existing caller
+#: spelling `Phase1Application` keeps working unchanged.
+Phase1Application = IacApplication

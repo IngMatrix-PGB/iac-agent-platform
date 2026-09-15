@@ -13,6 +13,14 @@ code is NOT itself evidence of scanner failure. This adapter treats
 exit codes {0, 1} as "the scan ran" and anything else as a genuine
 execution failure, then separately verifies the JSON payload is
 well-formed and internally consistent before trusting it.
+
+Batch 16.5: `scan()` takes an explicit, optional `CheckovScanProfile`
+rather than a resource type or a constructor-level default skip list.
+This module deliberately has no knowledge of SQS, S3, or any other
+resource type — `iac_agent.security.checkov_profiles` is the one place
+that maps a resource type to a specific profile. A caller that passes
+no profile always gets the strict, zero-skip scan; there is no
+implicit global skip list here.
 """
 
 from __future__ import annotations
@@ -62,6 +70,23 @@ _SEVERITY_MAP: dict[str, SecuritySeverity] = {
 _DEFAULT_FAILED_CHECK_SEVERITY = SecuritySeverity.HIGH
 
 _STDERR_EXCERPT_LIMIT = 500
+
+
+@dataclass(frozen=True)
+class CheckovScanProfile:
+    """An explicit, resource-agnostic Checkov scan configuration.
+
+    `CheckovAdapter` never infers a resource type or hardcodes a
+    default skip list itself (Batch 16.5) — it only knows how to apply
+    whatever profile a caller explicitly hands to `scan()`. The one
+    place that maps a resource type to a specific profile (and the
+    rationale for each skipped check) is
+    `iac_agent.security.checkov_profiles.checkov_profile_for`, not this
+    module. A caller that passes no profile at all always gets the
+    strict, zero-skip scan — there is no implicit global default here.
+    """
+
+    skipped_checks: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -169,8 +194,16 @@ class CheckovAdapter:
     def _default_base_env() -> dict[str, str]:
         return {key: os.environ[key] for key in _DEFAULT_ENV_ALLOWLIST if key in os.environ}
 
-    def scan(self, workspace: Path | str) -> CheckovScanResult:
+    def scan(
+        self, workspace: Path | str, *, profile: CheckovScanProfile | None = None
+    ) -> CheckovScanResult:
         """Run Checkov against `workspace` and return a normalized result.
+
+        `profile` is optional and defaults to `None` — a caller that
+        passes no profile always gets the strict, zero-skip scan; this
+        adapter never infers a resource type or applies a skip list on
+        its own (see `iac_agent.security.checkov_profiles` for the one
+        place that maps a resource type to a specific profile).
 
         Raises `CheckovExecutableNotFoundError`, `CheckovTimeoutError`,
         `CheckovExecutionError`, or `CheckovJsonError` if the scan could
@@ -189,6 +222,8 @@ class CheckovAdapter:
             "--compact",
             "--quiet",
         )
+        if profile is not None and profile.skipped_checks:
+            args = (*args, "--skip-check", ",".join(profile.skipped_checks))
 
         try:
             completed = subprocess.run(  # noqa: S603 — argument array, shell=False, fixed args

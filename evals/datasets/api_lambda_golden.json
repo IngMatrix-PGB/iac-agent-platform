@@ -1,0 +1,332 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "secure_get_root",
+      "description": "A minimal valid composition with a GET / route and every other field left at its safe default, except an explicit reserved concurrency (needed for a clean PASS).",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler", "reserved_concurrency": 5},
+        "route": {"method": "GET", "path": "/"}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-api-worker",
+        "api_name": "orders-api",
+        "function_name": "orders-handler",
+        "route_key": "GET /",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "secure_post_orders",
+      "description": "A valid composition with an explicit POST /orders route.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler", "reserved_concurrency": 5},
+        "route": {"method": "POST", "path": "/orders"}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-api-worker",
+        "api_name": "orders-api",
+        "function_name": "orders-handler",
+        "route_key": "POST /orders",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "get_orders_by_id",
+      "description": "A valid composition with a path-parameter route.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler", "reserved_concurrency": 5},
+        "route": {"method": "GET", "path": "/orders/{id}"}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-api-worker",
+        "api_name": "orders-api",
+        "function_name": "orders-handler",
+        "route_key": "GET /orders/{id}",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "arm64_lambda",
+      "description": "A composition whose Lambda function explicitly uses the arm64 architecture (the default), still passing.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler", "architecture": "arm64", "reserved_concurrency": 5},
+        "route": {"method": "POST", "path": "/orders"}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-api-worker",
+        "api_name": "orders-api",
+        "function_name": "orders-handler",
+        "route_key": "POST /orders",
+        "architecture": "arm64",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "x86_64_lambda",
+      "description": "A composition whose Lambda function uses the x86_64 architecture.",
+      "input": {
+        "name": "legacy-api-worker",
+        "api": {"name": "legacy-api"},
+        "function": {"name": "legacy-handler", "handler": "app.handler", "architecture": "x86_64", "reserved_concurrency": 5},
+        "route": {"method": "POST", "path": "/orders"}
+      },
+      "expected": {
+        "valid": true,
+        "name": "legacy-api-worker",
+        "api_name": "legacy-api",
+        "function_name": "legacy-handler",
+        "route_key": "POST /orders",
+        "architecture": "x86_64",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "tracing_pass_through_warns",
+      "description": "A valid composition whose Lambda function has X-Ray tracing set to PassThrough — a legitimate but risk-flagged configuration, proving WARN propagates from the constituent Lambda's own tracing policy into the composition's overall security status.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler", "tracing_mode": "PassThrough", "reserved_concurrency": 5},
+        "route": {"method": "POST", "path": "/orders"}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-api-worker",
+        "api_name": "orders-api",
+        "function_name": "orders-handler",
+        "route_key": "POST /orders",
+        "tracing_mode": "PassThrough",
+        "overall_security_status": "warn"
+      }
+    },
+    {
+      "id": "no_reserved_concurrency_warns",
+      "description": "A valid composition whose Lambda function omits reserved concurrency (the default) — a legitimate choice for some workloads, proving WARN propagates from the constituent Lambda's own reserved-concurrency policy.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler"},
+        "route": {"method": "POST", "path": "/orders"}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-api-worker",
+        "api_name": "orders-api",
+        "function_name": "orders-handler",
+        "route_key": "POST /orders",
+        "reserved_concurrency": null,
+        "overall_security_status": "warn"
+      }
+    },
+    {
+      "id": "invalid_route_missing_slash",
+      "description": "A route path missing its required leading '/' must be rejected at construction.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler"},
+        "route": {"method": "POST", "path": "orders"}
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_route_method",
+      "description": "An unsupported HTTP method (ANY) must be rejected — Batch 20 supports only GET/POST/PUT/PATCH/DELETE.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler"},
+        "route": {"method": "ANY", "path": "/orders"}
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "malformed_route",
+      "description": "A route path with an empty segment (a doubled slash) must be rejected as malformed.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler"},
+        "route": {"method": "GET", "path": "/orders//list"}
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "deterministic_defaults",
+      "description": "Constructing the same minimal input twice must yield identical field values — the deterministic-defaults counterpart to every other golden dataset's equivalent scenario.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler", "reserved_concurrency": 5},
+        "route": {"method": "POST", "path": "/orders"}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-api-worker",
+        "api_name": "orders-api",
+        "function_name": "orders-handler",
+        "route_key": "POST /orders",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "lambda_permission_principal",
+      "description": "A valid composition whose Lambda invocation permission grants exactly the apigateway.amazonaws.com principal — proven directly against a real Terraform plan in tests/integration/test_api_lambda_renderer_terraform.py; this scenario proves the same input is also a valid, secure composition end to end.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler", "reserved_concurrency": 5},
+        "route": {"method": "POST", "path": "/orders"}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-api-worker",
+        "api_name": "orders-api",
+        "function_name": "orders-handler",
+        "route_key": "POST /orders",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "lambda_permission_action",
+      "description": "A valid composition whose Lambda invocation permission grants exactly lambda:InvokeFunction — proven directly against a real Terraform plan; this scenario proves the same input still constructs and secures correctly.",
+      "input": {
+        "name": "checkout-api-worker",
+        "api": {"name": "checkout-api"},
+        "function": {"name": "checkout-handler", "handler": "app.handler", "reserved_concurrency": 5},
+        "route": {"method": "POST", "path": "/checkout"}
+      },
+      "expected": {
+        "valid": true,
+        "name": "checkout-api-worker",
+        "api_name": "checkout-api",
+        "function_name": "checkout-handler",
+        "route_key": "POST /checkout",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "no_wildcard_principal",
+      "description": "A valid composition proving the generated invocation permission never uses a wildcard principal — the renderer's fixed constants leave no field through which a caller could request one; proven directly against a real plan in the renderer-terraform integration test.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler", "reserved_concurrency": 5},
+        "route": {"method": "DELETE", "path": "/orders/{id}"}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-api-worker",
+        "api_name": "orders-api",
+        "function_name": "orders-handler",
+        "route_key": "DELETE /orders/{id}",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "explicit_integration_type",
+      "description": "A valid composition whose integration is always rendered as AWS_PROXY — proven directly against a real plan; this scenario proves the same input still constructs and secures correctly.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler", "reserved_concurrency": 5},
+        "route": {"method": "PUT", "path": "/orders/{id}"}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-api-worker",
+        "api_name": "orders-api",
+        "function_name": "orders-handler",
+        "route_key": "PUT /orders/{id}",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "payload_format_2",
+      "description": "A valid composition whose integration always renders payload_format_version 2.0 — proven directly against a real plan; this scenario proves the same input still constructs and secures correctly.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler", "reserved_concurrency": 5},
+        "route": {"method": "PATCH", "path": "/orders/{id}"}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-api-worker",
+        "api_name": "orders-api",
+        "function_name": "orders-handler",
+        "route_key": "PATCH /orders/{id}",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "route_key_correctness",
+      "description": "A valid composition proving the route key is exactly 'METHOD path', never an implicit $default catch-all.",
+      "input": {
+        "name": "billing-api-worker",
+        "api": {"name": "billing-api"},
+        "function": {"name": "billing-handler", "handler": "app.handler", "reserved_concurrency": 3},
+        "route": {"method": "GET", "path": "/invoices"}
+      },
+      "expected": {
+        "valid": true,
+        "name": "billing-api-worker",
+        "api_name": "billing-api",
+        "function_name": "billing-handler",
+        "route_key": "GET /invoices",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "composition_environment_consistency",
+      "description": "A valid composition with a composition-level environment that is consistent with a sub-spec's own explicitly-declared environment.",
+      "input": {
+        "name": "orders-api-worker",
+        "environment": "staging",
+        "api": {"name": "orders-api", "environment": "staging"},
+        "function": {"name": "orders-handler", "handler": "app.handler", "reserved_concurrency": 5},
+        "route": {"method": "POST", "path": "/orders"}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-api-worker",
+        "api_name": "orders-api",
+        "function_name": "orders-handler",
+        "route_key": "POST /orders",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "invalid_duplicate_identifiers",
+      "description": "A composition whose api and function share the same name — this platform never silently renames a resource to force uniqueness, so this must be rejected.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders"},
+        "function": {"name": "orders", "handler": "app.handler"},
+        "route": {"method": "POST", "path": "/orders"}
+      },
+      "expected": {
+        "valid": false
+      }
+    }
+  ]
+}

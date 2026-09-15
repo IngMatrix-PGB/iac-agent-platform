@@ -1,15 +1,68 @@
-"""Deterministic LangGraph orchestration of the SQS pipeline.
+"""Deterministic LangGraph orchestration of the Phase 1/2 AWS pipeline.
 
-`build_sqs_workflow` wires seven narrow nodes around the already-
+`build_iac_workflow` wires eight narrow nodes around the already-
 proven deterministic components:
 
-    render_terraform   -> TerraformCompositionRenderer
+    render_terraform   -> IacRenderer (dispatches AWSResourceSpec/ServerlessWorkerSpec)
     terraform_execute   -> TerraformRunner (fmt, init, validate, plan)
     plan_analysis       -> TerraformRunner.show_json + analyze_plan
-    platform_policy      -> evaluate_platform_policies
-    checkov_scan         -> CheckovAdapter.scan
+    platform_policy      -> evaluate_platform_policies / evaluate_composition_policies
+    checkov_scan         -> checkov_profile_for / composition_checkov_profile_for
+                            + CheckovAdapter.scan
     security_gate        -> evaluate_security_gate
     approval_gate         -> a durable LangGraph `interrupt()` (Batch 13)
+    source_control        -> SourceControlPort (Batch 14)
+
+Batch 16 (Phase 2) generalized this module from SQS-only to any
+supported `AWSResourceSpec` (Batch 18 added Lambda alongside SQS, S3,
+and DynamoDB from Batches 16-17). Batch 18's Lambda function and its
+IAM execution role/CloudWatch log group are all owned internally by
+the trusted `terraform/modules/lambda` module — there is no separate
+top-level IAM resource type, and no new graph node was needed for the
+multi-resource relationship.
+
+Batch 19 widens `resource_spec` (see `iac_agent.graph.state`) from
+`AWSResourceSpec` to `IacRequestSpec` (`iac_agent.request`) so a
+`ServerlessWorkerSpec` composition request — an SQS queue, a Lambda
+consumer, and a DynamoDB table, plus the event source mapping and
+narrowly-scoped IAM policies that bind them (see
+`iac_agent.compositions.serverless_worker`) — can flow through the
+exact same eight nodes an `AWSResourceSpec` does. Still no new graph
+node: `render_terraform`, `platform_policy`, and `checkov_scan` each
+gained one `match`/`case` branch (composition vs. single resource);
+`terraform_execute`, `plan_analysis`, and `approval_gate` needed **no**
+change at all — none of them ever inspected the request spec's type.
+`security_gate` gained one branch too, via
+`evaluate_security_gate`'s new `required_policy_ids` parameter
+(`iac_agent.security.gate`) rather than a second, parallel gate
+function. `source_control`'s PR/commit text also branches, producing
+"feat(iac): add serverless worker proposal <request_id>" and a PR body
+naming the composition type plus its queue/function/table, never a raw
+Terraform dump.
+
+Batch 20 adds a second composition, `ApiLambdaSpec` (an API Gateway
+HTTP API bound to a Lambda function via a proxy integration, route, and
+resource-based invocation permission — see
+`iac_agent.compositions.api_lambda`), proving the composition
+architecture generalizes: every `match`/`case` branch Batch 19 added
+above simply widened to `ServerlessWorkerSpec() | ApiLambdaSpec()`
+(the underlying `evaluate_composition_policies`/
+`composition_checkov_profile_for`/`REQUIRED_COMPOSITION_POLICY_IDS_BY_COMPOSITION_TYPE`
+dispatch on the spec's own type internally) — no new node, no second
+gate function, no new `CompositionType`-keyed trusted-module mapping
+(API Gateway's own module directory is registered under
+`ResourceType.API_GATEWAY` exactly like every other resource type).
+`source_control` produces "feat(iac): add API Lambda proposal
+<request_id>" for this composition.
+
+`build_sqs_workflow` remains as a zero-cost backward-compatible alias.
+
+Batch 16.5 made `checkov_scan` resource-aware too: it selects an
+explicit `CheckovScanProfile` via
+`iac_agent.security.checkov_profiles.checkov_profile_for` before
+calling `CheckovAdapter.scan`, rather than the adapter carrying an
+implicit, resource-blind default skip list. `CheckovAdapter` itself
+still has no idea what a "resource type" is.
 
 Each node consumes state, invokes exactly one existing capability, and
 returns only its own state update. None of the underlying business
@@ -70,7 +123,7 @@ independent layer of the same protection).
 
 from __future__ import annotations
 
-import os
+from collections.abc import Mapping
 from pathlib import Path
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -78,12 +131,18 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import interrupt
 
+from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec
+from iac_agent.compositions.api_lambda.renderer import ApiLambdaTerraformRenderer
+from iac_agent.compositions.resource import composition_type_of
+from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
+from iac_agent.compositions.serverless_worker.renderer import ServerlessWorkerTerraformRenderer
 from iac_agent.domain.approval import (
     ApprovalDecision,
     InvalidApprovalDecisionError,
     parse_approval_decision,
 )
 from iac_agent.domain.plan import PlanSummary
+from iac_agent.domain.resource import ResourceType
 from iac_agent.domain.security import PolicyStatus, SecurityGateResult
 from iac_agent.domain.source_control import derive_branch_name
 from iac_agent.domain.workflow import (
@@ -96,16 +155,48 @@ from iac_agent.execution.plan_analyzer import PlanAnalysisError, analyze_plan
 from iac_agent.execution.terraform_runner import TerraformError, TerraformRunner
 from iac_agent.git.port import SourceControlError, SourceControlPort
 from iac_agent.graph.state import WorkflowState
+from iac_agent.policies.composition import (
+    REQUIRED_COMPOSITION_POLICY_IDS_BY_COMPOSITION_TYPE,
+    evaluate_composition_policies,
+)
 from iac_agent.policies.platform import evaluate_platform_policies
+from iac_agent.providers.aws.renderer import AWSResourceRenderer
+from iac_agent.providers.aws.resource import resource_type_of
 from iac_agent.providers.aws.sqs.renderer import TerraformCompositionRenderer
+from iac_agent.request import IacRenderer, IacRequestSpec
 from iac_agent.security.checkov import CheckovAdapter, CheckovError
+from iac_agent.security.checkov_profiles import checkov_profile_for
+from iac_agent.security.composition_checkov_profiles import composition_checkov_profile_for
 from iac_agent.security.gate import SecurityGateError, evaluate_security_gate
 
-#: Default location of the trusted SQS module, computed relative to
-#: this installed package (src/iac_agent/graph/workflow.py -> repo
-#: root -> terraform/modules/sqs). Overridable at construction time;
-#: never inferred from the process working directory.
-_DEFAULT_TRUSTED_MODULE_DIR = Path(__file__).resolve().parents[3] / "terraform" / "modules" / "sqs"
+#: Repository root, computed relative to this installed package
+#: (src/iac_agent/graph/workflow.py -> repo root).
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+#: Default trusted-module directory per resource type. Overridable at
+#: construction time; never inferred from the process working directory.
+_DEFAULT_TRUSTED_MODULE_DIRS: dict[ResourceType, Path] = {
+    ResourceType.SQS: _REPO_ROOT / "terraform" / "modules" / "sqs",
+    ResourceType.S3: _REPO_ROOT / "terraform" / "modules" / "s3",
+    ResourceType.DYNAMODB: _REPO_ROOT / "terraform" / "modules" / "dynamodb",
+    ResourceType.LAMBDA: _REPO_ROOT / "terraform" / "modules" / "lambda",
+    ResourceType.API_GATEWAY: _REPO_ROOT / "terraform" / "modules" / "api_gateway",
+}
+
+#: Human-readable resource-kind label for commit/PR text. Batch 16's
+#: `resource_type_of(...).value.upper()` happened to be correct for
+#: both SQS and S3 (both are already-correct all-caps acronyms), but
+#: DynamoDB's proper name is mixed-case — a concrete third-resource
+#: limitation, not a reason to redesign anything else here. `_pr_body`
+#: still uses the plain lowercase `.value` for its "Resource type:"
+#: line, which needed no change.
+_RESOURCE_KIND_DISPLAY_NAMES: dict[ResourceType, str] = {
+    ResourceType.SQS: "SQS",
+    ResourceType.S3: "S3",
+    ResourceType.DYNAMODB: "DynamoDB",
+    ResourceType.LAMBDA: "Lambda",
+    ResourceType.API_GATEWAY: "API Gateway",
+}
 
 #: Placeholder-only credentials for the credential-free Terraform plan
 #: design proven in Batches 3-9 — never real, never logged, never
@@ -207,17 +298,44 @@ def _pr_body(state: WorkflowState) -> str:
     workspace paths, tokens, or internal exception text. States the
     security status verbatim (WARN is never rewritten to look like
     PASS) and states only that a human approved the change, never a
-    reviewer identity Batch 13 has no way to authenticate."""
+    reviewer identity Batch 13 has no way to authenticate.
+
+    Batch 19: a `ServerlessWorkerSpec` request gets its own body shape
+    (composition type, queue/function/table names) instead of the
+    single-resource "Resource type:"/"Resource:" lines — never a raw
+    Terraform dump either way.
+    """
     gate_result: SecurityGateResult = state["security_gate"]
     plan_summary: PlanSummary = state["plan_summary"]
     approval_decision: ApprovalDecision = state["approval_decision"]
     approval_text = (
         "approved" if approval_decision is ApprovalDecision.APPROVE else approval_decision.value
     )
+    spec: IacRequestSpec = state["resource_spec"]
+
+    match spec:
+        case ServerlessWorkerSpec():
+            identity_lines = (
+                f"Composition type: {composition_type_of(spec).value}\n"
+                f"Queue: {spec.queue.name}\n"
+                f"Lambda: {spec.function.name}\n"
+                f"DynamoDB: {spec.table.name}\n"
+            )
+        case ApiLambdaSpec():
+            identity_lines = (
+                f"Composition type: {composition_type_of(spec).value}\n"
+                f"API: {spec.api.name}\n"
+                f"Route: {spec.route.route_key}\n"
+                f"Lambda: {spec.function.name}\n"
+            )
+        case _:
+            identity_lines = (
+                f"Resource type: {resource_type_of(spec).value}\nResource: {spec.name}\n"
+            )
 
     return (
         f"Request ID: {state['request_id']}\n"
-        f"Resource: {state['resource_spec'].name}\n"
+        f"{identity_lines}"
         f"Security status: {gate_result.overall_status.value}\n"
         f"Plan: {plan_summary.add_count} to add, {plan_summary.change_count} to change, "
         f"{plan_summary.destroy_count} to destroy\n"
@@ -225,18 +343,20 @@ def _pr_body(state: WorkflowState) -> str:
     )
 
 
-def build_sqs_workflow(
+def build_iac_workflow(
     *,
-    renderer: TerraformCompositionRenderer,
+    renderer: AWSResourceRenderer,
     terraform_runner: TerraformRunner,
     checkov_adapter: CheckovAdapter,
     source_control_port: SourceControlPort,
     workspace_root: Path,
-    trusted_module_dir: Path = _DEFAULT_TRUSTED_MODULE_DIR,
+    trusted_module_dirs: Mapping[ResourceType, Path] = _DEFAULT_TRUSTED_MODULE_DIRS,
     base_branch: str = "main",
     checkpointer: BaseCheckpointSaver | None = None,
+    serverless_worker_renderer: ServerlessWorkerTerraformRenderer | None = None,
+    api_lambda_renderer: ApiLambdaTerraformRenderer | None = None,
 ) -> CompiledStateGraph:
-    """Build and compile the deterministic SQS workflow graph.
+    """Build and compile the deterministic IaC request workflow graph.
 
     All external boundaries are injected — no hidden global singletons,
     no real Terraform/Checkov/GitHub requirement for callers who inject
@@ -252,13 +372,30 @@ def build_sqs_workflow(
     default is acceptable (the application composition layer); the
     `SourceControlPort` itself always receives it explicitly and never
     assumes a default on its own.
+
+    `serverless_worker_renderer` (Batch 19) and `api_lambda_renderer`
+    (Batch 20) are both optional, each defaulting to a fresh concrete
+    renderer when not supplied, exactly like every existing renderer/
+    adapter parameter's own "construct a real one if you didn't give me
+    one" convention. Every existing caller (which only ever passes
+    `renderer=`) is completely unaffected: `renderer` (the AWS-resource
+    renderer) is never touched, and neither a `ServerlessWorkerSpec` nor
+    an `ApiLambdaSpec` request was something any pre-Batch-19 caller
+    ever submitted.
     """
+    iac_renderer = IacRenderer(
+        aws_renderer=renderer,
+        serverless_worker_renderer=serverless_worker_renderer,
+        api_lambda_renderer=api_lambda_renderer,
+    )
 
     def render_terraform(state: WorkflowState) -> dict:
         try:
+            spec: IacRequestSpec = state["resource_spec"]
             workspace = _resolve_request_workspace(workspace_root, state["request_id"])
-            module_source = os.path.relpath(trusted_module_dir, start=workspace)
-            composition = renderer.render(state["resource_spec"], module_source=module_source)
+            composition = iac_renderer.render(
+                spec, trusted_module_dirs=trusted_module_dirs, workspace=workspace
+            )
             composition.write_to(workspace)
         except Exception as exc:  # noqa: BLE001 - sanitized below; KeyboardInterrupt/
             # SystemExit are BaseException subclasses and are never caught here.
@@ -305,9 +442,12 @@ def build_sqs_workflow(
 
     def platform_policy(state: WorkflowState) -> dict:
         try:
-            platform_evaluation = evaluate_platform_policies(
-                state["resource_spec"], state["plan_summary"]
-            )
+            spec: IacRequestSpec = state["resource_spec"]
+            match spec:
+                case ServerlessWorkerSpec() | ApiLambdaSpec():
+                    platform_evaluation = evaluate_composition_policies(spec, state["plan_summary"])
+                case _:
+                    platform_evaluation = evaluate_platform_policies(spec, state["plan_summary"])
         except Exception as exc:  # noqa: BLE001 - a pure deterministic function
             # should never raise, but fail closed rather than crash the graph.
             return _error_update(WorkflowStage.PLATFORM_POLICY, exc)
@@ -319,7 +459,20 @@ def build_sqs_workflow(
 
     def checkov_scan(state: WorkflowState) -> dict:
         try:
-            checkov_result = checkov_adapter.scan(state["workspace"])
+            spec: IacRequestSpec = state["resource_spec"]
+            match spec:
+                case ServerlessWorkerSpec() | ApiLambdaSpec():
+                    profile = composition_checkov_profile_for(composition_type_of(spec))
+                case _:
+                    profile = checkov_profile_for(resource_type_of(spec))
+        except Exception as exc:  # noqa: BLE001 - a pure deterministic lookup
+            # should never raise for a spec that already reached this node
+            # (render_terraform already validated the request type), but
+            # fail closed rather than crash the graph.
+            return _error_update(WorkflowStage.CHECKOV, exc)
+
+        try:
+            checkov_result = checkov_adapter.scan(state["workspace"], profile=profile)
         except CheckovError as exc:
             return _error_update(WorkflowStage.CHECKOV, exc)
 
@@ -330,9 +483,22 @@ def build_sqs_workflow(
 
     def security_gate(state: WorkflowState) -> dict:
         try:
-            gate_result = evaluate_security_gate(
-                state["platform_evaluation"], state["checkov_result"]
-            )
+            spec: IacRequestSpec = state["resource_spec"]
+            match spec:
+                case ServerlessWorkerSpec() | ApiLambdaSpec():
+                    gate_result = evaluate_security_gate(
+                        state["platform_evaluation"],
+                        state["checkov_result"],
+                        required_policy_ids=REQUIRED_COMPOSITION_POLICY_IDS_BY_COMPOSITION_TYPE[
+                            composition_type_of(spec)
+                        ],
+                    )
+                case _:
+                    gate_result = evaluate_security_gate(
+                        state["platform_evaluation"],
+                        state["checkov_result"],
+                        resource_type=resource_type_of(spec),
+                    )
         except SecurityGateError as exc:
             return _error_update(WorkflowStage.SECURITY_GATE, exc)
 
@@ -397,12 +563,24 @@ def build_sqs_workflow(
         request_id = state["request_id"]
         try:
             branch_name = derive_branch_name(request_id)
+            spec: IacRequestSpec = state["resource_spec"]
+            match spec:
+                case ServerlessWorkerSpec():
+                    # Matches the batch's own example verbatim:
+                    # "feat(iac): add serverless worker proposal <request_id>".
+                    resource_kind = "serverless worker"
+                case ApiLambdaSpec():
+                    # Matches Batch 20's own example verbatim:
+                    # "feat(iac): add API Lambda proposal <request_id>".
+                    resource_kind = "API Lambda"
+                case _:
+                    resource_kind = _RESOURCE_KIND_DISPLAY_NAMES[resource_type_of(spec)]
             pr_result = source_control_port.publish_change(
                 request_id=request_id,
                 base_branch=base_branch,
                 branch_name=branch_name,
                 files=state.get("generated_files") or {},
-                commit_message=f"feat(iac): add SQS proposal {request_id}",
+                commit_message=f"feat(iac): add {resource_kind} proposal {request_id}",
                 pr_title=f"IaC proposal: {request_id}",
                 pr_body=_pr_body(state),
             )
@@ -450,3 +628,39 @@ def build_sqs_workflow(
     builder.add_edge("source_control", END)
 
     return builder.compile(checkpointer=checkpointer)
+
+
+def build_sqs_workflow(
+    *,
+    renderer: TerraformCompositionRenderer,
+    terraform_runner: TerraformRunner,
+    checkov_adapter: CheckovAdapter,
+    source_control_port: SourceControlPort,
+    workspace_root: Path,
+    trusted_module_dir: Path = _DEFAULT_TRUSTED_MODULE_DIRS[ResourceType.SQS],
+    base_branch: str = "main",
+    checkpointer: BaseCheckpointSaver | None = None,
+) -> CompiledStateGraph:
+    """Backward-compatible, SQS-only entry point — a thin wrapper around
+    `build_iac_workflow`, kept because every call site through Batch 15
+    passes a bare SQS renderer and a single `trusted_module_dir`. Prefer
+    `build_iac_workflow` directly for new code (S3 or otherwise); this
+    wrapper never becomes aware of S3 itself, it just constructs an
+    `AWSResourceRenderer` around the given SQS renderer plus a real S3
+    renderer (never exercised unless an S3 spec is actually submitted
+    through this same graph).
+    """
+    dispatch_renderer = AWSResourceRenderer(sqs_renderer=renderer)
+    trusted_module_dirs = dict(_DEFAULT_TRUSTED_MODULE_DIRS)
+    trusted_module_dirs[ResourceType.SQS] = trusted_module_dir
+
+    return build_iac_workflow(
+        renderer=dispatch_renderer,
+        terraform_runner=terraform_runner,
+        checkov_adapter=checkov_adapter,
+        source_control_port=source_control_port,
+        workspace_root=workspace_root,
+        trusted_module_dirs=trusted_module_dirs,
+        base_branch=base_branch,
+        checkpointer=checkpointer,
+    )

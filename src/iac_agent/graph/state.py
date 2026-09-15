@@ -1,12 +1,29 @@
-"""The explicit LangGraph state schema for the SQS workflow.
+"""The explicit LangGraph state schema for the Phase 1/2 AWS workflow.
 
 Deliberately a plain ``TypedDict`` of explicit workflow facts — never
 ``MessagesState``. There is no message history anywhere in this state;
 every field here is inspectable, typed application data, reusing the
-existing domain models (``SQSResourceSpec``, ``PlanSummary``,
+existing domain models (``AWSResourceSpec``, ``PlanSummary``,
 ``PolicyEvaluation``, ``CheckovScanResult``, ``SecurityGateResult``,
 ``ApprovalDecision``) rather than re-serializing them into arbitrary
 dicts.
+
+Batch 16 (Phase 2) widened ``resource_spec`` from ``SQSResourceSpec`` to
+the ``AWSResourceSpec`` union (currently SQS, S3, DynamoDB, or Lambda)
+— a typing-only change; nothing about how this ``TypedDict`` is
+constructed, stored, or checkpointed changed.
+
+Batch 19 widens it again to ``IacRequestSpec`` (``AWSResourceSpec |
+ServerlessWorkerSpec``), so one workflow can carry either a single AWS
+resource request or a multi-resource composition request. The field is
+deliberately **not** renamed to ``request_spec``: every graph node,
+every test in this project, and the application layer already spell it
+``resource_spec``, and a composition spec still has exactly the shape
+every current reader of this field needs (a ``.name`` attribute, and a
+type dispatchable via ``iac_agent.request.IacRequestSpec``'s own
+``match``/``case`` handling in ``iac_agent.graph.workflow``) — renaming
+here would be cosmetic churn across dozens of call sites for no
+behavioral benefit, not a fix for an actual type mismatch.
 """
 
 from __future__ import annotations
@@ -19,7 +36,7 @@ from iac_agent.domain.plan import PlanSummary
 from iac_agent.domain.security import PolicyEvaluation, SecurityGateResult
 from iac_agent.domain.source_control import PullRequestResult
 from iac_agent.domain.workflow import WorkflowError, WorkflowStage, WorkflowStatus
-from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
+from iac_agent.request import IacRequestSpec
 from iac_agent.security.checkov import CheckovScanResult
 
 
@@ -53,7 +70,7 @@ class WorkflowState(TypedDict, total=False):
     """
 
     request_id: str
-    resource_spec: SQSResourceSpec
+    resource_spec: IacRequestSpec
 
     workspace: Path
     generated_files: dict[str, str] | None

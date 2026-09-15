@@ -23,6 +23,7 @@ from iac_agent.security.checkov import (
     CheckovExecutableNotFoundError,
     CheckovExecutionError,
     CheckovJsonError,
+    CheckovScanProfile,
     CheckovScanResult,
     CheckovTimeoutError,
 )
@@ -84,6 +85,9 @@ def adapter():
 
 
 def test_exact_argv_is_built_correctly(adapter, workspace):
+    """Batch 16.5: with no profile passed at all, `scan()` always
+    performs the strict, zero-skip scan — there is no implicit
+    resource-blind default skip list on the adapter itself."""
     import json as _json
 
     with patch(
@@ -102,6 +106,49 @@ def test_exact_argv_is_built_correctly(adapter, workspace):
         "json",
         "--compact",
         "--quiet",
+    )
+
+
+def test_empty_profile_adds_no_skip_check_flag(adapter, workspace):
+    """A profile with an empty skip tuple behaves identically to no
+    profile at all — never adds a bare `--skip-check` with nothing
+    after it."""
+    import json as _json
+
+    with patch(
+        RUN_TARGET, return_value=_completed(stdout=_json.dumps(_clean_scan_json()))
+    ) as mock_run:
+        adapter.scan(workspace, profile=CheckovScanProfile())
+
+    args, _kwargs = mock_run.call_args
+    assert "--skip-check" not in args[0]
+
+
+def test_profile_with_skips_appends_skip_check_argv(adapter, workspace):
+    """Batch 16.5: skips are applied only when the caller explicitly
+    hands `scan()` a profile naming them — proving the adapter itself
+    never infers which checks to skip for any resource type."""
+    import json as _json
+
+    profile = CheckovScanProfile(skipped_checks=("CKV_AWS_18", "CKV2_AWS_61"))
+    with patch(
+        RUN_TARGET, return_value=_completed(stdout=_json.dumps(_clean_scan_json()))
+    ) as mock_run:
+        adapter.scan(workspace, profile=profile)
+
+    args, _kwargs = mock_run.call_args
+    assert args[0] == (
+        "checkov",
+        "-d",
+        ".",
+        "--framework",
+        "terraform",
+        "-o",
+        "json",
+        "--compact",
+        "--quiet",
+        "--skip-check",
+        "CKV_AWS_18,CKV2_AWS_61",
     )
 
 
