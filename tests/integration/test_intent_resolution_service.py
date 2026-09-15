@@ -23,7 +23,11 @@ from iac_agent.domain.workflow import WorkflowStatus
 from iac_agent.execution.terraform_runner import CommandResult
 from iac_agent.graph.workflow import build_iac_workflow
 from iac_agent.intent.models import ArchitectureIntent
-from iac_agent.intent.port import IntentProviderTimeoutError, parse_intent_payload
+from iac_agent.intent.port import (
+    IntentProviderRefusalError,
+    IntentProviderTimeoutError,
+    parse_intent_payload,
+)
 from iac_agent.intent.resolver import ArchitectureResolver
 from iac_agent.intent.service import IntentResolutionService
 from iac_agent.providers.aws.renderer import AWSResourceRenderer
@@ -202,3 +206,51 @@ def test_interpreter_failure_propagates_uncaught(tmp_path):
     )
     with pytest.raises(IntentProviderTimeoutError):
         service.submit(request_id="req-004", natural_language_request="build me an api")
+
+
+# ---------------------------------------------------------------------------
+# Task 8: boundary/integration regression tests — proving structurally that
+# only a resolved architecture ever reaches IacApplication.submit(), mirroring
+# _NeverCalledSourceControl's exact "raise AssertionError if called" pattern.
+# ---------------------------------------------------------------------------
+
+
+class _NeverCalledApplication:
+    """`submit` must never be invoked for anything other than a
+    `ResolvedArchitecture` — calling it is a test failure, not a
+    fallback."""
+
+    def submit(self, **kwargs):
+        raise AssertionError("submit must not be called in this test")
+
+
+def test_clarification_required_never_invokes_application_submit():
+    service = IntentResolutionService(
+        interpreter=FakeIntentInterpreter(payload=_CLARIFICATION_PAYLOAD),
+        resolver=ArchitectureResolver(),
+        application=_NeverCalledApplication(),
+    )
+    result = service.submit(request_id="req-005", natural_language_request="do something")
+    assert result.workflow_view is None
+    assert result.resolution.outcome == "clarification_required"
+
+
+def test_unsupported_never_invokes_application_submit():
+    service = IntentResolutionService(
+        interpreter=FakeIntentInterpreter(payload=_UNSUPPORTED_PAYLOAD),
+        resolver=ArchitectureResolver(),
+        application=_NeverCalledApplication(),
+    )
+    result = service.submit(request_id="req-006", natural_language_request="build an aurora db")
+    assert result.workflow_view is None
+    assert result.resolution.outcome == "unsupported"
+
+
+def test_interpreter_failure_never_invokes_application_submit():
+    service = IntentResolutionService(
+        interpreter=FakeIntentInterpreter(raises=IntentProviderRefusalError("refused")),
+        resolver=ArchitectureResolver(),
+        application=_NeverCalledApplication(),
+    )
+    with pytest.raises(IntentProviderRefusalError):
+        service.submit(request_id="req-007", natural_language_request="build me an api")
