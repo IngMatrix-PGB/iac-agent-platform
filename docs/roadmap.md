@@ -163,24 +163,112 @@ uses a single checked-in trusted fixture zip
 SNS, DLQ wiring, and the FastAPI/HTTP adapter/UI work this and every
 prior batch have deliberately deferred.
 
+## Phase 2 — Serverless composition: SQS -> Lambda -> DynamoDB (complete)
+
+**Goal:** prove the platform can model and generate a small
+multi-resource architecture with deterministic relationships — not an
+arbitrary graph DSL, not a generic workflow engine, not a generic IAM
+generator, not a generic Terraform module composer. See
+`docs/compositions/serverless-worker.md` for the full composition
+contract, IAM design, Checkov-scope, and policy write-up.
+
+Composition registration touchpoints (discovered via read-only
+inspection before implementation, confirmed accurate afterward):
+
+- `CompositionType` (`iac_agent.domain.composition`) — one new enum,
+  separate from `ResourceType`, with one member,
+  `SQS_LAMBDA_DYNAMODB`. No `ResourceType.SERVERLESS` was added or
+  ever planned.
+- `ServerlessWorkerSpec` (`iac_agent.compositions.serverless_worker.
+  contract`) — reuses `SQSResourceSpec`/`LambdaResourceSpec`/
+  `DynamoDBResourceSpec` verbatim as nested fields; adds pairwise-
+  distinct-identifier, environment-consistency, and event-source-
+  parameter invariants.
+- `ServerlessWorkerTerraformRenderer` (`iac_agent.compositions.
+  serverless_worker.renderer`) — instantiates the three existing
+  trusted modules side by side and adds only the relationship
+  resources (event source mapping, two narrowly-scoped
+  `aws_iam_role_policy` resources) not naturally owned by any one of
+  them.
+- `iac_agent.request.IacRequestSpec`/`IacRenderer` — a new request-
+  level dispatch boundary (`AWSResourceSpec | ServerlessWorkerSpec`),
+  computing each renderer's expected module-source shape from the same
+  `ResourceType`-keyed `trusted_module_dirs` mapping every AWS resource
+  type already used; no new `CompositionType`-keyed trusted-module map.
+- `iac_agent.policies.composition.evaluate_composition_policies` +
+  `REQUIRED_COMPOSITION_POLICY_IDS_BY_COMPOSITION_TYPE` — three new
+  composition-specific policies, plus the constituent Lambda/DynamoDB
+  sub-specs' own already-approved recommendation policies reused
+  verbatim (promoted from private to public functions in
+  `iac_agent.policies.platform` for reuse), plus the shared
+  destructive-changes policy (promoted to `iac_agent.policies.shared`
+  once a second dispatcher needed it).
+- `iac_agent.security.composition_checkov_profiles.
+  composition_checkov_profile_for` — one new composition-type entry,
+  verified empirically (not assumed) to be exactly the union of
+  DynamoDB's and Lambda's already-approved skips, with zero new
+  findings and zero S3-related findings.
+- `iac_agent.security.gate.evaluate_security_gate` — one new optional
+  `required_policy_ids` parameter, so a composition caller can supply
+  its required-ID list directly instead of the `resource_type`-keyed
+  lookup; every existing call site is unaffected.
+- `iac_agent.graph.state.WorkflowState.resource_spec` — widened to
+  `IacRequestSpec`; **not** renamed to `request_spec` (cosmetic churn
+  with no behavioral benefit — see `docs/compositions/serverless-
+  worker.md`).
+- `iac_agent.graph.workflow.build_iac_workflow` — one new optional
+  parameter (`serverless_worker_renderer`); `render_terraform`,
+  `platform_policy`, and `checkov_scan` each gained one `match`/`case`
+  branch; `terraform_execute`, `plan_analysis`, and `approval_gate`
+  needed no change at all; `source_control`'s PR/commit text gained a
+  composition-specific branch. No new graph node.
+- `terraform/modules/lambda/outputs.tf` — one new output,
+  `execution_role_name`, the smallest addition needed for the
+  composition layer to attach its own IAM policies to the Lambda
+  module's role without the module itself becoming IAM-relationship-
+  aware.
+- `iac_agent.app.service.Phase1Application` renamed to
+  `IacApplication` (alias kept); `submit`'s type hint widened to
+  `IacRequestSpec`. `iac_agent.app.composition.open_application`
+  needed **zero** changes — proven directly (not just asserted) by a
+  new test showing a `ServerlessWorkerSpec` request already works
+  through the existing composition root.
+- `iac_agent.persistence.checkpoints._ALLOWED_WORKFLOW_TYPES` — one
+  new entry, `ServerlessWorkerSpec` (its nested sub-spec/enum types
+  were already registered individually).
+
+One genuine IAM design decision, evaluated and reported before
+implementation (not assumed): Option B (composition-owned
+`aws_iam_role_policy` resources targeting the Lambda module's own
+`execution_role_name` output) over Option A (extending the Lambda
+module with SQS/DynamoDB-aware inputs) — see
+`docs/compositions/serverless-worker.md` for the full evaluation.
+
+No new Terraform provider was added, and no new runtime dependency was
+added.
+
+**Next: Serverless composition, phase two** — a FastAPI/HTTP
+application-layer adapter or API Gateway composition; this is not
+claimed to be a full serverless platform yet.
+
 ## Known naming debt (tracked, not yet resolved)
 
-`iac_agent.app.service.Phase1Application` and the surrounding
-composition layer (`iac_agent.app.composition`,
-`iac_agent.app.config`) are still SQS-only as of Batch 18 — they
-construct `build_sqs_workflow` and a single SQS trusted-module path
-directly, never `build_iac_workflow` or an S3/DynamoDB/Lambda-capable
-renderer. This is a real gap (the graph layer one level below has been
-resource-neutral since Batch 16) but a full generalization here would
-need `ApplicationConfig` to carry a *mapping* of trusted module
-directories rather than one path, and `submit()`'s type hint widened
-from `SQSResourceSpec` to `AWSResourceSpec` — more churn than any of
-these batches' scope, and deferred rather than rushed each time.
+`iac_agent.app.config` is still SQS-shaped as of Batch 19 —
+`ApplicationConfig.terraform_module_path` remains a single path rather
+than a mapping, so `open_application` still only ever configures the
+SQS trusted-module directory explicitly (S3/DynamoDB/Lambda and the
+serverless-worker composition all fall back to `build_iac_workflow`'s
+own defaults, which already cover them — this is why zero application-
+layer code changes were needed this batch, not evidence the gap is
+closed). A full generalization here would need `ApplicationConfig` to
+carry a genuine multi-resource-type module-directory mapping — more
+churn than this batch's scope, and deferred rather than rushed.
 Tracked here explicitly so it is not forgotten; revisit when the first
 real caller (FastAPI adapter, CLI) makes the gap unavoidable.
 
 ## Not yet started
 
-Serverless composition (API Gateway, EventBridge, SNS, DLQ wiring), a
-FastAPI/HTTP adapter, and any UI remain entirely out of scope until a
-future phase is explicitly approved.
+API Gateway, EventBridge, SNS (beyond this batch's own SQS-Lambda event
+source mapping), a second Lambda in one composition, a FastAPI/HTTP
+adapter, and any UI remain entirely out of scope until a future phase
+is explicitly approved.
