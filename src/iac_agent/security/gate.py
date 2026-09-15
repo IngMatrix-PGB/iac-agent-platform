@@ -52,19 +52,33 @@ def evaluate_security_gate(
     checkov: CheckovScanResult,
     *,
     resource_type: ResourceType = ResourceType.SQS,
+    required_policy_ids: tuple[str, ...] | None = None,
 ) -> SecurityGateResult:
     """Combine platform-policy and Checkov findings into one aggregate result.
 
-    Pure function: given the same three inputs, always returns an equal
+    Pure function: given the same inputs, always returns an equal
     `SecurityGateResult`, regardless of the order of findings within
     either input. `resource_type` defaults to `ResourceType.SQS` to
     preserve every Phase 1 call site's exact behavior unchanged; Batch
-    16 callers evaluating an S3 request must pass `resource_type=
-    ResourceType.S3` explicitly (see `iac_agent.graph.workflow`, which
+    16-18 callers evaluating an S3/DynamoDB/Lambda request must pass
+    `resource_type=` explicitly (see `iac_agent.graph.workflow`, which
     derives it from the request's own resource spec via
     `resource_type_of`, never a hardcoded default).
+
+    `required_policy_ids` (Batch 19) lets a caller evaluating a
+    *composition* request (no single `ResourceType` applies to it at
+    all) supply the required-ID list directly — typically
+    `iac_agent.policies.composition.
+    REQUIRED_COMPOSITION_POLICY_IDS_BY_COMPOSITION_TYPE[...]` — instead
+    of the `resource_type`-keyed lookup. When given, it always takes
+    precedence over `resource_type`, which is then ignored entirely.
     """
-    _require_complete_platform_policies(platform, resource_type)
+    required_ids = (
+        required_policy_ids
+        if required_policy_ids is not None
+        else REQUIRED_PLATFORM_POLICY_IDS_BY_RESOURCE_TYPE[resource_type]
+    )
+    _require_complete_platform_policies(platform, required_ids)
     _require_consistent_checkov_result(checkov)
 
     combined = platform.findings + checkov.findings
@@ -73,13 +87,12 @@ def evaluate_security_gate(
 
 
 def _require_complete_platform_policies(
-    platform: PolicyEvaluation, resource_type: ResourceType
+    platform: PolicyEvaluation, required_ids: tuple[str, ...]
 ) -> None:
     findings_by_policy_id: dict[str, list[SecurityFinding]] = {}
     for finding in platform.findings:
         findings_by_policy_id.setdefault(finding.policy_id, []).append(finding)
 
-    required_ids = REQUIRED_PLATFORM_POLICY_IDS_BY_RESOURCE_TYPE[resource_type]
     for required_id in required_ids:
         matches = findings_by_policy_id.get(required_id, [])
 

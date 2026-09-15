@@ -50,6 +50,7 @@ _ALLOWED_WORKFLOW_TYPES: tuple[tuple[str, str], ...] = (
     ("iac_agent.providers.aws.lambda_function.contract", "LambdaRuntime"),
     ("iac_agent.providers.aws.lambda_function.contract", "LambdaArchitecture"),
     ("iac_agent.providers.aws.lambda_function.contract", "LambdaTracingMode"),
+    ("iac_agent.compositions.serverless_worker.contract", "ServerlessWorkerSpec"),
     ("iac_agent.domain.plan", "PlanAction"),
     ("iac_agent.domain.plan", "ResourceChange"),
     ("iac_agent.domain.plan", "PlanSummary"),
