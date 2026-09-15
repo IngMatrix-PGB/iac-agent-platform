@@ -1,4 +1,5 @@
-"""Resource-aware Checkov scan profiles for composition requests (Batch 19).
+"""Resource-aware Checkov scan profiles for composition requests
+(Batches 19-20).
 
 Mirrors `iac_agent.security.checkov_profiles` exactly in structure and
 discipline: `CheckovAdapter` itself carries no notion of a composition,
@@ -57,9 +58,46 @@ _SQS_LAMBDA_DYNAMODB_SKIPPED_CHECKS: tuple[str, ...] = (
     "CKV_AWS_272",
 )
 
+#: Verified empirically (2026-09, Checkov 3.3.13, real scan of the
+#: rendered `ApiLambdaSpec` secure baseline — 9 managed resources:
+#: HTTP API + $default stage, Lambda function + execution role +
+#: inline logs policy + log group, the integration, the route, and the
+#: Lambda permission — resource_count=9, passed=41, failed=7): six of
+#: the seven findings are exactly the already-approved API Gateway skip
+#: (`CKV_AWS_76`) and Lambda's five already-approved skips
+#: (`CKV_AWS_117`, `CKV_AWS_116`, `CKV_AWS_158`, `CKV_AWS_173`,
+#: `CKV_AWS_272`). The seventh, `CKV_AWS_309` ("Ensure API GatewayV2
+#: routes specify an authorization type"), is a genuinely **new**
+#: finding not covered by any prior batch's profile — surfaced to the
+#: project owner via `AskUserQuestion` before being added, per this
+#: batch's own "classify the finding, then STOP and request explicit
+#: approval before adding a new skip" instruction. It corresponds
+#: exactly to Batch 20's declared non-goal of authorization (no
+#: Cognito, no JWT/Lambda authorizers, no IAM route auth, no API keys —
+#: explicit future hardening, not this batch's scope).
+_API_GATEWAY_LAMBDA_SKIPPED_CHECKS: tuple[str, ...] = (
+    # API Gateway: access logging — same deferral as
+    # `iac_agent.security.checkov_profiles._API_GATEWAY_SKIPPED_CHECKS`.
+    "CKV_AWS_76",
+    # Lambda: VPC, DLQ, log-group KMS, env-var KMS, code-signing — same
+    # five deferrals as
+    # `iac_agent.security.checkov_profiles._LAMBDA_SKIPPED_CHECKS`.
+    "CKV_AWS_117",
+    "CKV_AWS_116",
+    "CKV_AWS_158",
+    "CKV_AWS_173",
+    "CKV_AWS_272",
+    # API Gateway route authorization — a genuinely new finding this
+    # batch, approved via AskUserQuestion (see docstring above).
+    "CKV_AWS_309",
+)
+
 _PROFILES_BY_COMPOSITION_TYPE: dict[CompositionType, CheckovScanProfile] = {
     CompositionType.SQS_LAMBDA_DYNAMODB: CheckovScanProfile(
         skipped_checks=_SQS_LAMBDA_DYNAMODB_SKIPPED_CHECKS
+    ),
+    CompositionType.API_GATEWAY_LAMBDA: CheckovScanProfile(
+        skipped_checks=_API_GATEWAY_LAMBDA_SKIPPED_CHECKS
     ),
 }
 

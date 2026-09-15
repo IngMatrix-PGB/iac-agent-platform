@@ -6,6 +6,19 @@ Terraform renderer, `TerraformRunner`, `CheckovAdapter`,
 wired into the compiled LangGraph workflow. No domain module or graph
 node constructs any of these itself, and none of them reads
 `os.environ` — see `iac_agent.app.config`.
+
+Batch 20 stopped passing an explicit `trusted_module_dir=` to
+`build_sqs_workflow` — the value it used to pass
+(`ApplicationConfig.terraform_module_path`, now removed) was always
+identical to `build_sqs_workflow`'s own default, so this is a pure
+simplification, not a behavior change. This composition root still
+needed **zero** other changes to support `ServerlessWorkerSpec` (Batch
+19) or `ApiLambdaSpec` (Batch 20) requests: `build_sqs_workflow` is a
+thin wrapper around the fully request-generalized `build_iac_workflow`,
+whose own defaults (`_DEFAULT_TRUSTED_MODULE_DIRS`, a default-
+constructed `ServerlessWorkerTerraformRenderer`/`ApiLambdaTerraformRenderer`)
+already cover every resource and composition type this platform
+supports — see `tests/integration/test_application_composition.py`.
 """
 
 from __future__ import annotations
@@ -78,7 +91,6 @@ def open_application(
             checkov_adapter=CheckovAdapter(),
             source_control_port=source_control_port,
             workspace_root=config.workspace_root,
-            trusted_module_dir=config.terraform_module_path,
             base_branch=config.github_base_branch,
             checkpointer=saver,
         )

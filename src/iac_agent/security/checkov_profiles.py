@@ -100,11 +100,28 @@ _LAMBDA_SKIPPED_CHECKS: tuple[str, ...] = (
     "CKV_AWS_272",
 )
 
+#: Verified empirically (2026-09, Checkov 3.3.13, real scan of the
+#: trusted API Gateway module's secure-default baseline —
+#: resource_count=2, passed=3, failed=1): exactly this one check fails,
+#: corresponding to the one documented Batch 20 API Gateway non-goal
+#: (access logging — see docs/compositions/api-lambda.md). Surfaced to
+#: the project owner via `AskUserQuestion` before being added, mirroring
+#: the S3/DynamoDB/Lambda precedent from Batches 16-18.
+_API_GATEWAY_SKIPPED_CHECKS: tuple[str, ...] = (
+    # "Ensure API Gateway has Access Logging enabled" — access logging
+    # is a documented Batch 20 non-goal: ApiGatewayResourceSpec has no
+    # log-format/destination field, and implementing it would need a
+    # new CloudWatch Log Group plus access_log_settings/IAM wiring —
+    # real feature scope, not a one-line fix, not implemented this batch.
+    "CKV_AWS_76",
+)
+
 _PROFILES_BY_RESOURCE_TYPE: dict[ResourceType, CheckovScanProfile] = {
     ResourceType.SQS: CheckovScanProfile(skipped_checks=()),
     ResourceType.S3: CheckovScanProfile(skipped_checks=_S3_SKIPPED_CHECKS),
     ResourceType.DYNAMODB: CheckovScanProfile(skipped_checks=_DYNAMODB_SKIPPED_CHECKS),
     ResourceType.LAMBDA: CheckovScanProfile(skipped_checks=_LAMBDA_SKIPPED_CHECKS),
+    ResourceType.API_GATEWAY: CheckovScanProfile(skipped_checks=_API_GATEWAY_SKIPPED_CHECKS),
 }
 
 

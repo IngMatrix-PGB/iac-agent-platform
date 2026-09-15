@@ -56,7 +56,17 @@ def test_lambda_profile_has_exactly_the_five_approved_skips():
     )
 
 
-def test_all_four_resource_profiles_are_pairwise_disjoint():
+def test_api_gateway_profile_has_exactly_the_one_approved_skip():
+    """Batch 20: a real Checkov scan of the trusted API Gateway
+    module's secure baseline reported exactly one finding (CKV_AWS_76,
+    access logging) — a documented Batch 20 non-goal, approved via
+    AskUserQuestion before being added."""
+    profile = checkov_profile_for(ResourceType.API_GATEWAY)
+    assert isinstance(profile, CheckovScanProfile)
+    assert profile.skipped_checks == ("CKV_AWS_76",)
+
+
+def test_all_five_resource_profiles_are_pairwise_disjoint():
     """Proves isolation across every registered resource type at once —
     no skip check ever leaks from one resource's profile into
     another's."""
