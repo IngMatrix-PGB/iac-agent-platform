@@ -95,7 +95,9 @@ No changes were needed to: `terraform_execute`, `plan_analysis`,
 `SecurityGate`'s aggregation logic (only its already-generic
 `resource_type`-keyed required-ID lookup, unchanged since Batch 16.5),
 or the application/composition layer (DynamoDB does not go through
-that layer in this batch — see "Known naming debt" below).
+that layer in this batch — the app-layer naming debt this note used to
+point to was resolved in Batch 20; see the "API Gateway (resource) +
+API Gateway → Lambda (composition)" section below).
 
 One deferred feature, decided via explicit project-owner approval
 (not unilaterally): customer-managed KMS encryption for DynamoDB. A
@@ -251,24 +253,105 @@ added.
 application-layer adapter or API Gateway composition; this is not
 claimed to be a full serverless platform yet.
 
-## Known naming debt (tracked, not yet resolved)
+## Phase 2 — API Gateway (resource) + API Gateway → Lambda (composition) (complete)
 
-`iac_agent.app.config` is still SQS-shaped as of Batch 19 —
-`ApplicationConfig.terraform_module_path` remains a single path rather
-than a mapping, so `open_application` still only ever configures the
-SQS trusted-module directory explicitly (S3/DynamoDB/Lambda and the
-serverless-worker composition all fall back to `build_iac_workflow`'s
-own defaults, which already cover them — this is why zero application-
-layer code changes were needed this batch, not evidence the gap is
-closed). A full generalization here would need `ApplicationConfig` to
-carry a genuine multi-resource-type module-directory mapping — more
-churn than this batch's scope, and deferred rather than rushed.
-Tracked here explicitly so it is not forgotten; revisit when the first
-real caller (FastAPI adapter, CLI) makes the gap unavoidable.
+**Goal:** prove the composition architecture Batch 19 introduced
+generalizes to a *second* composition without redesigning any core
+layer — an explicit architectural test, not merely "add API Gateway."
+See `docs/compositions/api-lambda.md` for the full composition
+contract, IAM design, Checkov-scope, and policy write-up.
+
+Resource-level registration touchpoints (Option A: API Gateway is a
+full standalone resource type, reused by the composition — see the
+design-gate evaluation in `docs/compositions/api-lambda.md`):
+
+- `ResourceType.API_GATEWAY` (`iac_agent.domain.resource`).
+- `ApiGatewayResourceSpec` (`iac_agent.providers.aws.api_gateway.
+  contract`) — name/description/environment/tags only; protocol type
+  is hardcoded HTTP, never a configurable field.
+- `ApiGatewayTerraformCompositionRenderer` + `AWSResourceSpec` union +
+  `resource_type_of` + `AWSResourceRenderer` — one new arm each,
+  matching the existing SQS/S3/DynamoDB/Lambda precedent exactly.
+- `terraform/modules/api_gateway` — owns `aws_apigatewayv2_api` and one
+  `aws_apigatewayv2_stage` ("$default", `auto_deploy = true`), verified
+  against the real AWS provider schema before writing `main.tf`.
+- `REQUIRED_PLATFORM_POLICY_IDS_BY_RESOURCE_TYPE[ResourceType.
+  API_GATEWAY]` — only the shared `TF_NO_DESTRUCTIVE_CHANGES` policy;
+  no resource-specific policy was invented merely to inflate the count.
+- `checkov_profile_for` — one new entry, one approved skip
+  (`CKV_AWS_76`, access logging), approved via `AskUserQuestion`.
+- `_DEFAULT_TRUSTED_MODULE_DIRS`/`_RESOURCE_KIND_DISPLAY_NAMES`
+  (`iac_agent.graph.workflow`) — one new entry each.
+
+Composition-level registration touchpoints:
+
+- `CompositionType.API_GATEWAY_LAMBDA` (`iac_agent.domain.composition`)
+  — kept fully separate from `ResourceType`; still no
+  `ResourceType.SERVERLESS`.
+- `ApiLambdaSpec`/`RouteSpec`/`HttpMethod` (`iac_agent.compositions.
+  api_lambda.contract`) — reuses `ApiGatewayResourceSpec`/
+  `LambdaResourceSpec` verbatim; adds pairwise-distinct-identifier and
+  environment-consistency invariants, plus deterministic route-path
+  validation (bounded, not the full API Gateway grammar).
+- `ApiLambdaTerraformRenderer` (`iac_agent.compositions.api_lambda.
+  renderer`) — instantiates the two trusted modules side by side and
+  adds only the relationship resources not naturally owned by either
+  (`aws_apigatewayv2_integration`, `aws_apigatewayv2_route`,
+  `aws_lambda_permission`).
+- `iac_agent.request.IacRequestSpec`/`IacRenderer` — widened again
+  (`AWSResourceSpec | ServerlessWorkerSpec | ApiLambdaSpec`), one new
+  `match`/`case` branch; no new `CompositionType`-keyed trusted-module
+  map needed.
+- `iac_agent.policies.composition.evaluate_composition_policies` +
+  `REQUIRED_COMPOSITION_POLICY_IDS_BY_COMPOSITION_TYPE` — three new
+  composition-specific policies (`API_LAMBDA_INVOKE_PERMISSION_
+  REQUIRED`, `API_LAMBDA_NO_WILDCARD_PRINCIPAL`,
+  `API_LAMBDA_ROUTE_EXPLICIT`) plus the constituent Lambda sub-spec's
+  own tracing/reserved-concurrency policies reused verbatim, plus the
+  shared destructive-changes policy — the same dispatcher Batch 19
+  introduced, now matching a second composition spec type.
+- `iac_agent.security.composition_checkov_profiles.
+  composition_checkov_profile_for` — one new composition-type entry:
+  six skips carried forward from the already-approved API Gateway and
+  Lambda skips, plus one genuinely new finding this batch
+  (`CKV_AWS_309`, route authorization), approved via `AskUserQuestion`.
+- `iac_agent.graph.workflow.build_iac_workflow` — one new optional
+  parameter (`api_lambda_renderer`); every `match`/`case` branch Batch
+  19 added simply widened to include `ApiLambdaSpec`. No new graph
+  node, no second gate function.
+- `iac_agent.persistence.checkpoints._ALLOWED_WORKFLOW_TYPES` — four
+  new entries (`ApiGatewayResourceSpec`, `ApiLambdaSpec`, `HttpMethod`,
+  `RouteSpec`).
+- A new `tests/unit/test_composition_registration_consistency.py`,
+  mirroring the Batch 18 resource-level registration-consistency test
+  exactly, now proving every `CompositionType` is wired consistently
+  across request typing, renderer dispatch, policy expectations,
+  Checkov profile, trusted-module requirements, and persistence.
+
+One genuine IAM design decision, evaluated and reported before
+implementation (not assumed): reusing "Option B" from Batch 19
+unchanged — composition-owned `aws_lambda_permission` (a resource-based
+permission, never a role change) rather than extending the Lambda
+module itself to be API-Gateway-aware.
+
+No new Terraform provider was added, and no new runtime dependency was
+added. `ApplicationConfig.terraform_module_path` (tracked as naming
+debt since Batch 19) was re-evaluated and **removed** this batch — it
+was demonstrably dead configuration (never read from the environment,
+always identical to `build_sqs_workflow`'s own default), not merely
+undocumented; see `docs/compositions/api-lambda.md` for the full
+evaluation and its regression tests.
+
+**Next: not automatically implemented.** Candidate Batch 21 direction:
+natural-language architecture intent, or a full async API composition
+(API Gateway → Lambda → SQS → Lambda → DynamoDB) — a design review is
+expected before either is started; this project is not yet a full
+serverless platform.
 
 ## Not yet started
 
-API Gateway, EventBridge, SNS (beyond this batch's own SQS-Lambda event
-source mapping), a second Lambda in one composition, a FastAPI/HTTP
-adapter, and any UI remain entirely out of scope until a future phase
-is explicitly approved.
+EventBridge, SNS, a second Lambda in one composition, chaining the two
+existing compositions together, Cognito/JWT/Lambda authorizers, WAF,
+custom domains, a FastAPI/HTTP adapter, natural-language/LLM-driven
+intent parsing, and any UI remain entirely out of scope until a future
+phase is explicitly approved.
