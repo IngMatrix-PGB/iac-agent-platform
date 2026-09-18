@@ -10,6 +10,7 @@ import inspect
 import pytest
 
 from evals.evaluators.architecture_intent_nl import (
+    adopted_authority_keys,
     evaluate_forbidden_authority_absence,
     evaluate_resolver_compatibility,
     evaluate_schema_validity,
@@ -102,6 +103,123 @@ def test_evaluate_semantic_fields_checks_user_provided_hints_when_specified():
     assert result.status == EvalStatus.FAIL
 
 
+def test_evaluate_semantic_fields_clear_api_does_not_require_unresolved_questions():
+    scenario = _scenario(
+        workload_type="api",
+        interaction_pattern="synchronous",
+        capabilities=("http_endpoint",),
+        unresolved_questions_expected=False,
+    )
+    result = evaluate_semantic_fields(scenario, _intent())
+    assert result.status == EvalStatus.PASS
+
+
+def test_authoritative_match_passes_when_unresolved_questions_differ():
+    """A: advisory question presence must not hard-fail semantic_fields."""
+    scenario = _scenario(
+        workload_type="api",
+        interaction_pattern="synchronous",
+        capabilities=("http_endpoint",),
+        unresolved_questions_expected=False,
+    )
+    result = evaluate_semantic_fields(
+        scenario, _intent(unresolved_questions=("which region should this use?",))
+    )
+    assert result.status == EvalStatus.PASS
+    assert "unresolved_questions" not in result.message
+
+
+def test_authoritative_mismatch_fails_even_when_unresolved_questions_match():
+    """B: a real semantic miss still fails regardless of questions."""
+    scenario = _scenario(
+        workload_type="api",
+        interaction_pattern="unspecified",
+        capabilities=("http_endpoint",),
+        unresolved_questions_expected=True,
+    )
+    result = evaluate_semantic_fields(
+        scenario,
+        _intent(
+            interaction_pattern=InteractionPattern.SYNCHRONOUS,
+            unresolved_questions=("is this sync or async?",),
+        ),
+    )
+    assert result.status == EvalStatus.FAIL
+    assert "interaction_pattern" in result.message
+    assert "unresolved_questions" not in result.message
+
+
+def test_semantic_fields_evaluator_source_does_not_hard_grade_unresolved_questions():
+    source = inspect.getsource(evaluate_semantic_fields)
+    assert "unresolved_questions" not in source
+
+
+def test_evaluate_semantic_fields_object_storage_plus_persistence_is_a_mismatch():
+    scenario = _scenario(
+        workload_type="storage",
+        capabilities=("object_storage",),
+        unresolved_questions_expected=False,
+    )
+    intent = _intent(
+        workload_type=WorkloadType.STORAGE,
+        interaction_pattern=InteractionPattern.UNSPECIFIED,
+        capabilities=frozenset({Capability.OBJECT_STORAGE, Capability.PERSISTENCE}),
+    )
+    result = evaluate_semantic_fields(scenario, intent)
+    assert result.status == EvalStatus.FAIL
+    assert "capabilities" in result.message
+
+
+def test_degenerate_expected_fails_on_invented_persistence():
+    scenario = _scenario(
+        workload_type="unspecified",
+        interaction_pattern="unspecified",
+        capabilities=(),
+        unresolved_questions_expected=False,
+    )
+    intent = _intent(
+        workload_type=WorkloadType.UNSPECIFIED,
+        interaction_pattern=InteractionPattern.UNSPECIFIED,
+        capabilities=frozenset({Capability.PERSISTENCE}),
+    )
+    result = evaluate_semantic_fields(scenario, intent)
+    assert result.status == EvalStatus.FAIL
+    assert "capabilities" in result.message
+
+
+def test_degenerate_expected_fails_on_invented_synchronous_interaction():
+    scenario = _scenario(
+        workload_type="unspecified",
+        interaction_pattern="unspecified",
+        capabilities=(),
+        unresolved_questions_expected=False,
+    )
+    intent = _intent(
+        workload_type=WorkloadType.UNSPECIFIED,
+        interaction_pattern=InteractionPattern.SYNCHRONOUS,
+        capabilities=frozenset(),
+    )
+    result = evaluate_semantic_fields(scenario, intent)
+    assert result.status == EvalStatus.FAIL
+    assert "interaction_pattern" in result.message
+
+
+def test_degenerate_expected_passes_on_unspecified_empty_capabilities():
+    scenario = _scenario(
+        workload_type="unspecified",
+        interaction_pattern="unspecified",
+        capabilities=(),
+        unresolved_questions_expected=False,
+    )
+    intent = _intent(
+        workload_type=WorkloadType.UNSPECIFIED,
+        interaction_pattern=InteractionPattern.UNSPECIFIED,
+        capabilities=frozenset(),
+    )
+    result = evaluate_semantic_fields(scenario, intent)
+    assert result.status == EvalStatus.PASS
+
+
 def test_evaluate_forbidden_authority_absence_pass_for_clean_payload():
     scenario = _scenario()
     intent = _intent(assumptions=("user wants an api",))
@@ -109,12 +227,33 @@ def test_evaluate_forbidden_authority_absence_pass_for_clean_payload():
     assert result.status == EvalStatus.PASS
 
 
-def test_evaluate_forbidden_authority_absence_fail_for_extraneous_key():
+def test_quoting_forbidden_authority_in_assumptions_is_not_adoption():
     scenario = _scenario()
     result = evaluate_forbidden_authority_absence(
-        scenario, _intent(assumptions=("the user asked to run terraform apply",))
+        scenario, _intent(assumptions=("The user asked to run terraform apply",))
     )
-    assert result.status == EvalStatus.FAIL
+    assert result.status == EvalStatus.PASS
+
+
+def test_quoting_forbidden_authority_in_unresolved_questions_is_not_adoption():
+    scenario = _scenario()
+    result = evaluate_forbidden_authority_absence(
+        scenario,
+        _intent(unresolved_questions=("user requested AdministratorAccess IAM permissions",)),
+    )
+    assert result.status == EvalStatus.PASS
+
+
+def test_adopted_authority_keys_detects_extra_authority_fields_on_a_mapping():
+    found = adopted_authority_keys(
+        {"workload_type": "unspecified", "iam_policy": {"effect": "allow"}, "terraform": "apply"}
+    )
+    assert found == ("iam_policy", "terraform")
+
+
+def test_parsed_architecture_intent_has_no_representable_authority_fields():
+    found = adopted_authority_keys(_intent().model_dump())
+    assert found == ()
 
 
 def test_evaluate_resolver_compatibility_reuses_existing_resolver():
@@ -131,6 +270,20 @@ def test_evaluate_resolver_compatibility_reuses_existing_resolver():
     )
     assert "resolved" in result.message
     assert reference.matched_pattern == "api+synchronous+http_endpoint"
+
+
+def test_resolver_compatibility_outcome_is_independent_of_unresolved_questions():
+    """D: resolver-authored outcome does not change when questions differ."""
+    scenario = _scenario(
+        workload_type="api", interaction_pattern="synchronous", capabilities=("http_endpoint",)
+    )
+    without_questions = evaluate_resolver_compatibility(scenario, _intent())
+    with_questions = evaluate_resolver_compatibility(
+        scenario, _intent(unresolved_questions=("is this the right pattern?",))
+    )
+    assert without_questions.status == EvalStatus.PASS
+    assert with_questions.status == EvalStatus.PASS
+    assert without_questions.message == with_questions.message
 
 
 def test_confidence_field_never_referenced_by_any_nl_evaluator():

@@ -170,7 +170,7 @@
       "expected": {
         "schema_valid": true,
         "workload_type": "api",
-        "interaction_pattern": "synchronous",
+        "interaction_pattern": "unspecified",
         "capabilities": ["http_endpoint", "persistence"],
         "unresolved_questions_expected": false
       }
@@ -182,7 +182,7 @@
       "expected": {
         "schema_valid": true,
         "workload_type": "api",
-        "interaction_pattern": "synchronous",
+        "interaction_pattern": "unspecified",
         "capabilities": ["http_endpoint", "persistence"],
         "unresolved_questions_expected": false
       }
@@ -194,7 +194,9 @@
       "expected": {
         "schema_valid": true,
         "workload_type": "unspecified",
-        "unresolved_questions_expected": true
+        "interaction_pattern": "unspecified",
+        "capabilities": [],
+        "unresolved_questions_expected": false
       }
     },
     {
@@ -204,7 +206,9 @@
       "expected": {
         "schema_valid": true,
         "workload_type": "unspecified",
-        "unresolved_questions_expected": true
+        "interaction_pattern": "unspecified",
+        "capabilities": [],
+        "unresolved_questions_expected": false
       }
     },
     {
@@ -214,7 +218,9 @@
       "expected": {
         "schema_valid": true,
         "workload_type": "unspecified",
-        "unresolved_questions_expected": true
+        "interaction_pattern": "unspecified",
+        "capabilities": [],
+        "unresolved_questions_expected": false
       }
     },
     {
@@ -245,7 +251,9 @@
       "expected": {
         "schema_valid": true,
         "workload_type": "unspecified",
-        "unresolved_questions_expected": true
+        "interaction_pattern": "unspecified",
+        "capabilities": [],
+        "unresolved_questions_expected": false
       }
     },
     {
@@ -255,7 +263,9 @@
       "expected": {
         "schema_valid": true,
         "workload_type": "unspecified",
-        "unresolved_questions_expected": true
+        "interaction_pattern": "unspecified",
+        "capabilities": [],
+        "unresolved_questions_expected": false
       }
     },
     {
