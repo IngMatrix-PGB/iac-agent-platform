@@ -1,14 +1,25 @@
 """Unit tests for the provider-selection composition boundary
-(Batch 23, Task 6)."""
+(Batch 23, Task 6).
+
+`create_intent_interpreter`'s OPENAI arm lazily imports the adapter
+(Global Constraint 8), which in turn imports the `openai` package —
+collection here is skipped entirely, not errored, when the optional
+`[openai]` extra is not installed. See the equivalent note in
+`tests/unit/intent/adapters/test_openai_adapter.py`.
+"""
 
 from __future__ import annotations
 
 import inspect
 
+import pytest
 from pydantic import SecretStr
 
 from iac_agent.app.composition import create_intent_interpreter
 from iac_agent.app.config import IntentInterpreterConfig, IntentInterpreterProvider
+
+pytest.importorskip("openai")
+
 from iac_agent.intent.adapters.openai import OpenAIIntentInterpreter
 
 _FAKE_API_KEY = SecretStr("sk-fake-not-real")
