@@ -52,11 +52,12 @@ never deployed. See `docs/application.md`, `docs/hitl.md`,
 `docs/source-control.md`, `docs/resources/s3.md`,
 `docs/resources/dynamodb.md`, `docs/resources/lambda.md`,
 `docs/compositions/serverless-worker.md`,
-`docs/compositions/api-lambda.md`, `docs/roadmap.md`, and `docs/ci.md`
-for the composition root, the approval gate, the GitHub adapter, the S3
-resource, the DynamoDB resource, the Lambda resource, the serverless-
-worker composition, the API-Gateway-to-Lambda composition, the project
-roadmap, and the CI quality gates respectively.
+`docs/compositions/api-lambda.md`, `docs/roadmap.md`, `docs/ci.md`, and
+`docs/real-llm-intent-interpreter.md` for the composition root, the
+approval gate, the GitHub adapter, the S3 resource, the DynamoDB
+resource, the Lambda resource, the serverless-worker composition, the
+API-Gateway-to-Lambda composition, the project roadmap, the CI quality
+gates, and the optional real LLM intent interpreter respectively.
 
 **Safety:** `terraform apply` is not part of this project's design and
 does not exist anywhere in this codebase. No AWS resource is ever
