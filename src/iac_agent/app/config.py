@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 from pydantic import SecretStr
@@ -45,6 +46,20 @@ _ENV_GITHUB_BASE_BRANCH = "GITHUB_BASE_BRANCH"
 _ENV_GITHUB_TOKEN = "GITHUB_TOKEN"
 _ENV_GITHUB_COMMIT_AUTHOR_NAME = "GITHUB_COMMIT_AUTHOR_NAME"
 _ENV_GITHUB_COMMIT_AUTHOR_EMAIL = "GITHUB_COMMIT_AUTHOR_EMAIL"
+
+#: Batch 23 — provider-neutral LLM interpreter configuration. Deliberately
+#: separate from ApplicationConfig: these two config concerns (the
+#: Terraform/GitHub pipeline vs. the optional natural-language intent
+#: boundary) evolve independently, and a repository that never uses the
+#: LLM adapter at all should never need to think about these variables.
+_ENV_LLM_PROVIDER = "IAC_AGENT_LLM_PROVIDER"
+_ENV_LLM_MODEL = "IAC_AGENT_LLM_MODEL"
+
+#: OpenAI's own SDK-recognized env var name — reused as-is, mirroring
+#: the precedent of reusing GITHUB_TOKEN's own conventional name rather
+#: than inventing an IAC_AGENT_-prefixed wrapper for a third party's
+#: credential.
+_ENV_OPENAI_API_KEY = "OPENAI_API_KEY"
 
 
 class MissingConfigurationError(ValueError):
@@ -172,3 +187,85 @@ def load_github_token_from_env(env: Mapping[str, str] | None = None) -> SecretSt
             f"{_ENV_GITHUB_TOKEN} must be set explicitly — there is no default token"
         )
     return SecretStr(token)
+
+
+class IntentInterpreterProvider(StrEnum):
+    """The closed set of `IntentInterpreterPort` providers this platform
+    can construct (Batch 23). Exactly one member today — adding a future
+    provider (Anthropic, Bedrock) means adding one new member here and
+    one new arm in `iac_agent.app.composition.create_intent_interpreter`,
+    nothing else. An unrecognized provider string fails at this
+    StrEnum's own construction, the same closed-membership mechanism
+    `WorkloadType`/`Capability` already rely on — no silent fallback is
+    possible by construction."""
+
+    OPENAI = "openai"
+
+
+@dataclass(frozen=True)
+class IntentInterpreterConfig:
+    """Non-secret LLM interpreter configuration — always safe to log or
+    repr. The credential (an API key, or a future provider's own
+    credential chain) is never a field here; see
+    `load_openai_api_key_from_env`."""
+
+    provider: IntentInterpreterProvider
+    model: str
+
+
+def load_intent_interpreter_config_from_env(
+    env: Mapping[str, str] | None = None,
+) -> IntentInterpreterConfig:
+    """Build `IntentInterpreterConfig` from environment variables.
+
+    Supported variables:
+        IAC_AGENT_LLM_PROVIDER   (required, no default)
+        IAC_AGENT_LLM_MODEL      (required, no default)
+
+    Neither has a safe default — this project never silently picks a
+    provider or a model. An unrecognized provider string raises
+    `MissingConfigurationError`, never a silent fallback to a default
+    provider.
+    """
+    env = env if env is not None else os.environ
+
+    raw_provider = env.get(_ENV_LLM_PROVIDER)
+    if not raw_provider:
+        raise MissingConfigurationError(
+            f"{_ENV_LLM_PROVIDER} must be set explicitly — there is no default LLM provider"
+        )
+    try:
+        provider = IntentInterpreterProvider(raw_provider)
+    except ValueError as exc:
+        raise MissingConfigurationError(
+            f"{_ENV_LLM_PROVIDER} has an unsupported value {raw_provider!r} — supported "
+            f"providers: {[p.value for p in IntentInterpreterProvider]}"
+        ) from exc
+
+    model = env.get(_ENV_LLM_MODEL)
+    if not model:
+        raise MissingConfigurationError(
+            f"{_ENV_LLM_MODEL} must be set explicitly — there is no default model"
+        )
+
+    return IntentInterpreterConfig(provider=provider, model=model)
+
+
+def load_openai_api_key_from_env(env: Mapping[str, str] | None = None) -> SecretStr:
+    """Load the OpenAI API key from `OPENAI_API_KEY`, wrapped in
+    `SecretStr`.
+
+    Raises `MissingConfigurationError` if unset or empty — the OpenAI
+    adapter has no safe default key. Never logged, never printed, never
+    returned as a plain `str`. This fails at composition time, before
+    `iac_agent.app.composition.create_intent_interpreter` can even
+    construct the adapter — a missing key never surfaces as an
+    `IntentInterpreterError` at request time.
+    """
+    env = env if env is not None else os.environ
+    api_key = env.get(_ENV_OPENAI_API_KEY)
+    if not api_key:
+        raise MissingConfigurationError(
+            f"{_ENV_OPENAI_API_KEY} must be set explicitly — there is no default API key"
+        )
+    return SecretStr(api_key)
