@@ -3,6 +3,16 @@
 Every test injects a `FakeOpenAIClient` (defined here, never importable
 from `src/`, per the existing fakes-in-tests convention) — zero real
 network calls, zero real API key required anywhere in this file.
+
+These tests import the `openai` package itself (to construct its own
+exception types for the fakes above) — collection is skipped entirely
+when the optional `[openai]` extra is not installed, rather than
+erroring, via `pytest.importorskip` below. The existing, unmodified
+`Quality`/`Tests`/`Tool Validation` CI jobs (Batch 22) install only
+`.[dev]`, so this file currently skips under ordinary CI; a future,
+separately-authorized CI change would need to add the `[openai]` extra
+to actually exercise these tests remotely. Flagged explicitly, not
+silently worked around — see the Batch 23 completion report.
 """
 
 from __future__ import annotations
@@ -10,13 +20,14 @@ from __future__ import annotations
 import logging
 
 import httpx
-import openai
 import pytest
 from pydantic import SecretStr
 
-from iac_agent.intent.adapters.openai import OpenAIIntentInterpreter
-from iac_agent.intent.models import Capability, InteractionPattern, WorkloadType
-from iac_agent.intent.port import (
+openai = pytest.importorskip("openai")
+
+from iac_agent.intent.adapters.openai import OpenAIIntentInterpreter  # noqa: E402
+from iac_agent.intent.models import Capability, InteractionPattern, WorkloadType  # noqa: E402
+from iac_agent.intent.port import (  # noqa: E402
     IntentInterpreterError,
     IntentProviderRefusalError,
     IntentProviderTimeoutError,

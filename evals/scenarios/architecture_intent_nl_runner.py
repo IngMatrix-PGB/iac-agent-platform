@@ -23,12 +23,19 @@ from evals.evaluators.architecture_intent_nl import (
     evaluate_semantic_fields,
 )
 from evals.scenarios.architecture_intent_nl_loader import load_architecture_intent_nl_golden_dataset
+from evals.scenarios.runner import format_summary
 from iac_agent.domain.evals import EvalResult, EvalSuiteResult
 from iac_agent.intent.port import IntentInterpreterError, IntentInterpreterPort
 
 DEFAULT_DATASET_PATH = (
     Path(__file__).resolve().parents[1] / "datasets" / "architecture_intent_nl_golden.json"
 )
+
+__all__ = [
+    "CallCeilingExceededError",
+    "run_architecture_intent_nl_evals",
+    "format_summary",
+]
 
 #: Matches the approved design's retry policy — never assumed to be a
 #: different value silently.
