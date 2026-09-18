@@ -318,6 +318,7 @@ def test_successful_call_logs_only_safe_metadata_fields(caplog):
     assert record.request_id == _REQUEST_ID
     assert record.provider == "openai"
     assert record.model == "gpt-5-nano"
+    assert record.prompt_version == "3"
     assert record.outcome_category == "schema_valid"
     assert hasattr(record, "attempt_count")
     assert hasattr(record, "latency_ms")

@@ -16,6 +16,7 @@ import os
 
 import pytest
 
+from evals.observability.layer2 import DEFAULT_LAYER2_DIAGNOSTIC_PATH
 from evals.scenarios.architecture_intent_nl_runner import (
     format_summary,
     run_architecture_intent_nl_evals,
@@ -42,7 +43,14 @@ def test_natural_language_to_intent_real_model_eval():
     api_key = load_openai_api_key_from_env()
     interpreter = create_intent_interpreter(config, api_key=api_key)
 
-    suite = run_architecture_intent_nl_evals(interpreter=interpreter)
+    suite = run_architecture_intent_nl_evals(
+        interpreter=interpreter,
+        diagnostic_path=DEFAULT_LAYER2_DIAGNOSTIC_PATH,
+        run_metadata={
+            "provider": config.provider.value,
+            "model": config.model,
+        },
+    )
     print("\n" + format_summary(suite, title="Architecture Intent NL Golden Evals (Layer 2)"))
 
     assert suite.failed == 0
