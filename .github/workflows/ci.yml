@@ -56,7 +56,7 @@ jobs:
           cache: pip
 
       - name: Install project (dev extras)
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,openai]"
 
       - name: Run deterministic offline suite
         run: pytest -m "not real_tool and not real_llm"

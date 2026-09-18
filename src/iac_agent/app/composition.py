@@ -30,11 +30,16 @@ from dataclasses import dataclass
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import SecretStr
 
-from iac_agent.app.config import ApplicationConfig
+from iac_agent.app.config import (
+    ApplicationConfig,
+    IntentInterpreterConfig,
+    IntentInterpreterProvider,
+)
 from iac_agent.domain.source_control import GitCommitIdentity
 from iac_agent.execution.terraform_runner import TerraformRunner
 from iac_agent.git.github import GitHubRepository, GitHubSourceControl, HttpTransport
 from iac_agent.graph.workflow import build_sqs_workflow
+from iac_agent.intent.port import IntentInterpreterPort
 from iac_agent.persistence.checkpoints import open_sqlite_checkpointer
 from iac_agent.providers.aws.sqs.renderer import TerraformCompositionRenderer
 from iac_agent.security.checkov import CheckovAdapter
@@ -95,3 +100,24 @@ def open_application(
             checkpointer=saver,
         )
         yield Application(config=config, graph=graph)
+
+
+def create_intent_interpreter(
+    config: IntentInterpreterConfig, *, api_key: SecretStr
+) -> IntentInterpreterPort:
+    """The one place in this codebase that ever dispatches on provider
+    identity (Batch 23). One arm today; a future provider (Anthropic,
+    Bedrock) means one new `IntentInterpreterProvider` member and one
+    new arm here — nothing else in the domain ever needs to know.
+
+    The adapter import is deliberately **inside** this function, not at
+    module scope: `iac_agent.app.composition` is imported unconditionally
+    by every Terraform-pipeline caller of `open_application`, and the
+    `openai` SDK is an optional dependency (`pip install -e ".[openai]"`)
+    — a bare install must never fail to import this module.
+    """
+    match config.provider:
+        case IntentInterpreterProvider.OPENAI:
+            from iac_agent.intent.adapters.openai import OpenAIIntentInterpreter
+
+            return OpenAIIntentInterpreter(model=config.model, api_key=api_key)
