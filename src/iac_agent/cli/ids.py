@@ -4,11 +4,11 @@ generation is CLI-owned only."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def generate_request_id(now: datetime | None = None) -> str:
-    stamp = datetime.now(timezone.utc) if now is None else now
+    stamp = datetime.now(UTC) if now is None else now
     if stamp.tzinfo is None:
         raise ValueError("now must be timezone-aware")
-    return stamp.astimezone(timezone.utc).strftime("req-%Y%m%dT%H%M%SZ")
+    return stamp.astimezone(UTC).strftime("req-%Y%m%dT%H%M%SZ")
