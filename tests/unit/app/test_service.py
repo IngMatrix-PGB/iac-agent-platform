@@ -10,12 +10,13 @@ tests/integration/test_application_composition.py.
 
 from __future__ import annotations
 
-from iac_agent.app.service import Phase1Application, WorkflowView
+from iac_agent.app.service import Phase1Application, WorkflowView, _to_view
 from iac_agent.domain.approval import ApprovalDecision
 from iac_agent.domain.security import (
     FindingSource,
     PolicyStatus,
     SecurityFinding,
+    SecurityGateResult,
     SecuritySeverity,
 )
 from iac_agent.domain.source_control import PullRequestResult
@@ -345,3 +346,73 @@ def test_two_application_instances_do_not_share_state(tmp_path):
 
     assert view_a.resource_name == "order-events"
     assert view_b.resource_name == "payment-events"
+
+
+# ---------------------------------------------------------------------------
+# Batch 24, Task 2: WorkflowView.security_gate exposure.
+# ---------------------------------------------------------------------------
+
+
+def test_security_gate_is_none_before_gate_values_exist():
+    view = _to_view("req-001", {"workflow_status": WorkflowStatus.RUNNING})
+    assert view.security_gate is None
+    assert view.security_status is None
+
+
+def test_submit_exposes_pass_security_gate(tmp_path):
+    db_path = tmp_path / "state.db"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    with open_sqlite_checkpointer(db_path) as saver:
+        app, _ = _build_app(workspace_root, saver)
+        view = app.submit(request_id="req-001", spec=_spec())
+    assert view.security_gate is not None
+    assert view.security_gate.overall_status is PolicyStatus.PASS
+    assert view.security_status == "pass"
+
+
+def test_submit_exposes_block_security_gate(tmp_path):
+    db_path = tmp_path / "state.db"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    with open_sqlite_checkpointer(db_path) as saver:
+        app, _ = _build_app(
+            workspace_root, saver, checkov_adapter=FakeCheckovAdapter(block=True)
+        )
+        view = app.submit(request_id="req-block", spec=_spec())
+    assert view.security_gate is not None
+    assert view.security_gate.overall_status is PolicyStatus.BLOCK
+    assert view.security_status == "block"
+
+
+def test_view_still_hides_raw_checkov_result_after_gate_exposure(tmp_path):
+    db_path = tmp_path / "state.db"
+    workspace_root = tmp_path / "workspaces"
+    workspace_root.mkdir()
+    with open_sqlite_checkpointer(db_path) as saver:
+        app, _ = _build_app(workspace_root, saver)
+        view = app.submit(request_id="req-001", spec=_spec())
+    assert not hasattr(view, "checkov_result")
+    assert "scanner_version" not in repr(view)
+    assert "terraform_plan_json" not in WorkflowView.__dataclass_fields__
+
+
+def test_to_view_exposes_warn_security_gate():
+    finding = SecurityFinding(
+        policy_id="LAMBDA_RESERVED_CONCURRENCY_RECOMMENDED",
+        severity=SecuritySeverity.MEDIUM,
+        status=PolicyStatus.WARN,
+        resource="fn",
+        message="not set",
+        source=FindingSource.PLATFORM_POLICY,
+    )
+    gate = SecurityGateResult(findings=(finding,))
+    view = _to_view(
+        "req-001",
+        {
+            "workflow_status": WorkflowStatus.AWAITING_APPROVAL,
+            "security_gate": gate,
+        },
+    )
+    assert view.security_gate is gate
+    assert view.security_status == "warn"
