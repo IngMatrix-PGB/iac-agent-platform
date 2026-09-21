@@ -18,6 +18,7 @@ from iac_agent.cli.approval import parse_cli_approval
 from iac_agent.cli.ids import generate_request_id
 from iac_agent.cli.parser import parse_args
 from iac_agent.cli.present import render_interpreter_error, render_submission, render_workflow
+from iac_agent.domain.approval import ApprovalDecision
 from iac_agent.domain.workflow import WorkflowStatus
 from iac_agent.intent.port import IntentInterpreterError
 
@@ -55,7 +56,7 @@ def main(
             isatty=is_tty,
             clock=clock,
         )
-    raise NotImplementedError("resume command is wired in a later task")
+    return _run_resume(args, holder=holder, stdout=stdout)
 
 
 def _run_propose(
@@ -95,6 +96,20 @@ def _run_propose(
 
     stdout.write(render_submission(result) + "\n")
     return _exit_code_for_terminal_result(result)
+
+
+def _run_resume(args, *, holder: IntentApplication, stdout: TextIO) -> int:
+    view = holder.application.get_state(args.request_id)
+    if view.workflow_status is not WorkflowStatus.AWAITING_APPROVAL:
+        stdout.write(render_workflow(view) + "\n")
+        if view.workflow_status is WorkflowStatus.BLOCKED:
+            return _EXIT_BLOCKED
+        return _EXIT_GENERAL_ERROR
+
+    decision = ApprovalDecision.APPROVE if args.decision == "approve" else ApprovalDecision.REJECT
+    view = holder.application.resume(args.request_id, decision)
+    stdout.write(render_workflow(view) + "\n")
+    return _EXIT_GENERAL_ERROR if view.workflow_status is WorkflowStatus.ERROR else _EXIT_OK
 
 
 def _exit_code_for_terminal_result(result) -> int:
