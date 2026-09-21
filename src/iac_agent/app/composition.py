@@ -26,6 +26,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import SecretStr
@@ -43,6 +44,11 @@ from iac_agent.intent.port import IntentInterpreterPort
 from iac_agent.persistence.checkpoints import open_sqlite_checkpointer
 from iac_agent.providers.aws.sqs.renderer import TerraformCompositionRenderer
 from iac_agent.security.checkov import CheckovAdapter
+
+if TYPE_CHECKING:
+    from iac_agent.app.service import IacApplication
+    from iac_agent.intent.resolver import ArchitectureResolver
+    from iac_agent.intent.service import IntentResolutionService
 
 
 @dataclass(frozen=True)
@@ -100,6 +106,51 @@ def open_application(
             checkpointer=saver,
         )
         yield Application(config=config, graph=graph)
+
+
+@dataclass(frozen=True)
+class IntentApplication:
+    """Composition holder — lifetime only, no business decisions.
+
+    Does not interpret, resolve, submit, resume, or publish. Callers use
+    the already-owned services:
+      holder.intent_service.submit(...)
+      holder.application.resume(...)
+      holder.application.get_state(...)
+    """
+
+    config: ApplicationConfig
+    intent_service: IntentResolutionService
+    application: IacApplication
+
+
+@contextmanager
+def open_intent_application(
+    config: ApplicationConfig,
+    *,
+    github_token: SecretStr,
+    interpreter: IntentInterpreterPort,
+    github_transport: HttpTransport | None = None,
+    resolver: ArchitectureResolver | None = None,
+) -> Iterator[IntentApplication]:
+    """Wraps `open_application` with the NL orchestration layer. Does not
+    change `open_application` itself, does not open a second SQLite
+    connection, and never reads `OPENAI_API_KEY` or imports `openai` —
+    `interpreter` is always supplied by the caller."""
+    from iac_agent.app.service import IacApplication
+    from iac_agent.intent.resolver import ArchitectureResolver as _ArchitectureResolver
+    from iac_agent.intent.service import IntentResolutionService
+
+    with open_application(
+        config, github_token=github_token, github_transport=github_transport
+    ) as application:
+        iac = IacApplication.from_application(application)
+        service = IntentResolutionService(
+            interpreter=interpreter,
+            resolver=resolver if resolver is not None else _ArchitectureResolver(),
+            application=iac,
+        )
+        yield IntentApplication(config=application.config, intent_service=service, application=iac)
 
 
 def create_intent_interpreter(
