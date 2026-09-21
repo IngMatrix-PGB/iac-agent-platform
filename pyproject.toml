@@ -23,6 +23,9 @@ openai = [
     "openai>=3.0,<4",
 ]
 
+[project.scripts]
+iac-agent = "iac_agent.cli.main:main"
+
 [tool.setuptools.packages.find]
 where = ["src", "."]
 include = ["iac_agent*", "evals*"]

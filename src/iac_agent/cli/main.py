@@ -13,7 +13,18 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import TextIO
 
-from iac_agent.app.composition import IntentApplication
+from iac_agent.app.composition import (
+    IntentApplication,
+    create_intent_interpreter,
+    open_intent_application,
+)
+from iac_agent.app.config import (
+    MissingConfigurationError,
+    load_application_config_from_env,
+    load_github_token_from_env,
+    load_intent_interpreter_config_from_env,
+    load_openai_api_key_from_env,
+)
 from iac_agent.cli.approval import parse_cli_approval
 from iac_agent.cli.ids import generate_request_id
 from iac_agent.cli.parser import parse_args
@@ -46,6 +57,51 @@ def main(
 
     args = parse_args(argv)
 
+    if holder is not None:
+        return _dispatch(
+            args,
+            holder=holder,
+            stdin=stdin,
+            stdout=stdout,
+            stderr=stderr,
+            isatty=is_tty,
+            clock=clock,
+        )
+
+    try:
+        config = load_application_config_from_env()
+        github_token = load_github_token_from_env()
+        interpreter = create_intent_interpreter(
+            load_intent_interpreter_config_from_env(), api_key=load_openai_api_key_from_env()
+        )
+    except MissingConfigurationError as exc:
+        stderr.write(str(exc) + "\n")
+        return _EXIT_GENERAL_ERROR
+
+    with open_intent_application(
+        config, github_token=github_token, interpreter=interpreter
+    ) as opened:
+        return _dispatch(
+            args,
+            holder=opened,
+            stdin=stdin,
+            stdout=stdout,
+            stderr=stderr,
+            isatty=is_tty,
+            clock=clock,
+        )
+
+
+def _dispatch(
+    args,
+    *,
+    holder: IntentApplication,
+    stdin: TextIO,
+    stdout: TextIO,
+    stderr: TextIO,
+    isatty: bool,
+    clock: Callable[[], datetime] | None,
+) -> int:
     if args.command == "propose":
         return _run_propose(
             args,
@@ -53,7 +109,7 @@ def main(
             stdin=stdin,
             stdout=stdout,
             stderr=stderr,
-            isatty=is_tty,
+            isatty=isatty,
             clock=clock,
         )
     return _run_resume(args, holder=holder, stdout=stdout)
