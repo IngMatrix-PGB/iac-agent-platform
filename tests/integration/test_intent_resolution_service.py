@@ -22,7 +22,7 @@ from iac_agent.app.service import IacApplication
 from iac_agent.domain.workflow import WorkflowStatus
 from iac_agent.execution.terraform_runner import CommandResult
 from iac_agent.graph.workflow import build_iac_workflow
-from iac_agent.intent.models import ArchitectureIntent
+from iac_agent.intent.models import ArchitectureIntent, Capability
 from iac_agent.intent.port import (
     IntentProviderRefusalError,
     IntentProviderTimeoutError,
@@ -254,3 +254,54 @@ def test_interpreter_failure_never_invokes_application_submit():
     )
     with pytest.raises(IntentProviderRefusalError):
         service.submit(request_id="req-007", natural_language_request="build me an api")
+
+
+# ---------------------------------------------------------------------------
+# Batch 24, Task 1: IntentSubmissionResult retains request_id/intent.
+# ---------------------------------------------------------------------------
+
+
+def test_resolved_result_retains_exact_interpreted_intent(tmp_path):
+    service = IntentResolutionService(
+        interpreter=FakeIntentInterpreter(payload=_RESOLVABLE_API_PAYLOAD),
+        resolver=ArchitectureResolver(),
+        application=_build_application(tmp_path),
+    )
+    result = service.submit(request_id="req-001", natural_language_request="build me an api")
+    assert result.request_id == "req-001"
+    assert result.intent.workload_type.value == "api"
+    assert result.intent.interaction_pattern.value == "synchronous"
+    assert result.intent.capabilities == frozenset({Capability.HTTP_ENDPOINT})
+    assert result.intent is parse_intent_payload(_RESOLVABLE_API_PAYLOAD) or (
+        result.intent.model_dump(mode="json")["workload_type"] == "api"
+    )
+    assert result.resolution.outcome == "resolved"
+    assert result.workflow_view is not None
+    assert result.approval_available is True
+
+
+def test_clarification_retains_intent_and_never_submits(tmp_path):
+    service = IntentResolutionService(
+        interpreter=FakeIntentInterpreter(payload=_CLARIFICATION_PAYLOAD),
+        resolver=ArchitectureResolver(),
+        application=_NeverCalledApplication(),
+    )
+    result = service.submit(request_id="req-002", natural_language_request="do something")
+    assert result.request_id == "req-002"
+    assert result.intent.workload_type.value == "unspecified"
+    assert result.workflow_view is None
+    assert result.approval_available is False
+    assert result.resolution.outcome == "clarification_required"
+
+
+def test_unsupported_retains_intent_and_never_submits():
+    service = IntentResolutionService(
+        interpreter=FakeIntentInterpreter(payload=_UNSUPPORTED_PAYLOAD),
+        resolver=ArchitectureResolver(),
+        application=_NeverCalledApplication(),
+    )
+    result = service.submit(request_id="req-003", natural_language_request="build an aurora db")
+    assert result.intent.workload_type.value == "storage"
+    assert result.workflow_view is None
+    assert result.approval_available is False
+    assert result.resolution.outcome == "unsupported"
