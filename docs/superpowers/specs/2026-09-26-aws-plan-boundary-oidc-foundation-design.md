@@ -1,9 +1,33 @@
 # Design Spec: AWS Plan Boundary / GitHub OIDC Foundation (Batch 25)
 
-Status: **DESIGN ONLY — no implementation in this document.**
+Status: **APPROVED WITH HUMAN DECISIONS RECORDED BELOW — design only,
+implementation plan explicitly gated (see §20).**
 Discovery base: `origin/main` `460d717` (PR #4 Batch 23 + PR #5 Gate D demo
 artifact, both merged). **`feat/batch24-demo-cli` — the actual CLI/
-composition implementation (Tasks 1–12) — is NOT yet merged to `main`.**
+composition implementation (Tasks 1–12) — is NOT yet merged to `main`
+(re-verified 2026-09-26: still not an ancestor of `origin/main`).**
+
+## Human decisions (2026-09-26, recorded verbatim in substance)
+
+1. **Real AWS provider boundary:** the CI-owned Terraform
+   `_override.tf` approach (§0.1 Option 1) is **approved**. The
+   production renderer (`terraform_render.py`) is **not** modified.
+   Acceptance is strengthened: OIDC/STS assumption succeeding is
+   **not** sufficient evidence on its own — the design must separately
+   prove the AWS provider actually used the resulting credentials (see
+   §0.1's updated acceptance split, A/B).
+2. **IAM permission baseline:** do **not** pre-grant the candidate
+   SQS/Lambda/DynamoDB/IAM read matrix (§7). Start from the empirical
+   minimum (§0.2's hypothesis — likely just identity/provider-init
+   operations) and add exactly one action at a time, only against
+   observed `AccessDenied` evidence, each documented with why it's
+   required and confirmed non-mutating. §7/§8 updated accordingly.
+3. **Batch 24 prerequisite (hard gate):** Batch 25 implementation
+   **must not begin** until `feat/batch24-demo-cli` has completed
+   review, passed CI, and merged to `main`. The implementation branch
+   must be cut from the `main` commit that contains Batch 24. This
+   design document is approved; the **implementation plan is not
+   written yet** because this gate is still open (§20).
 
 **Golden rule, unchanged and reframed for this batch: the security claim
 is not "`terraform plan` is read-only." The security claim is "the AWS
@@ -75,8 +99,31 @@ not silently resolving it. Three honest options, none implemented here:
   whether/how to connect that boundary to the agent's real generated
   artifacts.
 
-I recommend **Option 1** and have designed §6/§10 around it, but this is
-a human decision point, not something to assume settled.
+**DECISION (2026-09-26): Option 1 is approved.** The generated
+Terraform artifact and the production renderer
+(`terraform_render.py`) are never modified. The opt-in `aws-plan` CI
+job materializes an execution-only `*_override.tf` inside the
+temporary Terraform workspace (never committed, never part of
+`generated/<request_id>/`) that disables the `skip_*` provider flags
+for that one execution context, so the AWS provider uses the real
+OIDC/STS-derived credentials from the job environment. This is
+execution-boundary configuration, not generated infrastructure — it
+never becomes part of the PR's own diff.
+
+**Acceptance is two-part, and part A alone is explicitly insufficient:**
+
+- **A. GitHub OIDC successfully assumed `IaCPlanRole`** — provable via
+  the CI log's own STS response / `aws sts get-caller-identity` echo
+  (account/ARN only, never credential values).
+- **B. Terraform's AWS provider actually used those credentials** —
+  provable independently of A, e.g. by asserting the plan log shows
+  the provider's own initialization step completed (not
+  short-circuited by the skip-flags) and/or by a deliberate,
+  non-destructive read the override enables (such as the provider's
+  internal `GetCallerIdentity` call surfacing in the plan's debug
+  log). A successful `AssumeRoleWithWebIdentity` call proves GitHub↔AWS
+  trust works; it does **not** by itself prove Terraform ever touched
+  AWS — those are two separate claims, and both must be evidenced.
 
 ### 0.2 A `terraform plan` of brand-new resources against real AWS likely needs almost no IAM permissions at all
 
@@ -221,12 +268,19 @@ with repository evidence and adopted as locked constraints for Batch
   §11 for the additional GitHub-native layer.
 - **H (no apply/destroy):** confirmed — `TerraformRunner` has no such
   methods (§1), and nothing in this design adds any.
-- **New invariant surfaced by §0.1:** *the generated Terraform artifact
-  itself must not be silently modified to enable this batch.* Any
-  mechanism that makes real-AWS planning possible must not touch
-  `src/iac_agent/providers/aws/terraform_render.py` or the "generated
-  file — do not edit by hand" contract, without a separate, explicit
-  human decision to do so.
+- **New invariant surfaced by §0.1, now a locked decision:** *the
+  generated Terraform artifact and `terraform_render.py` are never
+  modified for this batch* — confirmed and locked, not merely
+  provisional (see "Human decisions," item 1).
+- **New invariant, locked:** the `IaCPlanRole` permission set is
+  derived strictly from observed `AccessDenied` evidence, one action at
+  a time — the candidate matrix in §7 is documentation of a rejected
+  starting hypothesis, never a pre-grant (see "Human decisions," item
+  2, and §7/§8 below).
+- **New invariant, locked:** Batch 25 **implementation** does not begin
+  until `feat/batch24-demo-cli` is merged to `main`, and the
+  implementation branch is cut from the `main` commit containing it
+  (see "Human decisions," item 3, and §20).
 
 ---
 
@@ -300,13 +354,20 @@ it.
 
 ## 7. Candidate `IaCPlanRole` policy matrix
 
-| Family | Candidate actions | Status |
+**DECISION (2026-09-26): none of the families below are pre-granted.**
+The starting `IaCPlanRole` policy at implementation time contains
+**only** `sts:GetCallerIdentity` (§0.2's empirical minimum). Everything
+else in this table is a **rejected-as-pre-grant hypothesis**, kept here
+only so the discovery loop (§8) has candidates to test *against*
+observed `AccessDenied` evidence — not a list to grant upfront.
+
+| Family | Hypothesis (not granted) | Status |
 |---|---|---|
-| STS | `sts:GetCallerIdentity` | **A — near-certain requirement** (provider init, if §0.1 skip-flags are overridden) |
-| SQS | `GetQueueAttributes`, `GetQueueUrl`, `ListQueueTags`, `ListQueues` | **B — requires empirical discovery**; per §0.2, may not be exercised at all for a from-scratch plan |
-| Lambda | `GetFunction`, `GetFunctionConfiguration`, `GetFunctionCodeSigningConfig`, `GetPolicy`, `ListTags`, `ListVersionsByFunction` | **B** — same caveat |
-| DynamoDB | `DescribeTable`, `DescribeContinuousBackups`, `DescribeTimeToLive`, `ListTagsOfResource` | **B** — same caveat |
-| IAM | `GetRole`, `GetRolePolicy`, `ListRolePolicies`, `ListAttachedRolePolicies` | **B** — same caveat; needed only if the provider ever reads an *existing* execution role (not the case for a brand-new one) |
+| STS | `sts:GetCallerIdentity` | **Starting grant** — provider init, needed once §0.1's override removes the skip-flags |
+| SQS | `GetQueueAttributes`, `GetQueueUrl`, `ListQueueTags`, `ListQueues` | **Not granted.** Test empirically; per §0.2, likely unnecessary for a from-scratch, no-state plan |
+| Lambda | `GetFunction`, `GetFunctionConfiguration`, `GetFunctionCodeSigningConfig`, `GetPolicy`, `ListTags`, `ListVersionsByFunction` | **Not granted.** Same caveat |
+| DynamoDB | `DescribeTable`, `DescribeContinuousBackups`, `DescribeTimeToLive`, `ListTagsOfResource` | **Not granted.** Same caveat |
+| IAM | `GetRole`, `GetRolePolicy`, `ListRolePolicies`, `ListAttachedRolePolicies` | **Not granted.** Same caveat; would only matter if the provider ever reads an *existing* execution role (not the case for a brand-new one) |
 
 None of these are approved as a final policy. §8/§9 are authoritative
 about what happens next.
@@ -315,16 +376,25 @@ about what happens next.
 
 ## 8. Permissions requiring empirical discovery
 
-Per §0.2, the discovery loop (§E of the authorization, adopted
-unchanged) must be run against a **real** `terraform plan` invocation
-(with §0.1 resolved) before any family in §7 is added beyond
-`sts:GetCallerIdentity`. Expected outcome, stated as a hypothesis: the
-loop converges quickly (1–2 iterations) because there is no existing
-state to refresh and no AWS-querying `data` source in the current
-generated composition. If discovery instead reveals additional calls
-(e.g., the AWS provider internally validating an ARN format against a
-live IAM lookup, which is plausible but not confirmed), each is added
-one at a time, per the loop, never in bulk.
+**Locked process (human decision item 2):** implementation starts from
+`sts:GetCallerIdentity` alone. For every subsequent `AccessDenied`
+during a real `terraform plan` (with §0.1's override in place): (1)
+identify the exact AWS API action denied, (2) confirm the AWS provider
+genuinely requires it for this specific plan, (3) confirm it is
+non-mutating, (4) add only that one action, with a written note of why,
+(5) rerun. Never widen in bulk, never jump to
+`AdministratorAccess`/`PowerUserAccess`/persistent `ReadOnlyAccess`.
+§7's families are candidates to check against, in the order discovery
+actually surfaces them — not a checklist to grant preemptively.
+
+Expected outcome, stated as a hypothesis to be confirmed, not assumed:
+the loop converges quickly (1–2 iterations) because there is no
+existing state to refresh and no AWS-querying `data` source in the
+current generated composition. If discovery instead reveals additional
+calls (e.g., the AWS provider internally validating an ARN format
+against a live IAM lookup, which is plausible but not confirmed), each
+is added one at a time, per the loop above, with its justification
+documented in the same commit that adds it.
 
 ## 9. Explicitly forbidden AWS permissions
 
@@ -528,17 +598,20 @@ agent-managed bootstrap role, static AWS credentials in GitHub.
 
 ## 18. Risks / open questions
 
-1. **§0.1 must be resolved by explicit human decision** before an
-   implementation plan can be written — this is the single biggest
-   open item.
-2. **§0.2's hypothesis** (near-empty permission set) should be treated
-   as provisional until the actual discovery loop runs against real
-   AWS.
-3. **Batch 24 (`feat/batch24-demo-cli`) is unmerged** — Batch 25 does
-   not depend on it structurally (§1's sequencing note), but the
-   portfolio "story" (§15) reads oddly if the CLI that's supposed to
-   produce these PRs doesn't exist on `main` yet. Worth a merge
-   decision independent of Batch 25.
+1. ~~§0.1 must be resolved by explicit human decision~~ — **resolved
+   2026-09-26: Option 1 approved** (see "Human decisions," item 1).
+2. **§0.2's hypothesis** (near-empty permission set) remains
+   provisional until the actual discovery loop runs against real AWS —
+   this is expected and correct; it is *why* §8 is a loop, not a
+   one-shot grant (see "Human decisions," item 2, now locked as
+   process).
+3. **Batch 24 (`feat/batch24-demo-cli`) is unmerged — this is now a
+   hard gate, not a soft risk.** Re-verified 2026-09-26:
+   `feat/batch24-demo-cli` is still not an ancestor of `origin/main`
+   (`git merge-base --is-ancestor` → false; `origin/main` HEAD is
+   still `460d717`, containing only the Batch 23 merge and the Gate D
+   demo artifact PR #5). **Batch 25 implementation must not start
+   until this merges** (see "Human decisions," item 3, and §20).
 4. GitHub's exact AWS OIDC provider thumbprint/setup guidance should be
    re-verified at actual bootstrap-apply time (AWS/GitHub have changed
    this mechanism before; treat this document's own drafting date,
@@ -551,19 +624,35 @@ agent-managed bootstrap role, static AWS credentials in GitHub.
 
 ## 19. Recommended implementation sequence (not an implementation plan)
 
-1. Human decision on §0.1 (Option 1/2/3).
+0. **Gate: merge `feat/batch24-demo-cli` to `main` first** (§20). No
+   step below starts before this.
+1. ~~Human decision on §0.1~~ — done; Option 1 is locked.
 2. §5's temporary OIDC-debugger workflow → record real claims → delete
    it.
 3. Bootstrap plane applied manually, outside this repository (§6).
 4. `aws-plan` job added to `ci.yml`, gated per §11/§12, initially with
-   only `sts:GetCallerIdentity` (§0.2's hypothesis) attached to
-   `IaCPlanRole`.
+   only `sts:GetCallerIdentity` attached to `IaCPlanRole` (§0.2/§8,
+   locked as the starting grant — no pre-granted family from §7).
 5. Discovery loop (§8) against one real, authorized PR — add
-   permissions one at a time only if genuinely needed.
+   permissions one at a time, each with a written justification, only
+   against observed `AccessDenied`.
 6. Freeze the policy; add §13's structural regression tests and §14's
    policy-simulation negative-path check.
-7. Record §15's acceptance evidence.
+7. Record §15's acceptance evidence, including both parts of §0.1's
+   acceptance split (A: OIDC assumed; B: provider actually used the
+   credentials).
 
-A full task-by-task implementation plan (mirroring Batch 23/24's own
-planning documents) is the next artifact, written only after a human
-has reviewed and responded to §0.1 and §18 specifically.
+## 20. Batch 25 closure gate (explicit, checked 2026-09-26)
+
+| Gate condition | Status |
+|---|---|
+| §0.1 (real AWS provider boundary approach) decided | ✅ Option 1 approved |
+| §7/§8 (IAM permission baseline approach) decided | ✅ empirical-minimum locked, no pre-grant |
+| `feat/batch24-demo-cli` merged to `main` | ❌ **not merged** — re-verified this session |
+
+**Batch 25 status: design APPROVED; implementation plan BLOCKED** on
+the third condition. Do not run `/writing-plans` (or its manual
+equivalent) for Batch 25 until `feat/batch24-demo-cli` is merged and
+this table's third row flips to ✅. When it does, the implementation
+branch is cut from the `main` commit containing that merge, not from
+`origin/main`'s current `460d717`.
