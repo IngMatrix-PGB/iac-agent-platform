@@ -48,6 +48,9 @@ def create_app(holder=None) -> FastAPI:
             return JSONResponse({"status": "not_ready"}, status_code=503)
         return {"status": "ready"}
 
+    from iac_agent.api.routes import register_routes
+
+    register_routes(app)
     return app
 
 
