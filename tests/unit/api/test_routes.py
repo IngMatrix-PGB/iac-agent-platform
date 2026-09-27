@@ -219,3 +219,34 @@ def test_interpreter_failure_hides_exception_text():
     assert response.json()["error"] == "intent_provider_unavailable"
     assert response.json()["message"] == "Intent provider unavailable."
     assert "secret downstream" not in response.text
+
+
+def test_unknown_valid_request_id_is_404_and_not_a_synthetic_status():
+    holder = Holder()
+    response = _client(holder).get("/api/v1/requests/req-missing")
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": "request_not_found",
+        "message": "Request not found.",
+    }
+    rendered = response.text
+    for forbidden in ("pending", "submitted", "awaiting_approval", "workflow_status"):
+        assert forbidden not in rendered
+    assert holder.application.get_state_calls == []
+
+
+def test_get_existing_request_omits_intent_and_does_not_resume():
+    holder = Holder()
+    holder.application.stored["req-001"] = _resolved_view()
+    client = _client(holder)
+    first = client.get("/api/v1/requests/req-001")
+    second = client.get("/api/v1/requests/req-001")
+    assert first.status_code == 200
+    assert second.status_code == 200
+    body = first.json()
+    assert body["intent"] is None
+    assert body["resolution"]["matched_pattern"] is None
+    assert body["approval_available"] is True
+    assert body["outcome"] == "awaiting_approval"
+    assert holder.application.resume_calls == []
+    assert holder.application.get_state_calls == []
