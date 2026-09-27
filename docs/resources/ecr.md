@@ -27,9 +27,9 @@ makes no OpenAI call.
 
   `^[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*(\/[a-z0-9]+((\.|_|__|-+)[a-z0-9]+)*)*$`
 
-  A leading digit matches this regex. AWS prose that says a name must
-  start with a letter is not what the regex enforces. Gate B's
-  `terraform plan` is what records which form the provider accepts.
+  A leading digit matches this regex. AWS provider 6.x accepted
+  `name = "1orders"` in a credential-free `terraform plan` (one
+  `aws_ecr_repository` create). The regex stands.
 - `image_tag_mutability` defaults to `IMMUTABLE`. `MUTABLE` is allowed
   and warned. Exclusion-filter modes are not members.
 - `scan_on_push` defaults to `True`.
@@ -83,3 +83,42 @@ the repository name, `image_tag_mutability`, and `scan_on_push`.
 Lifecycle policy, repository policy, KMS, public ECR, registry-level
 scanning (`aws_ecr_registry_scanning_configuration`), and `force_delete`
 are out of this batch.
+
+## Actual versus theoretical
+
+Design inventory: 20 production dispatch/registration sites, 1
+non-dispatch prompt site (`intent/adapters/openai.py`), and 24
+test/eval rows. Gate B did not add a 21st dispatch site. `request.py`
+stayed unchanged.
+
+The 24 inventory rows all exist after Gate B, including
+`tests/integration/test_ecr_renderer_terraform.py`,
+`tests/integration/test_ecr_golden_real_tool_eval.py`, and
+`tests/integration/test_ecr_workflow_persistence.py`. Three test/eval
+files were outside that inventory:
+`tests/unit/graph/test_state.py` (exact workflow-state union),
+`tests/unit/intent/adapters/test_openai_adapter.py` (recorded prompt
+version), and `evals/evaluators/architecture_intent_resolver.py`
+(`EcrResourceSpec` in the resolved-type map). `ApiLambdaDynamoDbSpec`
+is still absent from that map. That pre-existing hole did not block
+ECR.
+
+Omission behavior, from the tests that failed before the registration
+existed:
+
+- A missing `ResourceType` arm, renderer case, policy id, Checkov
+  profile, module-directory entry, or display name fails loudly
+  (`ValueError` or `KeyError`).
+- Omitting the checkpoint allowlist does not raise. The recovered
+  value is a `dict`. The unit round-trip and the fresh-process HITL
+  test are what catch it.
+- Omitting the `_component_lines` branch does not raise. The lines are
+  `[]`. Only the dedicated CLI test catches that.
+- The resolver golden evaluator ignores a `resolved_type` it does not
+  map. ECR is mapped. An unmapped name would still pass on outcome and
+  pattern alone.
+
+A registry would mostly move the dicts and `match` arms that already
+fail loudly. It would not, by itself, own checkpoint allowlisting or
+CLI component lines. Those two silent spots already have dedicated
+tests. No registry is implemented in this batch.
