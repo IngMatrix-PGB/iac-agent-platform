@@ -174,37 +174,26 @@ Every existing resolver-owned fixed default
 — none of these three module-level constants change meaning or value
 for the existing two compositions; this is purely additive.
 
-## 5. Recommended defaults (need explicit sign-off)
-
-To keep this "the smallest useful composition #3" (per the approved
-discovery recommendation), and consistent with this project's own
-established discipline of resolver-owned, non-caller-configurable
-structural defaults:
+## 5. Defaults (CLOSED — "BATCH 26 — DESIGN DECISIONS APPROVED")
 
 - **Exactly one route**, reusing `API_LAMBDA_DEFAULT_ROUTE`
-  (`POST /invoke`) unchanged — not a new, second fixed default. A
-  future batch could add multi-route support to `ApiLambdaSpec` and
-  this composition together, but doing it only for the new composition
-  now would create an asymmetry between the two API-fronting
-  compositions without a driving requirement.
+  (`POST /invoke`) unchanged — not a new, second fixed default.
+  **Decided:** one fixed route, following `ApiLambdaSpec` exactly.
+  Multi-route support is explicitly out of scope for Batch 26 — this
+  batch validates composition #3, it does not introduce a generalized
+  API-routing abstraction. Any future multi-route need is a separate,
+  later architecture decision.
 - **Exactly one DynamoDB partition key**, reusing
   `WORKER_DDB_DEFAULT_PARTITION_KEY` (`id`, string) unchanged.
-- **Exactly one Lambda→DynamoDB IAM action: `dynamodb:PutItem`** —
-  matching `ServerlessWorkerSpec`'s existing minimal grant exactly
-  (§6), not a broader CRUD action set. Rationale: `ArchitectureIntent`
-  carries no field distinguishing "read" from "write" persistence
-  need, `Capability.PERSISTENCE` is a single undifferentiated
-  capability, and this project's established policy discipline (Batch
-  17/18/19) is to grant the single narrowest action a fixed,
-  non-caller-configurable relationship can honestly justify — not to
-  guess at a fuller CRUD set the contract has no way to express intent
-  for. **This is a real trade-off, not an obviously-correct answer**:
-  it means the initial composition supports "record an event"
-  (write-only), not "look up a record" (would need `GetItem`/`Query`
-  too). Flagged explicitly for the human decision in §13 — a
-  broader-but-still-fixed action set (e.g. `PutItem` + `GetItem`) is a
-  defensible alternative if the intended use case is closer to a real
-  CRUD API than a write-only ingestion endpoint.
+- **Exactly one Lambda→DynamoDB IAM action: `dynamodb:PutItem`,
+  scoped to the generated table's ARN.** **Decided:** grant exactly
+  `dynamodb:PutItem` — never `GetItem`, `UpdateItem`, `DeleteItem`,
+  `Query`, `Scan`, `BatchWriteItem`, a wildcard action, or any broader
+  CRUD set. This matches `ServerlessWorkerSpec`'s existing minimal
+  grant exactly (§6). Any additional DynamoDB behavior (read access,
+  updates, deletes) requires a future, explicit
+  architecture/capability decision — it is never added preventively or
+  speculatively ahead of a demonstrated need.
 
 ## 6. Renderer and Terraform module wiring
 
@@ -289,29 +278,36 @@ decision already treats the dispatch-site duplication.
   `evaluate_dynamodb_pitr_policy(spec.table)`,
   `evaluate_dynamodb_deletion_protection_policy(spec.table)`.
 
-## 8. Checkov profile — discovery methodology (not derived by union)
+## 8. Checkov profile — discovery methodology (CLOSED — never a union)
 
 `src/iac_agent/security/composition_checkov_profiles.py` gets one new
-`CompositionType.API_GATEWAY_LAMBDA_DYNAMODB` entry — **empirically
-derived**, exactly per the human decision (item 7) and this project's
-own stated discipline (already documented verbatim in this same file's
-module docstring for the first two compositions): a real, strict
-(zero-skip) Checkov scan is run against the new composition's
-rendered, secure-default baseline (credential-free — Checkov operates
-on the rendered `.tf`/plan JSON, no AWS call), and the reported failed
-checks are compared against the union hypothesis
-(`api_lambda`'s two approved skips ∪ `serverless_worker`'s six approved
-skips ∪ any newly-surfaced check specific to the three-resource
-combination). Only if the real scan's findings are **exactly** that
-union (or a documented, justified subset/superset) is a profile
-written — if a genuinely new finding appears (e.g. from the specific
-API-Gateway+DynamoDB combination never scanned together before), it
-requires the same explicit `AskUserQuestion`-gated decision the module
-docstring says the first two compositions avoided by getting empirical
-confirmation. This step is implementation-time work (needs the real
-renderer to exist first, per Gate-A-style sequencing) — this design
-only fixes the *methodology*, not the resulting skip list, which is
-not assumed here.
+`CompositionType.API_GATEWAY_LAMBDA_DYNAMODB` entry, produced by the
+following approved, ordered, empirical procedure (implementation-time
+work — needs the real renderer to exist first; this design fixes only
+the *methodology*, never the resulting skip list):
+
+1. Implement the renderer (§6).
+2. Render the real composition (a real, secure-default
+   `ApiLambdaDynamoDbSpec` — credential-free, no AWS call).
+3. Run the existing strict real-tool Checkov path against it with
+   **zero** composition-specific skips initially.
+4. Capture the actual reported findings.
+5. Evaluate each finding individually against this specific
+   three-resource combination — never assumed from either existing
+   profile.
+6. Add only empirically justified skips (each with the same kind of
+   written evidence/citation this project's existing profiles already
+   carry).
+7. Freeze the resulting profile in code and in a regression test.
+8. Prove the final strict scan (with only the frozen skips applied)
+   passes cleanly.
+
+**Never** obtained by unioning `api_lambda`'s and `serverless_worker`'s
+existing approved skip lists — a superficially similar shortcut this
+project used successfully for `serverless_worker` (whose profile *was*
+verified to equal a union, but only after running the real scan first
+and checking, not by assumption) is explicitly rejected here as a
+starting method, not just as a final answer.
 
 ## 9. All dispatch sites requiring recognition of the new type
 
@@ -345,28 +341,61 @@ existing trusted Terraform modules themselves (no change to
 `api_gateway`, `lambda`, or `dynamodb` modules — the Lambda module's
 `execution_role_name` output already exists and is reused unchanged).
 
-## 10. HITL / PR / CLI presentation
+## 10. HITL / PR / CLI presentation (cosmetic decisions CLOSED)
 
+- **Commit message / `resource_kind` (CLOSED):**
+  `resource_kind = "api lambda dynamodb"`, exactly as approved —
+  matching the existing lowercase-with-spaces style
+  (`"serverless worker"`) rather than `ApiLambdaSpec`'s own
+  `"API Lambda"` casing; this is the approved literal string, not a
+  free choice.
+- **Human-readable architecture label (CLOSED):** an equivalent of
+  `"API Gateway + Lambda + DynamoDB"` — used consistently everywhere
+  the composition's architecture is described to a human (PR body's
+  `Composition type:` line context, CLI output), not a different
+  wording in each place. Per human decision item 3, this consistency is
+  achieved by defining the exact string **once**, as a plain module-level
+  constant, and importing it into `graph/workflow.py` and
+  `cli/present.py` — **not** by introducing a descriptor/registry
+  abstraction (explicitly ruled out for this batch, same as §13's
+  standing decision).
 - **PR body** (`_pr_body()` in `graph/workflow.py`): new `identity_lines`
   block, mirroring the `ApiLambdaSpec` shape plus the table line:
   `Composition type: api_gateway_lambda_dynamodb`, `API: <name>`,
   `Route: <method> <path>`, `Lambda: <name>`, `Table: <name>`.
-- **Commit message / `resource_kind`**: a new fixed string (exact
-  wording TBD at implementation, following the existing
-  `"serverless worker"`/`"API Lambda"` precedent — candidate: `"API
-  Lambda DynamoDB"`).
-- **CLI** (`cli/present.py`): `_architecture_label()` returns a new
-  label (e.g. `"api_lambda_dynamodb"`); `_component_lines()` lists all
-  three resources (api, route, function, table) — satisfying human
-  decision item 5's explicit CLI requirement.
+- **CLI** (`cli/present.py`): `_architecture_label()` returns the new
+  label; `_component_lines()` lists all three resources (api, route,
+  function, table) — satisfying human decision item 5's explicit CLI
+  requirement. A dedicated regression test proves this composition
+  never falls through to the pre-existing unconditional `"s3"`
+  fallback (§9 row 10, §14).
 - **HITL / durable resume**: no change to the approval-gate mechanics
   themselves (`graph/workflow.py`'s interrupt/resume logic is already
   fully request-shape-agnostic — it only reads `plan_summary`,
   `security_gate`, and `approval_decision`, never branches on spec
   type). The only durability-relevant change is the checkpoint
-  allowlist entry (§9, row 11) — without it, HITL resume would break
-  specifically for this composition even though the approval gate logic
-  itself needs no change.
+  allowlist entry (§9, row 11) — treated as a **critical dispatch
+  boundary** per the closed decision below, with dedicated proof, not
+  just an allowlist entry taken on faith.
+
+**Critical regression invariant (closed, mandatory):**
+`persistence/checkpoints.py`'s `_ALLOWED_WORKFLOW_TYPES` is a security-
+and-correctness-relevant dispatch boundary, not incidental plumbing.
+Implementation must prove, not just assert:
+- `ApiLambdaDynamoDbSpec` survives real checkpoint
+  serialization/deserialization through the actual
+  `open_sqlite_checkpointer`/`JsonPlusSerializer` path (no fakes).
+- A workflow paused at the HITL interrupt can be reconstructed in a
+  **fresh** application/process (a new `open_sqlite_checkpointer` call
+  against the same on-disk database, simulating a real process
+  restart) and resumed with the exact original composition spec.
+- The reconstructed spec's type is asserted to be exactly
+  `ApiLambdaDynamoDbSpec` — and explicitly asserted to **not** degrade
+  into `ApiLambdaSpec`, a primitive `AWSResourceSpec`, a raw `dict`, or
+  any other type. A silent type-widening failure here (e.g. the
+  allowlist entry missing and the serializer falling back to a
+  permissive/dict representation) is exactly the failure mode this
+  test exists to catch.
 
 ## 11. Golden-eval structure
 
@@ -440,10 +469,13 @@ the files above rather than as a separate suite:
    regression identified in the discovery report (§9 above).
 3. PR-body and commit-message tests assert all three resource names
    (api/route/function/table) appear, for this composition only.
-4. CLI presentation test asserts `_component_lines()` lists all three
-   resources for this composition, and that `_architecture_label()`
-   never falls through to `"s3"` for it (directly exercising the
-   pre-existing sharp edge found in §9, row 10).
+4. **CLI presentation regression (mandatory, closed):** a dedicated
+   test asserts `_architecture_label()` returns the new label for
+   `ApiLambdaDynamoDbSpec` and explicitly asserts it does **not** fall
+   through to the pre-existing unconditional `"s3"` fallback — directly
+   exercising the sharp edge found in §9 row 10; `_component_lines()`
+   is asserted to list all three resources (api, route, function,
+   table).
 5. Resolver test: the two new capability combinations resolve/clarify
    correctly; every combination that should remain
    `UnsupportedArchitecture` (e.g. same capability set + `ASYNCHRONOUS`)
@@ -451,10 +483,23 @@ the files above rather than as a separate suite:
 6. Full existing `tests/unit`/`tests/integration` suites for
    `ServerlessWorkerSpec`/`ApiLambdaSpec` re-run unmodified and green —
    the explicit backward-compatibility proof (§12).
-7. Checkpoint round-trip test: a durable-checkpointed
-   `ApiLambdaDynamoDbSpec` request survives a save/resume cycle through
-   the real `open_sqlite_checkpointer` — the concrete proof for §9 row
-   11's easy-to-miss allowlist entry.
+7. **Durable HITL reconstruction/resume proof (mandatory, closed) —**
+   `test_api_lambda_dynamodb_workflow_persistence.py`: submit an
+   `ApiLambdaDynamoDbSpec` request through the real graph to the HITL
+   interrupt (real `open_sqlite_checkpointer`, on-disk SQLite, no
+   fakes); close that checkpointer/process; open a **fresh**
+   `open_sqlite_checkpointer` against the same database path (a real
+   process-restart simulation, not just re-reading in the same
+   session); reconstruct the paused state; assert the reconstructed
+   `resource_spec` is exactly `ApiLambdaDynamoDbSpec` (`type(...) is
+   ApiLambdaDynamoDbSpec`, not merely `isinstance` — to also rule out
+   an accidental subclass); assert it is explicitly **not**
+   `ApiLambdaSpec`, not a primitive `AWSResourceSpec`, not a raw
+   `dict`; resume with an `APPROVE` decision through to
+   `source_control`, proving the full HITL round trip. This is the
+   concrete proof for §9 row 11's easy-to-miss allowlist entry —
+   without it, this test fails loudly instead of the regression passing
+   silently.
 
 ## 15. Contradictions discovered during design (none found)
 
@@ -466,19 +511,39 @@ not a contradiction of a decision, it's a pre-existing minor sharp edge
 this composition must not walk into; it's addressed in §9/§14, not
 flagged as blocking.
 
-## 16. Summary of open decisions requiring explicit sign-off before an implementation plan is written
+## 16. Design decisions — CLOSED ("BATCH 26 — DESIGN DECISIONS APPROVED")
 
-1. **Route cardinality** (§3, §5): exactly one fixed route (recommended,
-   matches `ApiLambdaSpec` exactly) vs. multi-route support.
-2. **IAM action set** (§5): `dynamodb:PutItem` only (recommended,
-   matches `ServerlessWorkerSpec`'s minimalism) vs. a broader fixed set
-   (e.g. `PutItem`+`GetItem`) for a more CRUD-like default.
-3. **Exact `resource_kind`/commit-message string** (§10) — cosmetic,
-   low-stakes, but needs a single agreed value before implementation.
-4. Confirmation that the Checkov-profile methodology in §8 (empirical,
-   real-scan, union-hypothesis-then-verify) is acceptable as described,
-   since the actual resulting skip list cannot be produced until the
-   renderer exists.
+All four decisions previously open are now closed:
 
-No implementation performed. No implementation plan written. No
-repository mutation pushed to GitHub.
+1. **Route cardinality:** exactly one fixed route, matching
+   `ApiLambdaSpec` exactly (§5). Multi-route support is explicitly out
+   of scope for Batch 26.
+2. **IAM action set:** exactly `dynamodb:PutItem`, scoped to the
+   generated table's ARN — never a broader or wildcard grant (§5).
+3. **Presentation:** `resource_kind = "api lambda dynamodb"`; a single,
+   centrally-defined human-readable label equivalent to `"API Gateway +
+   Lambda + DynamoDB"`, reused everywhere (not a descriptor/registry
+   abstraction) (§10).
+4. **Checkov methodology:** approved exactly as the 8-step empirical
+   procedure in §8 — never a union of the existing two profiles.
+
+Plus one additional mandatory regression invariant, discovered during
+design review and now locked: the durable HITL reconstruction/resume
+proof and the `cli/present.py` `_architecture_label()` non-degradation
+proof (§10, §14, items 4 and 7).
+
+## 17. Design closure review against current repository evidence
+
+Re-checked against `origin/main` `8f8ce8a` (no change since §0/§9's
+original discovery — confirmed via `git rev-parse --short origin/main`
+before writing this closure section): no new contradiction found.
+Every dispatch site enumerated in §9 was verified by direct file
+inspection this session (not assumed from memory), and none of them
+have changed shape since. The four now-closed decisions do not
+conflict with any locked architectural invariant (§0, §12, §13) or
+with Batch 25's deferred-AWS boundary (untouched throughout: no file
+under `bootstrap/aws-oidc/` or `ci/aws_plan/` was read, referenced, or
+modified in this design work).
+
+**No unresolved architectural contradiction remains.** Proceeding to
+the implementation plan.
