@@ -59,7 +59,7 @@ jobs:
         run: pip install -e ".[dev,openai]"
 
       - name: Run deterministic offline suite
-        run: pytest -m "not real_tool and not real_llm"
+        run: pytest -m "not real_tool and not real_llm and not docker"
 
   tool-validation:
     name: Tool Validation
