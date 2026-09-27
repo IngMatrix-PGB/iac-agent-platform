@@ -9,17 +9,14 @@ metaprogramming. Adding a third composition means adding one entry
 here, exactly like every other registration touchpoint this test
 checks.
 
-Batch 26 note: `test_every_composition_type_has_a_checkov_profile`
-below is marked `xfail(strict=True)` for
-`API_GATEWAY_LAMBDA_DYNAMODB` specifically — its Checkov profile is
-deliberately not derivable until Gate B's empirical, real-scan
-discovery (Task 16) actually runs; see
-`docs/superpowers/plans/2026-09-27-api-lambda-dynamodb-composition.md`.
+Batch 26 note: `API_GATEWAY_LAMBDA_DYNAMODB`'s Checkov profile was a
+temporary `xfail(strict=True)` forward reference through Gate A; Gate
+B's empirical, real-scan discovery (Task 16) closed it — see
+`iac_agent.security.composition_checkov_profiles`'s own module
+docstring for the real scan result.
 """
 
 from __future__ import annotations
-
-import pytest
 
 from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec, HttpMethod, RouteSpec
 from iac_agent.compositions.api_lambda_dynamodb.contract import ApiLambdaDynamoDbSpec
@@ -166,23 +163,29 @@ def test_every_composition_type_policy_evaluation_covers_its_required_ids():
 
 
 def test_every_composition_type_has_a_checkov_profile():
+    # Gate B, Task 16 closed this forward reference: every CompositionType
+    # now has a real, empirically-derived profile (see
+    # iac_agent.security.composition_checkov_profiles's own module
+    # docstring for the API_GATEWAY_LAMBDA_DYNAMODB discovery result).
     for composition_type in CompositionType:
-        if composition_type is CompositionType.API_GATEWAY_LAMBDA_DYNAMODB:
-            continue  # covered by the xfail test below (Gate B, Task 16)
         composition_checkov_profile_for(composition_type)  # must not raise
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Batch 26 Gate B, Task 16: the API_GATEWAY_LAMBDA_DYNAMODB Checkov profile is "
-        "deliberately not derivable until empirical, real-scan discovery actually runs — "
-        "never assumed or unioned from the other two profiles. An unexpected early pass "
-        "here (XPASS) would mean the profile was added without that real discovery step."
-    ),
-)
-def test_api_gateway_lambda_dynamodb_has_a_checkov_profile_gate_b():
-    composition_checkov_profile_for(CompositionType.API_GATEWAY_LAMBDA_DYNAMODB)
+def test_api_gateway_lambda_dynamodb_checkov_profile_is_frozen_to_the_empirical_result():
+    """Freezes the exact, empirically-derived skip list (Batch 26, Gate
+    B, Task 16) — a regression here means the profile silently drifted
+    from the real scan result it was derived from."""
+    profile = composition_checkov_profile_for(CompositionType.API_GATEWAY_LAMBDA_DYNAMODB)
+    assert set(profile.skipped_checks) == {
+        "CKV_AWS_76",
+        "CKV_AWS_116",
+        "CKV_AWS_117",
+        "CKV_AWS_119",
+        "CKV_AWS_158",
+        "CKV_AWS_173",
+        "CKV_AWS_272",
+        "CKV_AWS_309",
+    }
 
 
 def test_every_composition_types_constituent_resource_types_have_trusted_module_dirs():
