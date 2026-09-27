@@ -31,6 +31,7 @@ from iac_agent.intent.resolver import (
     ResolvedArchitecture,
     UnsupportedArchitecture,
 )
+from iac_agent.providers.aws.ecr.contract import EcrResourceSpec
 from iac_agent.providers.aws.s3.contract import S3ResourceSpec
 
 #: Fixed, deterministic request id used by every scenario in this
@@ -42,6 +43,7 @@ _RESOLVED_TYPE_BY_NAME = {
     "ApiLambdaSpec": ApiLambdaSpec,
     "ServerlessWorkerSpec": ServerlessWorkerSpec,
     "S3ResourceSpec": S3ResourceSpec,
+    "EcrResourceSpec": EcrResourceSpec,
 }
 
 

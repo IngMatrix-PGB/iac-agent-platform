@@ -23,3 +23,4 @@ class ResourceType(StrEnum):
     DYNAMODB = "dynamodb"
     LAMBDA = "lambda"
     API_GATEWAY = "api_gateway"
+    ECR = "ecr"

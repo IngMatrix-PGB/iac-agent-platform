@@ -2,7 +2,7 @@
 allowlist (Batch 21, Task 4, spec §7.1; extended to a fourth pattern by
 Batch 26).
 
-Exactly four resolvable architecture patterns exist. There is no
+Exactly five resolvable architecture patterns exist. There is no
 best-match, nearest-match, or fallback architecture anywhere in this
 module — an unlisted combination always returns
 `UnsupportedArchitecture`, never an approximation.
@@ -24,6 +24,7 @@ from iac_agent.intent.resolver import (
     UnsupportedArchitecture,
     UnsupportedReason,
 )
+from iac_agent.providers.aws.ecr.contract import EcrResourceSpec
 from iac_agent.providers.aws.s3.contract import S3ResourceSpec
 
 _REQUEST_ID = "req-001"
@@ -93,6 +94,64 @@ def test_storage_object_storage_resolves_to_s3_spec_regardless_of_interaction_pa
     assert isinstance(result, ResolvedArchitecture)
     assert isinstance(result.request_spec, S3ResourceSpec)
     assert result.matched_pattern == "storage+object_storage"
+
+
+@pytest.mark.parametrize(
+    "interaction_pattern",
+    [
+        InteractionPattern.SYNCHRONOUS,
+        InteractionPattern.ASYNCHRONOUS,
+        InteractionPattern.UNSPECIFIED,
+    ],
+)
+def test_storage_container_registry_resolves_to_ecr_spec_regardless_of_interaction_pattern(
+    interaction_pattern,
+):
+    intent = ArchitectureIntent(
+        workload_type=WorkloadType.STORAGE,
+        interaction_pattern=interaction_pattern,
+        capabilities=frozenset({Capability.CONTAINER_REGISTRY}),
+    )
+    result = _resolver().resolve(intent=intent, request_id=_REQUEST_ID)
+    assert isinstance(result, ResolvedArchitecture)
+    assert not isinstance(result, ClarificationRequired)
+    assert isinstance(result.request_spec, EcrResourceSpec)
+    assert result.matched_pattern == "storage+container_registry"
+    assert result.request_spec.image_tag_mutability.value == "IMMUTABLE"
+    assert result.request_spec.scan_on_push is True
+    assert result.request_spec.encryption.enabled is True
+
+
+@pytest.mark.parametrize(
+    "capabilities",
+    [
+        frozenset({Capability.CONTAINER_REGISTRY, Capability.OBJECT_STORAGE}),
+        frozenset({Capability.CONTAINER_REGISTRY, Capability.PERSISTENCE}),
+    ],
+)
+def test_storage_container_registry_mixed_with_another_capability_is_unsupported(capabilities):
+    intent = ArchitectureIntent(
+        workload_type=WorkloadType.STORAGE,
+        interaction_pattern=InteractionPattern.UNSPECIFIED,
+        capabilities=capabilities,
+    )
+    result = _resolver().resolve(intent=intent, request_id=_REQUEST_ID)
+    assert isinstance(result, UnsupportedArchitecture)
+    assert result.reason is UnsupportedReason.UNSUPPORTED_CAPABILITY
+
+
+def test_container_registry_name_comes_from_the_logical_name_hint():
+    intent = ArchitectureIntent(
+        workload_type=WorkloadType.STORAGE,
+        interaction_pattern=InteractionPattern.UNSPECIFIED,
+        capabilities=frozenset({Capability.CONTAINER_REGISTRY}),
+        logical_name_hint="Orders API",
+        user_provided_hints=(),
+    )
+    result = _resolver().resolve(intent=intent, request_id=_REQUEST_ID)
+    assert isinstance(result, ResolvedArchitecture)
+    assert isinstance(result.request_spec, EcrResourceSpec)
+    assert result.request_spec.name == "orders-api"
 
 
 def test_unspecified_workload_type_returns_clarification_required_workload_type_required():

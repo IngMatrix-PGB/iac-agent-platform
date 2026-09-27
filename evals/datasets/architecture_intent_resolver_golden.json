@@ -293,6 +293,37 @@
         "resolved_type": "S3ResourceSpec",
         "expected_name_prefix": "req-"
       }
+    },
+    {
+      "id": "storage_container_registry_resolves_to_ecr_repository",
+      "description": "Storage plus exactly container_registry resolves to EcrResourceSpec. Interaction pattern is not consulted.",
+      "input": {
+        "schema_version": "1",
+        "workload_type": "storage",
+        "interaction_pattern": "unspecified",
+        "capabilities": ["container_registry"]
+      },
+      "expected": {
+        "schema_valid": true,
+        "outcome": "resolved",
+        "matched_pattern": "storage+container_registry",
+        "resolved_type": "EcrResourceSpec"
+      }
+    },
+    {
+      "id": "storage_container_registry_with_object_storage_unsupported_capability",
+      "description": "container_registry mixed with object_storage stays unsupported. It does not resolve to ECR or S3.",
+      "input": {
+        "schema_version": "1",
+        "workload_type": "storage",
+        "interaction_pattern": "unspecified",
+        "capabilities": ["container_registry", "object_storage"]
+      },
+      "expected": {
+        "schema_valid": true,
+        "outcome": "unsupported",
+        "unsupported_reason": "unsupported_capability"
+      }
     }
   ]
 }

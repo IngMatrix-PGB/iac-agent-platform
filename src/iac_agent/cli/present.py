@@ -11,6 +11,7 @@ from iac_agent.app.service import WorkflowView
 from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec
 from iac_agent.compositions.api_lambda_dynamodb.contract import ApiLambdaDynamoDbSpec
 from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
+from iac_agent.domain.resource import ResourceType
 from iac_agent.domain.security import PolicyStatus
 from iac_agent.domain.workflow import WorkflowStatus
 from iac_agent.intent.models import ArchitectureIntent
@@ -27,6 +28,8 @@ from iac_agent.intent.resolver import (
     UnsupportedArchitecture,
 )
 from iac_agent.intent.service import IntentSubmissionResult
+from iac_agent.providers.aws.ecr.contract import EcrResourceSpec
+from iac_agent.providers.aws.resource import resource_type_of
 from iac_agent.request import IacRequestSpec
 
 _ERROR_CODES: dict[type[BaseException], tuple[str, str]] = {
@@ -70,6 +73,15 @@ def _intent_lines(intent: ArchitectureIntent) -> list[str]:
 #: general convention.
 _API_LAMBDA_DYNAMODB_ARCHITECTURE_LABEL = "API Gateway + Lambda + DynamoDB"
 
+_STANDALONE_RESOURCE_LABELS: dict[ResourceType, str] = {
+    ResourceType.SQS: "sqs",
+    ResourceType.S3: "s3",
+    ResourceType.DYNAMODB: "dynamodb",
+    ResourceType.LAMBDA: "lambda",
+    ResourceType.API_GATEWAY: "api_gateway",
+    ResourceType.ECR: "ecr",
+}
+
 
 def _architecture_label(spec: IacRequestSpec) -> str:
     if isinstance(spec, ServerlessWorkerSpec):
@@ -82,7 +94,7 @@ def _architecture_label(spec: IacRequestSpec) -> str:
         return _API_LAMBDA_DYNAMODB_ARCHITECTURE_LABEL
     if isinstance(spec, ApiLambdaSpec):
         return "api_lambda"
-    return "s3"
+    return _STANDALONE_RESOURCE_LABELS[resource_type_of(spec)]
 
 
 def _component_lines(spec: IacRequestSpec) -> list[str]:
@@ -104,6 +116,12 @@ def _component_lines(spec: IacRequestSpec) -> list[str]:
             f"  api: {spec.api.name}",
             f"  route: {spec.route.method.value} {spec.route.path}",
             f"  function: {spec.function.name}",
+        ]
+    if isinstance(spec, EcrResourceSpec):
+        return [
+            f"  repository: {spec.name}",
+            f"  image_tag_mutability: {spec.image_tag_mutability.value}",
+            f"  scan_on_push: {str(spec.scan_on_push).lower()}",
         ]
     return []
 

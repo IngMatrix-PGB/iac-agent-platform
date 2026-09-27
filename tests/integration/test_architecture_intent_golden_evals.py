@@ -37,6 +37,8 @@ _REQUIRED_SCENARIO_IDS = {
     "naming_hint_normalized_and_used",
     "naming_fallback_used_when_hint_absent",
     "non_authoritative_metadata_invariants",
+    "storage_container_registry_resolves_to_ecr_repository",
+    "storage_container_registry_with_object_storage_unsupported_capability",
 }
 
 

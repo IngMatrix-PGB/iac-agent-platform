@@ -30,6 +30,7 @@ from iac_agent.providers.aws.dynamodb.contract import (
     DynamoDBKeyType,
     DynamoDBResourceSpec,
 )
+from iac_agent.providers.aws.ecr.contract import EcrResourceSpec
 from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec
 from iac_agent.providers.aws.s3.contract import S3ResourceSpec
 from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
@@ -192,6 +193,11 @@ def _build_s3_spec(intent: ArchitectureIntent, *, request_id: str) -> S3Resource
     return S3ResourceSpec(name=base)
 
 
+def _build_ecr_spec(intent: ArchitectureIntent, *, request_id: str) -> EcrResourceSpec:
+    base = resolve_base_name(logical_name_hint=intent.logical_name_hint, request_id=request_id)
+    return EcrResourceSpec(name=base)
+
+
 class ArchitectureResolver:
     """Pure, deterministic. No I/O, no LLM call, no network, no
     filesystem access — mirrors `resource_type_of`'s own purity exactly.
@@ -244,6 +250,11 @@ class ArchitectureResolver:
                 return ResolvedArchitecture(
                     request_spec=_build_s3_spec(intent, request_id=request_id),
                     matched_pattern="storage+object_storage",
+                )
+            case WorkloadType.STORAGE if capabilities == frozenset({Capability.CONTAINER_REGISTRY}):
+                return ResolvedArchitecture(
+                    request_spec=_build_ecr_spec(intent, request_id=request_id),
+                    matched_pattern="storage+container_registry",
                 )
             case WorkloadType.UNSPECIFIED:
                 return ClarificationRequired(request=_workload_type_clarification())
