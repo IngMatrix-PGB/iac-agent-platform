@@ -474,10 +474,11 @@ EventBridge, Secrets Manager, ECS/Fargate together with this ECR
 repository, ALB / networking, RDS / Aurora, and registry-level ECR
 scanning.
 
-Agent Observability / LLMOps, potentially using Langfuse, is a future
-platform capability. Langfuse is not Checkov, not a platform policy,
-and not AWS infrastructure monitoring. It is not implemented here, and
-this batch adds no Langfuse dependency.
+Agent Observability / LLMOps can use the optional Langfuse adapter
+documented in `docs/observability.md` and
+`docs/superpowers/specs/2026-09-27-llm-observability-langfuse-design.md`.
+It is off unless explicitly configured. Langfuse is not Checkov, not a
+platform policy, and not AWS infrastructure monitoring.
 
 ## Not yet started
 

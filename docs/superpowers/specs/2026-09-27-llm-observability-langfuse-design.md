@@ -420,7 +420,7 @@ workflow status. Cost per request is not computable from current data.
 must pass with no Langfuse env vars and no Langfuse package imported
 on that path.
 
-Default is NoOp when `IAC_AGENT_OBSERVABILITY` is unset, empty, `off`, or `noop`. `langfuse` is a recognized backend name and, until Gate B provides the adapter, `build_observability` raises `ObservabilityConfigurationError` instead of pretending that backend is active. Any other value fails at load. This configuration failure is not a workflow telemetry failure: fail-open still applies only after a sink has been constructed. Langfuse keys are not read in Gate A. When Gate B adds them, they stay `SecretStr` and off `ApplicationConfig`.
+Default is NoOp when `IAC_AGENT_OBSERVABILITY` is unset, empty, `off`, or `noop`. `langfuse` with both `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` constructs the optional adapter and wraps it in `FailOpenObservability`. The same mode with a missing key, or a client constructor that fails, raises `ObservabilityConfigurationError` and is not downgraded to NoOp. Any other value fails at load. This configuration failure is not a workflow telemetry failure: fail-open still applies only after a sink has been constructed. Langfuse keys stay `SecretStr` and off `ApplicationConfig`.
 
 The Langfuse SDK belongs in an optional extra, the same way `openai`
 does. The base install does not depend on it.
@@ -432,7 +432,7 @@ None are marked `real_tool` or `real_llm`.
 
 | # | Case | Assertion |
 |---|---|---|
-| 1 | Observability disabled / keys absent | composition builds `NoOp`; submit still returns the workflow view |
+| 1 | Observability disabled | composition builds `NoOp`; submit still returns the workflow view. Explicit `langfuse` with a missing key is a configuration error, not NoOp |
 | 2 | NoOp | port methods return; no extra attribute appears on `WorkflowView` |
 | 3 | Fake adapter | interpret + resolve + terminal events recorded in order for one `request_id` |
 | 4 | Generation metadata | fake records model, prompt version, attempt count, token counts; not the prompt |
@@ -528,7 +528,7 @@ runner/adapter timing wrappers. The first gate does not need that.
 ## 20. Theoretical test and eval files
 
 - new `tests/unit/observability/` for the table in section 16
-- `tests/unit/app/` composition test: missing keys select NoOp
+- `tests/unit/app/` composition test: disabled mode selects NoOp; explicit langfuse with missing keys raises `ObservabilityConfigurationError`
 - no change to golden datasets
 - no change to `evals/observability/layer2.py` in the first gate
 - a future `real_observability` test, if any, lives under
