@@ -123,13 +123,29 @@
       }
     },
     {
-      "id": "case7_aurora_style_request_unsupported_capability",
-      "description": "Spec §16 case 7: an API needing relational persistence is not a supported combination — never approximated to any resolvable target.",
+      "id": "case7_api_http_endpoint_persistence_resolves_to_api_lambda_dynamodb",
+      "description": "Spec §16 case 7, updated by Batch 26: an API needing HTTP_ENDPOINT + PERSISTENCE was originally unsupported and never approximated — Batch 26 introduced a genuine, purpose-built third composition (API Gateway + Lambda + DynamoDB) for exactly this combination instead of approximating it, so this scenario now expects a real resolution, not an approximation.",
       "input": {
         "schema_version": "1",
         "workload_type": "api",
         "interaction_pattern": "synchronous",
         "capabilities": ["http_endpoint", "persistence"]
+      },
+      "expected": {
+        "schema_valid": true,
+        "outcome": "resolved",
+        "matched_pattern": "api+synchronous+http_endpoint+persistence",
+        "resolved_type": "ApiLambdaDynamoDbSpec"
+      }
+    },
+    {
+      "id": "case7b_aurora_style_request_still_unsupported_capability",
+      "description": "Spec §16 case 7's original intent preserved: a persistence-needing API capability set with no purpose-built composition remains genuinely unsupported — never approximated to any resolvable target. Uses a third, still-unmapped capability on top of Batch 26's own new combination to keep proving the fail-closed default.",
+      "input": {
+        "schema_version": "1",
+        "workload_type": "api",
+        "interaction_pattern": "synchronous",
+        "capabilities": ["http_endpoint", "persistence", "queue_processing"]
       },
       "expected": {
         "schema_valid": true,
