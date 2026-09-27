@@ -8,6 +8,19 @@ bootstrap plane. Neither step is executed by `iac-agent-platform`
 itself — both are performed by a human, outside this repository's own
 CI.
 
+## Current status (2026-09-26)
+
+| Layer | Status |
+|---|---|
+| A. Structurally/deterministically proven (Gate A/B — Tasks 1–10) | ✅ **Complete.** Bootstrap Terraform module, frozen empirical-minimum IAM policy, CI-owned provider override, `aws-plan` job contract (pre-committed, `xfail` until Task 13), no-self-management regression tests, real (credential-free) `terraform fmt/init/validate/plan` against the bootstrap module — all merged to `feat/batch25-aws-plan-boundary`. |
+| B. Empirically proven against real GitHub OIDC (Gate C, part 1 — Task 11) | ✅ **Complete.** Step 1 below — real, observed `aud`/`sub` claims from a real workflow run, not assumed. |
+| C. Requires an authorized AWS sandbox (Gate C parts 2–3, Gate D, Gate E — Tasks 12–16) | ⏸ **Deferred.** No personal/lab AWS account has been authorized yet (ClubHub corporate account `891377250201`, under any profile, is explicitly excluded from this scope). Steps 2–3 below, and everything past them, cannot proceed until one is provided. |
+
+This is an external-integration constraint, not a defect in the Batch
+25 implementation: everything that can be proven without a real,
+authorized AWS account has been proven, and nothing beyond that has
+been claimed or fabricated.
+
 ## Step 1 — confirm the actual OIDC claims for this repository
 
 **Status: done (Batch 25, Task 11, 2026-09-26).** Do not assume the
@@ -55,20 +68,31 @@ This was verified empirically, not assumed:
 
 ## Step 2 — apply the bootstrap plane
 
+**Status: DEFERRED — authorized personal/lab AWS account required.**
+As of 2026-09-26, the only AWS credentials available resolve to
+ClubHub corporate account `891377250201` (profiles `no-prod` and
+`iac-agent-lab`, both explicitly excluded — this account is outside
+`iac-agent-platform`'s authority boundary, an employer-owned account,
+not a personal/lab sandbox for this portfolio project). No `terraform
+plan` or `apply` has been run against any real AWS account for this
+module.
+
 See `bootstrap/aws-oidc/README.md` for the exact `terraform
-init/plan/apply` commands. This is run by a human, from their own
-machine or a separate bootstrap pipeline — never by this repository's
-CI, never by `TerraformRunner`. Record the resulting
-`iac_plan_role_arn` output and set it as the `AWS_PLAN_ROLE_ARN`
-repository variable (non-secret) in GitHub.
+init/plan/apply` commands to use once an authorized account is
+available. This is run by a human, from their own machine or a
+separate bootstrap pipeline — never by this repository's CI, never by
+`TerraformRunner`. Record the resulting `iac_plan_role_arn` output and
+set it as the `AWS_PLAN_ROLE_ARN` repository variable (non-secret) in
+GitHub.
 
 ## Step 3 — enable the `aws-plan` CI job
 
-Only after Steps 1–2 are complete and `AWS_PLAN_ROLE_ARN` is set: the
-`aws-plan` job (implementation plan Task 13, human-gated) can be added
-to `ci.yml`. It never runs automatically — it requires the `aws-plan`
-label, an authorized-actor check, and the PR's head repository to be
-this repository itself (never a fork).
+**Status: DEFERRED** — blocked on Step 2. Only after Steps 1–2 are
+complete and `AWS_PLAN_ROLE_ARN` is set: the `aws-plan` job
+(implementation plan Task 13, human-gated) can be added to `ci.yml`.
+It never runs automatically — it requires the `aws-plan` label, an
+authorized-actor check, and the PR's head repository to be this
+repository itself (never a fork).
 
 ## What this never does
 

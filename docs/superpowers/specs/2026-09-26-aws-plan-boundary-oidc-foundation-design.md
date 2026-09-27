@@ -673,3 +673,35 @@ All three closure conditions are satisfied. A task-by-task
 implementation plan may now be written, cut from `main` at `0e92809`
 or later — this still requires a separate, explicit human go-ahead to
 begin (this document being closed is not itself that go-ahead).
+
+## 21. Implementation status (updated 2026-09-26, post-Task 11 closure)
+
+| Task(s) | Gate | Classification | Evidence |
+|---|---|---|---|
+| 1–9 | A (deterministic) | **COMPLETE** | 1381 unit tests passing (3 `xfail` by design, Task 13-gated); `ruff`/`terraform fmt`/`git diff --check` clean. No real network/AWS/GitHub call involved. |
+| 10 | B (real tool, no credentials) | **COMPLETE** | Real `terraform fmt/init/validate/plan/show` against `bootstrap/aws-oidc/`, credential-free (fake `AWS_ACCESS_KEY_ID=test` + full skip-flags) — proves the module is syntactically/semantically valid Terraform, not that it authenticates against a real account. |
+| 11 | C, part 1 (real GitHub OIDC) | **COMPLETE — real evidence** | Real workflow run (`36287435611`), real throwaway PR (#7, closed), real observed `aud`/`sub` — recorded in §5 above and in `docs/aws-plan-boundary.md`. This is genuine empirical evidence, not fabricated. |
+| 12 | C, part 2 (real AWS apply) | **DEFERRED — authorized AWS sandbox required** | Blocked: the only AWS credentials available on this machine resolve to ClubHub corporate account `891377250201` (profiles `no-prod`, `iac-agent-lab`), explicitly excluded from this project's authority boundary by human decision (2026-09-26). No `terraform apply` has been run anywhere for this module. Per design invariant 1, this step is never performed by the agent regardless — it always requires a human, but that human also needs a personal/lab account, which does not yet exist. |
+| 13 | C, part 3 (`aws-plan` job in `ci.yml`) | **DEFERRED** | Requires the real `IaCPlanRole` ARN from Task 12, which does not exist yet. Task 6's structural contract test remains intentionally `xfail(strict=True)` — un-`xfail`-ing it without Task 13 actually landing would be exactly the fabrication this closure must avoid. |
+| 14 | D (empirical IAM discovery loop) | **DEFERRED** | Requires Task 13. The current permissions policy (`sts:GetCallerIdentity` only) is the *starting hypothesis* from §0.2/§8, not an empirically-confirmed final policy — it must not be described as "frozen" or "validated against real AWS" until this loop actually runs. |
+| 15 | D closing (freeze policy + negative-path test) | **DEFERRED** | The design's own `iam:SimulatePrincipalPolicy` negative-path check (§14) is itself a real AWS API call against a real, applied role — it cannot be executed, faked, or pre-written as passing without Task 12–14 first being real. |
+| 16 | E (video acceptance evidence) | **DEFERRED** | Depends on the full real positive-path story (Tasks 12–15), none of which exists yet. |
+
+**Security invariants proven so far (structurally, Tasks 1–9, and confirmed unweakened by this closure pass):**
+- `bootstrap/aws-oidc` is never referenced as a trusted module by `TerraformRunner`/`build_iac_workflow` (`tests/unit/bootstrap/test_no_self_management.py`).
+- The generated-artifact renderer (`src/iac_agent/providers/aws/terraform_render.py`) and `generated/` output are untouched by Batch 25.
+- `ci/aws_plan/provider_override.tf.template` is CI-owned, referenced by no `src/` code, and explicitly enables (not skips) real credential validation — proven by an offline merge-simulation test (Task 5), never a live plan.
+- `TerraformRunner` has no `apply`/`destroy` method (unchanged since Batch 20-something; re-verified, not re-implemented, this batch).
+- The bootstrap trust policy (`bootstrap/aws-oidc/main.tf`) sources `sub` only from `var.github_oidc_subject`, one `StringEquals` condition, no wildcard, no literal repo string ever hardcoded (`test_trust_policy_subject_is_a_variable_never_a_literal_repo_string`).
+- No static AWS credentials, no remote Terraform backend, anywhere in this repository (Task 9's sweep, re-run clean this closure pass).
+
+**Real-AWS evidence still missing (and not claimed to exist):**
+- No real `terraform plan`/`apply` has ever succeeded against a real, non-fake AWS account for `bootstrap/aws-oidc`.
+- No IAM OIDC provider or `IaCPlanRole` has been created in any AWS account.
+- No real GitHub Actions run has ever assumed `IaCPlanRole` via STS.
+- No empirical `AccessDenied`-driven permission has ever been added beyond the starting `sts:GetCallerIdentity` hypothesis.
+- No `iam:SimulatePrincipalPolicy` negative-path proof exists.
+
+**Conclusion:**
+
+**BATCH 25 IMPLEMENTATION COMPLETE — REAL-AWS OIDC/PLAN ACCEPTANCE DEFERRED PENDING AUTHORIZED SANDBOX**

@@ -70,8 +70,9 @@ never deployed. See `docs/application.md`, `docs/hitl.md`,
 approval gate, the GitHub adapter, the S3 resource, the DynamoDB
 resource, the Lambda resource, the serverless-worker composition, the
 API-Gateway-to-Lambda composition, the project roadmap, the CI quality
-gates, the optional real LLM intent interpreter, and the (design-only,
-human-gated) AWS OIDC plan boundary respectively.
+gates, the optional real LLM intent interpreter, and the (implemented
+and empirically OIDC-verified; real-AWS bootstrap/plan application
+still human-gated and deferred) AWS OIDC plan boundary respectively.
 
 **Safety:** `terraform apply` is not part of this project's design and
 does not exist anywhere in this codebase. No AWS resource is ever
