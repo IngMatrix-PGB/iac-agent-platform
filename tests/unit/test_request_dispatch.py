@@ -15,6 +15,8 @@ from pathlib import Path
 
 from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec, HttpMethod, RouteSpec
 from iac_agent.compositions.api_lambda.renderer import ApiLambdaModuleSources
+from iac_agent.compositions.api_lambda_dynamodb.contract import ApiLambdaDynamoDbSpec
+from iac_agent.compositions.api_lambda_dynamodb.renderer import ApiLambdaDynamoDbModuleSources
 from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
 from iac_agent.compositions.serverless_worker.renderer import ServerlessWorkerModuleSources
 from iac_agent.domain.resource import ResourceType
@@ -50,6 +52,15 @@ class _FakeApiLambdaRenderer:
     def render(self, spec, *, module_sources):
         self.calls.append((spec, module_sources))
         return "api-lambda-rendered"
+
+
+class _FakeApiLambdaDynamoDbRenderer:
+    def __init__(self):
+        self.calls: list[tuple] = []
+
+    def render(self, spec, *, module_sources):
+        self.calls.append((spec, module_sources))
+        return "api-lambda-dynamodb-rendered"
 
 
 _TRUSTED_MODULE_DIRS = {
@@ -137,6 +148,45 @@ def test_api_lambda_spec_dispatches_to_the_api_lambda_renderer():
     assert module_sources == ApiLambdaModuleSources(
         api="../../terraform/modules/api_gateway",
         function="../../terraform/modules/lambda",
+    )
+
+
+def test_api_lambda_dynamodb_spec_dispatches_to_its_own_renderer():
+    fake_aws = _FakeAWSResourceRenderer()
+    fake_serverless_worker = _FakeServerlessWorkerRenderer()
+    fake_api_lambda = _FakeApiLambdaRenderer()
+    fake_api_lambda_dynamodb = _FakeApiLambdaDynamoDbRenderer()
+    renderer = IacRenderer(
+        aws_renderer=fake_aws,
+        serverless_worker_renderer=fake_serverless_worker,
+        api_lambda_renderer=fake_api_lambda,
+        api_lambda_dynamodb_renderer=fake_api_lambda_dynamodb,
+    )
+
+    spec = ApiLambdaDynamoDbSpec(
+        name="orders-api-worker",
+        api=ApiGatewayResourceSpec(name="orders-api"),
+        function=LambdaResourceSpec(name="orders-handler", handler="app.handler"),
+        route=RouteSpec(method=HttpMethod.POST, path="/orders"),
+        table=DynamoDBResourceSpec(
+            name="orders-table", partition_key=DynamoDBKeySpec(name="id", type="S")
+        ),
+    )
+    workspace = Path("/repo/artifacts/req-4")
+
+    result = renderer.render(spec, trusted_module_dirs=_TRUSTED_MODULE_DIRS, workspace=workspace)
+
+    assert result == "api-lambda-dynamodb-rendered"
+    assert fake_aws.calls == []
+    assert fake_serverless_worker.calls == []
+    assert fake_api_lambda.calls == []
+    assert len(fake_api_lambda_dynamodb.calls) == 1
+    called_spec, module_sources = fake_api_lambda_dynamodb.calls[0]
+    assert called_spec is spec
+    assert module_sources == ApiLambdaDynamoDbModuleSources(
+        api="../../terraform/modules/api_gateway",
+        function="../../terraform/modules/lambda",
+        table="../../terraform/modules/dynamodb",
     )
 
 
