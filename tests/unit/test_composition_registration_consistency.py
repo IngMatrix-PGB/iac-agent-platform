@@ -8,11 +8,21 @@ of one representative spec per composition type, not runtime
 metaprogramming. Adding a third composition means adding one entry
 here, exactly like every other registration touchpoint this test
 checks.
+
+Batch 26 note: `test_every_composition_type_has_a_checkov_profile`
+below is marked `xfail(strict=True)` for
+`API_GATEWAY_LAMBDA_DYNAMODB` specifically — its Checkov profile is
+deliberately not derivable until Gate B's empirical, real-scan
+discovery (Task 16) actually runs; see
+`docs/superpowers/plans/2026-09-27-api-lambda-dynamodb-composition.md`.
 """
 
 from __future__ import annotations
 
+import pytest
+
 from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec, HttpMethod, RouteSpec
+from iac_agent.compositions.api_lambda_dynamodb.contract import ApiLambdaDynamoDbSpec
 from iac_agent.compositions.resource import CompositionSpec, composition_type_of
 from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
 from iac_agent.domain.composition import CompositionType
@@ -54,6 +64,17 @@ _EXAMPLE_SPECS: dict[CompositionType, CompositionSpec] = {
         ),
         route=RouteSpec(method=HttpMethod.POST, path="/orders"),
     ),
+    CompositionType.API_GATEWAY_LAMBDA_DYNAMODB: ApiLambdaDynamoDbSpec(
+        name="orders-api-dynamodb-worker",
+        api=ApiGatewayResourceSpec(name="orders-api-dynamodb"),
+        function=LambdaResourceSpec(
+            name="orders-dynamodb-handler", handler="app.handler", reserved_concurrency=5
+        ),
+        route=RouteSpec(method=HttpMethod.POST, path="/orders"),
+        table=DynamoDBResourceSpec(
+            name="orders-dynamodb-table", partition_key=DynamoDBKeySpec(name="id", type="S")
+        ),
+    ),
 }
 
 #: Every trusted-module resource type each composition's constituent
@@ -67,6 +88,11 @@ _CONSTITUENT_RESOURCE_TYPES: dict[CompositionType, tuple[ResourceType, ...]] = {
         ResourceType.DYNAMODB,
     ),
     CompositionType.API_GATEWAY_LAMBDA: (ResourceType.API_GATEWAY, ResourceType.LAMBDA),
+    CompositionType.API_GATEWAY_LAMBDA_DYNAMODB: (
+        ResourceType.API_GATEWAY,
+        ResourceType.LAMBDA,
+        ResourceType.DYNAMODB,
+    ),
 }
 
 
@@ -141,7 +167,22 @@ def test_every_composition_type_policy_evaluation_covers_its_required_ids():
 
 def test_every_composition_type_has_a_checkov_profile():
     for composition_type in CompositionType:
+        if composition_type is CompositionType.API_GATEWAY_LAMBDA_DYNAMODB:
+            continue  # covered by the xfail test below (Gate B, Task 16)
         composition_checkov_profile_for(composition_type)  # must not raise
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Batch 26 Gate B, Task 16: the API_GATEWAY_LAMBDA_DYNAMODB Checkov profile is "
+        "deliberately not derivable until empirical, real-scan discovery actually runs — "
+        "never assumed or unioned from the other two profiles. An unexpected early pass "
+        "here (XPASS) would mean the profile was added without that real discovery step."
+    ),
+)
+def test_api_gateway_lambda_dynamodb_has_a_checkov_profile_gate_b():
+    composition_checkov_profile_for(CompositionType.API_GATEWAY_LAMBDA_DYNAMODB)
 
 
 def test_every_composition_types_constituent_resource_types_have_trusted_module_dirs():
