@@ -35,12 +35,19 @@ from iac_agent.app.config import (
     ApplicationConfig,
     IntentInterpreterConfig,
     IntentInterpreterProvider,
+    ObservabilityConfigurationError,
+    ObservabilityMode,
+    ObservabilitySettings,
+    load_observability_settings_from_env,
 )
 from iac_agent.domain.source_control import GitCommitIdentity
 from iac_agent.execution.terraform_runner import TerraformRunner
 from iac_agent.git.github import GitHubRepository, GitHubSourceControl, HttpTransport
 from iac_agent.graph.workflow import build_sqs_workflow
 from iac_agent.intent.port import IntentInterpreterPort
+from iac_agent.observability.failopen import FailOpenObservability
+from iac_agent.observability.noop import NoOpObservability
+from iac_agent.observability.port import ObservabilityPort
 from iac_agent.persistence.checkpoints import open_sqlite_checkpointer
 from iac_agent.providers.aws.sqs.renderer import TerraformCompositionRenderer
 from iac_agent.security.checkov import CheckovAdapter
@@ -108,6 +115,23 @@ def open_application(
         yield Application(config=config, graph=graph)
 
 
+def build_observability(settings: ObservabilitySettings) -> ObservabilityPort:
+    """Select the observability sink.
+
+    Disabled settings return a fail-open no-op. A recognized backend
+    that this build cannot construct is a configuration error, not a
+    silent no-op. Runtime failures of a constructed sink stay inside
+    FailOpenObservability and are not this function's concern.
+    """
+    if settings.mode is ObservabilityMode.OFF:
+        return FailOpenObservability(NoOpObservability())
+    raise ObservabilityConfigurationError(
+        "IAC_AGENT_OBSERVABILITY="
+        f"{settings.mode.value} requests a backend this build does not provide. "
+        "Supported setting: off."
+    )
+
+
 @dataclass(frozen=True)
 class IntentApplication:
     """Composition holder — lifetime only, no business decisions.
@@ -144,11 +168,13 @@ def open_intent_application(
     with open_application(
         config, github_token=github_token, github_transport=github_transport
     ) as application:
-        iac = IacApplication.from_application(application)
+        observability = build_observability(load_observability_settings_from_env())
+        iac = IacApplication(application.graph, observability=observability)
         service = IntentResolutionService(
             interpreter=interpreter,
             resolver=resolver if resolver is not None else _ArchitectureResolver(),
             application=iac,
+            observability=observability,
         )
         yield IntentApplication(config=application.config, intent_service=service, application=iac)
 

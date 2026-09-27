@@ -939,22 +939,17 @@ class ObservabilitySettings:
 
 `load_observability_settings_from_env` reads `IAC_AGENT_OBSERVABILITY`. Unset, `""`, `off`, and `noop` return `OFF`. `langfuse` returns `LANGFUSE`. Any other value raises `MissingConfigurationError`. This object holds no secrets.
 
-Gate A `build_observability(settings) -> ObservabilityPort` always returns `FailOpenObservability(NoOpObservability())`, including when `mode` is `LANGFUSE`. Gate B replaces this function. The Gate A test locks the current behavior so a flag cannot enable a vendor before the adapter exists:
+Gate A `build_observability(settings)` returns `FailOpenObservability(NoOpObservability())` only for `ObservabilityMode.OFF`. `ObservabilityMode.LANGFUSE` raises `ObservabilityConfigurationError`. It must not be reported as an active or silent no-op. Gate B replaces the `LANGFUSE` arm with the adapter. Unknown values fail in `load_observability_settings_from_env` via `MissingConfigurationError`.
 
 ```python
-def test_default_env_is_off(monkeypatch):
-    monkeypatch.delenv("IAC_AGENT_OBSERVABILITY", raising=False)
-    assert load_observability_settings_from_env({}).mode is ObservabilityMode.OFF
-
-
-def test_langfuse_mode_is_still_noop_before_the_adapter_exists():
-    settings = ObservabilitySettings(mode=ObservabilityMode.LANGFUSE)
-    port = build_observability(settings)
-    assert isinstance(port, FailOpenObservability)
-    assert isinstance(port._inner, NoOpObservability)
+def test_langfuse_is_recognized_and_rejected_until_the_adapter_exists():
+    settings = load_observability_settings_from_env({"IAC_AGENT_OBSERVABILITY": "langfuse"})
+    assert settings.mode is ObservabilityMode.LANGFUSE
+    with pytest.raises(ObservabilityConfigurationError, match="langfuse"):
+        build_observability(settings)
 ```
 
-If `_inner` should stay private, assert with a recording subclass or expose a test-only way. Prefer a small public property `inner` used by tests, or compare behavior: `port.record_generation` does not raise and a wrapped NoOp records nothing. Do not assert a private name if a behavior assertion is enough. Behavior assertion: call `record_generation` and `flush`; nothing is raised; no log at WARNING.
+Disabled settings build a port whose `record_generation` and `flush` do not log a warning.
 
 `open_intent_application` builds one port with `build_observability(load_observability_settings_from_env())` and passes that same object to both `IacApplication(application.graph, observability=port)` and `IntentResolutionService(..., observability=port)`.
 
@@ -1091,7 +1086,7 @@ def _default_langfuse_factory(env: Mapping[str, str]):
 
 Unit tests always pass `adapter_factory` and never call `_default_langfuse_factory`. Missing keys return NoOp without calling the factory. A factory that raises returns NoOp.
 
-Update `test_langfuse_mode_is_still_noop_before_the_adapter_exists`: with mode `LANGFUSE` and both keys set, a factory that returns a sentinel is used. Assert the sentinel is what `build_observability` wraps. With the keys absent, the factory is not called.
+Replace the Gate A rejection of `ObservabilityMode.LANGFUSE` with the factory seam. With mode `LANGFUSE` and both keys set, a factory that returns a sentinel is used. Assert the sentinel is what `build_observability` wraps. With the keys absent, the factory is not called and the result is NoOp. A missing key is not the same as `IAC_AGENT_OBSERVABILITY=langfuse` while the adapter is unimplemented: Gate A rejects the latter; Gate B treats missing keys as disabled.
 
 `tests/unit/observability/test_import_isolation.py` parses AST:
 

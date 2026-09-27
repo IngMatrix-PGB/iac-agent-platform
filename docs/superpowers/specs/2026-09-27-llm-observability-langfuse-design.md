@@ -420,10 +420,7 @@ workflow status. Cost per request is not computable from current data.
 must pass with no Langfuse env vars and no Langfuse package imported
 on that path.
 
-Default is NoOp. Missing `LANGFUSE_PUBLIC_KEY` /
-`LANGFUSE_SECRET_KEY` / `LANGFUSE_BASE_URL` means NoOp, not an error.
-The keys, when a human later opts in, are `SecretStr` loaded next to
-`OPENAI_API_KEY`, not fields of `ApplicationConfig`.
+Default is NoOp when `IAC_AGENT_OBSERVABILITY` is unset, empty, `off`, or `noop`. `langfuse` is a recognized backend name and, until Gate B provides the adapter, `build_observability` raises `ObservabilityConfigurationError` instead of pretending that backend is active. Any other value fails at load. This configuration failure is not a workflow telemetry failure: fail-open still applies only after a sink has been constructed. Langfuse keys are not read in Gate A. When Gate B adds them, they stay `SecretStr` and off `ApplicationConfig`.
 
 The Langfuse SDK belongs in an optional extra, the same way `openai`
 does. The base install does not depend on it.
