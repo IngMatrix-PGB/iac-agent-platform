@@ -12,6 +12,7 @@ from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSp
 from iac_agent.graph.state import WorkflowState
 from iac_agent.providers.aws.api_gateway.contract import ApiGatewayResourceSpec
 from iac_agent.providers.aws.dynamodb.contract import DynamoDBResourceSpec
+from iac_agent.providers.aws.ecr.contract import EcrResourceSpec
 from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec
 from iac_agent.providers.aws.s3.contract import S3ResourceSpec
 from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
@@ -34,7 +35,7 @@ def test_workflow_state_declares_request_id_and_resource_spec():
     can flow through the same field. Batch 20 added `ApiGatewayResourceSpec`
     (a new AWS resource type) and `ApiLambdaSpec` (a second composition).
     Batch 26 added `ApiLambdaDynamoDbSpec` (a third composition, no new
-    AWS resource type)."""
+    AWS resource type). Batch 27 added `EcrResourceSpec`."""
     resolved = typing.get_type_hints(WorkflowState)
     assert resolved["request_id"] is str
     assert resolved["resource_spec"] is IacRequestSpec
@@ -44,6 +45,7 @@ def test_workflow_state_declares_request_id_and_resource_spec():
         | DynamoDBResourceSpec
         | LambdaResourceSpec
         | ApiGatewayResourceSpec
+        | EcrResourceSpec
         | ServerlessWorkerSpec
         | ApiLambdaSpec
         | ApiLambdaDynamoDbSpec
