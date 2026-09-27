@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from iac_agent.api.project import project_submission
+from iac_agent.api.project import project_submission, project_view
 from iac_agent.cli.ids import generate_request_id
 from iac_agent.domain.workflow import validate_request_id
 from iac_agent.intent.port import (
@@ -83,6 +83,17 @@ def register_routes(app: FastAPI) -> None:
             status_code=201,
             headers={"Location": f"/api/v1/requests/{request_id}"},
         )
+
+    @app.get("/api/v1/requests/{request_id}")
+    def get_request(request_id: str, request: Request):
+        try:
+            validate_request_id(request_id)
+        except ValueError:
+            return _error("invalid_request_id", "Invalid request id.", 400)
+        view = request.app.state.holder.application.read(request_id)
+        if view is None:
+            return _error("request_not_found", "Request not found.", 404)
+        return project_view(view)
 
 
 async def _read_json_object(request: Request) -> tuple[dict | None, JSONResponse | None]:
