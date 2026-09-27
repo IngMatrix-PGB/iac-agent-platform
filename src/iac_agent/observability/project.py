@@ -6,9 +6,8 @@ The input objects are not returned and are not forwarded.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from iac_agent.app.service import WorkflowView
 from iac_agent.intent.models import ArchitectureIntent
 from iac_agent.intent.resolver import (
     ClarificationRequired,
@@ -22,6 +21,9 @@ from iac_agent.observability.models import (
     ResolutionTelemetry,
     WorkflowTelemetry,
 )
+
+if TYPE_CHECKING:
+    from iac_agent.app.service import WorkflowView
 
 _WORKFLOW_KINDS = frozenset({"submit", "resume", "terminal"})
 
