@@ -1,14 +1,30 @@
-"""UTC request-id generation with an injectable clock (design spec
-§6.2). Application APIs still require an explicit `request_id` —
-generation is CLI-owned only."""
+"""UTC request-id generation with an injectable clock and entropy.
+
+Application APIs still require an explicit request_id. Generation is
+CLI-owned only. Caller-supplied --request-id is not passed through
+this function.
+"""
 
 from __future__ import annotations
 
+import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 
+_SUFFIX_LENGTH = 12
+_HEX_DIGITS = frozenset("0123456789abcdef")
 
-def generate_request_id(now: datetime | None = None) -> str:
+
+def generate_request_id(
+    now: datetime | None = None,
+    *,
+    entropy: Callable[[], str] | None = None,
+) -> str:
     stamp = datetime.now(UTC) if now is None else now
     if stamp.tzinfo is None:
         raise ValueError("now must be timezone-aware")
-    return stamp.astimezone(UTC).strftime("req-%Y%m%dT%H%M%SZ")
+    source = uuid.uuid4().hex if entropy is None else entropy()
+    suffix = source[:_SUFFIX_LENGTH]
+    if len(suffix) != _SUFFIX_LENGTH or any(char not in _HEX_DIGITS for char in suffix):
+        raise ValueError("entropy must provide 12 lowercase hex digits")
+    return stamp.astimezone(UTC).strftime("req-%Y%m%dT%H%M%SZ-") + suffix
