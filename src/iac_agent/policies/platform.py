@@ -37,6 +37,7 @@ from iac_agent.domain.security import (
 from iac_agent.policies.shared import TF_NO_DESTRUCTIVE_CHANGES, evaluate_destructive_policy
 from iac_agent.providers.aws.api_gateway.contract import ApiGatewayResourceSpec
 from iac_agent.providers.aws.dynamodb.contract import DynamoDBResourceSpec
+from iac_agent.providers.aws.ecr.contract import EcrImageTagMutability, EcrResourceSpec
 from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec, LambdaTracingMode
 from iac_agent.providers.aws.resource import AWSResourceSpec
 from iac_agent.providers.aws.s3.contract import S3ResourceSpec
@@ -53,6 +54,9 @@ DDB_DELETION_PROTECTION_RECOMMENDED = "DDB_DELETION_PROTECTION_RECOMMENDED"
 LAMBDA_TRACING_RECOMMENDED = "LAMBDA_TRACING_RECOMMENDED"
 LAMBDA_RESERVED_CONCURRENCY_RECOMMENDED = "LAMBDA_RESERVED_CONCURRENCY_RECOMMENDED"
 LAMBDA_LOG_RETENTION_REQUIRED = "LAMBDA_LOG_RETENTION_REQUIRED"
+ECR_ENCRYPTION_REQUIRED = "ECR_ENCRYPTION_REQUIRED"
+ECR_SCAN_ON_PUSH_RECOMMENDED = "ECR_SCAN_ON_PUSH_RECOMMENDED"
+ECR_IMAGE_TAG_MUTABILITY_RECOMMENDED = "ECR_IMAGE_TAG_MUTABILITY_RECOMMENDED"
 #: Re-exported from `iac_agent.policies.shared` so every existing call
 #: site importing `TF_NO_DESTRUCTIVE_CHANGES` from this module keeps
 #: working unchanged — the constant object is identical either way.
@@ -93,6 +97,12 @@ REQUIRED_PLATFORM_POLICY_IDS_BY_RESOURCE_TYPE: dict[ResourceType, tuple[str, ...
     # "do not create meaningless always-PASS policies merely to
     # inflate policy count" discipline.
     ResourceType.API_GATEWAY: (TF_NO_DESTRUCTIVE_CHANGES,),
+    ResourceType.ECR: (
+        ECR_ENCRYPTION_REQUIRED,
+        ECR_SCAN_ON_PUSH_RECOMMENDED,
+        ECR_IMAGE_TAG_MUTABILITY_RECOMMENDED,
+        TF_NO_DESTRUCTIVE_CHANGES,
+    ),
 }
 
 
@@ -133,6 +143,12 @@ def evaluate_platform_policies(
             )
         case ApiGatewayResourceSpec():
             resource_findings = ()
+        case EcrResourceSpec():
+            resource_findings = (
+                _evaluate_ecr_encryption_policy(spec),
+                _evaluate_ecr_scan_on_push_policy(spec),
+                _evaluate_ecr_image_tag_mutability_policy(spec),
+            )
         case _:
             raise ValueError(f"unsupported resource spec type: {type(spec).__name__}")
 
@@ -340,6 +356,76 @@ def evaluate_dynamodb_deletion_protection_policy(spec: DynamoDBResourceSpec) -> 
         status=PolicyStatus.WARN,
         resource=spec.name,
         message="DynamoDB deletion protection is disabled; review accidental-deletion risk.",
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+# ---------------------------------------------------------------------------
+# ECR policies
+# ---------------------------------------------------------------------------
+
+
+def _evaluate_ecr_encryption_policy(spec: EcrResourceSpec) -> SecurityFinding:
+    """ECR_ENCRYPTION_REQUIRED — defense in depth.
+
+    A constructible spec always has encryption enabled. This BLOCK
+    branch exists for an internally invalid spec that bypassed validation.
+    """
+    if spec.encryption.enabled:
+        return SecurityFinding(
+            policy_id=ECR_ENCRYPTION_REQUIRED,
+            severity=SecuritySeverity.HIGH,
+            status=PolicyStatus.PASS,
+            resource=spec.name,
+            message="ECR encryption is enabled.",
+            source=FindingSource.PLATFORM_POLICY,
+        )
+    return SecurityFinding(
+        policy_id=ECR_ENCRYPTION_REQUIRED,
+        severity=SecuritySeverity.HIGH,
+        status=PolicyStatus.BLOCK,
+        resource=spec.name,
+        message="ECR encryption is disabled; this request cannot proceed.",
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+def _evaluate_ecr_scan_on_push_policy(spec: EcrResourceSpec) -> SecurityFinding:
+    if spec.scan_on_push:
+        return SecurityFinding(
+            policy_id=ECR_SCAN_ON_PUSH_RECOMMENDED,
+            severity=SecuritySeverity.MEDIUM,
+            status=PolicyStatus.PASS,
+            resource=spec.name,
+            message="ECR scan on push is enabled.",
+            source=FindingSource.PLATFORM_POLICY,
+        )
+    return SecurityFinding(
+        policy_id=ECR_SCAN_ON_PUSH_RECOMMENDED,
+        severity=SecuritySeverity.MEDIUM,
+        status=PolicyStatus.WARN,
+        resource=spec.name,
+        message="ECR scan on push is disabled.",
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+def _evaluate_ecr_image_tag_mutability_policy(spec: EcrResourceSpec) -> SecurityFinding:
+    if spec.image_tag_mutability is EcrImageTagMutability.IMMUTABLE:
+        return SecurityFinding(
+            policy_id=ECR_IMAGE_TAG_MUTABILITY_RECOMMENDED,
+            severity=SecuritySeverity.MEDIUM,
+            status=PolicyStatus.PASS,
+            resource=spec.name,
+            message="ECR image tags are immutable.",
+            source=FindingSource.PLATFORM_POLICY,
+        )
+    return SecurityFinding(
+        policy_id=ECR_IMAGE_TAG_MUTABILITY_RECOMMENDED,
+        severity=SecuritySeverity.MEDIUM,
+        status=PolicyStatus.WARN,
+        resource=spec.name,
+        message="ECR image tags are mutable.",
         source=FindingSource.PLATFORM_POLICY,
     )
 
