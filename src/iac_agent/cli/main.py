@@ -78,18 +78,22 @@ def main(
         stderr.write(str(exc) + "\n")
         return _EXIT_GENERAL_ERROR
 
-    with open_intent_application(
-        config, github_token=github_token, interpreter=interpreter
-    ) as opened:
-        return _dispatch(
-            args,
-            holder=opened,
-            stdin=stdin,
-            stdout=stdout,
-            stderr=stderr,
-            isatty=is_tty,
-            clock=clock,
-        )
+    try:
+        with open_intent_application(
+            config, github_token=github_token, interpreter=interpreter
+        ) as opened:
+            return _dispatch(
+                args,
+                holder=opened,
+                stdin=stdin,
+                stdout=stdout,
+                stderr=stderr,
+                isatty=is_tty,
+                clock=clock,
+            )
+    except MissingConfigurationError as exc:
+        stderr.write(str(exc) + "\n")
+        return _EXIT_GENERAL_ERROR
 
 
 def _dispatch(
