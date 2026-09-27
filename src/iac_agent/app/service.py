@@ -125,6 +125,18 @@ class IacApplication:
         result = self._graph.invoke(Command(resume=decision.value), config)
         return self._emit(request_id, result, kind="resume")
 
+    def read(self, request_id: str) -> WorkflowView | None:
+        """Return the checkpointed view, or None when no thread exists.
+
+        LangGraph represents an unknown thread as a snapshot with
+        `created_at is None` and empty values. This method does not turn
+        that snapshot into `pending`. `get_state` remains the CLI read.
+        """
+        snapshot = self._graph.get_state(workflow_config(request_id))
+        if snapshot.created_at is None:
+            return None
+        return _to_view(request_id, snapshot.values)
+
     def get_state(self, request_id: str) -> WorkflowView:
         """Read the current durable state. Never executes a node, never
         resumes an interrupt, never mutates anything — `get_state` is a
