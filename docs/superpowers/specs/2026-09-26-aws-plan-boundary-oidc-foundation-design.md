@@ -1,11 +1,11 @@
 # Design Spec: AWS Plan Boundary / GitHub OIDC Foundation (Batch 25)
 
 Status: **APPROVED WITH HUMAN DECISIONS RECORDED BELOW — design only,
-implementation plan explicitly gated (see §20).**
+implementation plan gate now OPEN (see §20).**
 Discovery base: `origin/main` `460d717` (PR #4 Batch 23 + PR #5 Gate D demo
-artifact, both merged). **`feat/batch24-demo-cli` — the actual CLI/
-composition implementation (Tasks 1–12) — is NOT yet merged to `main`
-(re-verified 2026-09-26: still not an ancestor of `origin/main`).**
+artifact, both merged). **`feat/batch24-demo-cli` merged to `main` via
+PR #6 on 2026-09-26 (merge commit `0e92809`) — the last closure-gate
+condition is now satisfied.**
 
 ## Human decisions (2026-09-26, recorded verbatim in substance)
 
@@ -605,13 +605,12 @@ agent-managed bootstrap role, static AWS credentials in GitHub.
    this is expected and correct; it is *why* §8 is a loop, not a
    one-shot grant (see "Human decisions," item 2, now locked as
    process).
-3. **Batch 24 (`feat/batch24-demo-cli`) is unmerged — this is now a
-   hard gate, not a soft risk.** Re-verified 2026-09-26:
-   `feat/batch24-demo-cli` is still not an ancestor of `origin/main`
-   (`git merge-base --is-ancestor` → false; `origin/main` HEAD is
-   still `460d717`, containing only the Batch 23 merge and the Gate D
-   demo artifact PR #5). **Batch 25 implementation must not start
-   until this merges** (see "Human decisions," item 3, and §20).
+3. ~~Batch 24 (`feat/batch24-demo-cli`) is unmerged~~ — **resolved
+   2026-09-26: merged to `main` via PR #6, merge commit `0e92809`**
+   (re-verified: `git cat-file -e origin/main:src/iac_agent/cli/main.py`
+   succeeds). The implementation branch for Batch 25 must be cut from
+   `0e92809` or later, not from the earlier `460d717` this design was
+   drafted against.
 4. GitHub's exact AWS OIDC provider thumbprint/setup guidance should be
    re-verified at actual bootstrap-apply time (AWS/GitHub have changed
    this mechanism before; treat this document's own drafting date,
@@ -624,8 +623,9 @@ agent-managed bootstrap role, static AWS credentials in GitHub.
 
 ## 19. Recommended implementation sequence (not an implementation plan)
 
-0. **Gate: merge `feat/batch24-demo-cli` to `main` first** (§20). No
-   step below starts before this.
+0. ~~Gate: merge `feat/batch24-demo-cli` to `main` first~~ — **done**
+   (PR #6, `0e92809`). Cut the Batch 25 implementation branch from
+   this commit or later.
 1. ~~Human decision on §0.1~~ — done; Option 1 is locked.
 2. §5's temporary OIDC-debugger workflow → record real claims → delete
    it.
@@ -648,11 +648,10 @@ agent-managed bootstrap role, static AWS credentials in GitHub.
 |---|---|
 | §0.1 (real AWS provider boundary approach) decided | ✅ Option 1 approved |
 | §7/§8 (IAM permission baseline approach) decided | ✅ empirical-minimum locked, no pre-grant |
-| `feat/batch24-demo-cli` merged to `main` | ❌ **not merged** — re-verified this session |
+| `feat/batch24-demo-cli` merged to `main` | ✅ merged 2026-09-26 via PR #6 (`0e92809`) |
 
-**Batch 25 status: design APPROVED; implementation plan BLOCKED** on
-the third condition. Do not run `/writing-plans` (or its manual
-equivalent) for Batch 25 until `feat/batch24-demo-cli` is merged and
-this table's third row flips to ✅. When it does, the implementation
-branch is cut from the `main` commit containing that merge, not from
-`origin/main`'s current `460d717`.
+**Batch 25 status: design APPROVED; implementation plan gate OPEN.**
+All three closure conditions are satisfied. A task-by-task
+implementation plan may now be written, cut from `main` at `0e92809`
+or later — this still requires a separate, explicit human go-ahead to
+begin (this document being closed is not itself that go-ahead).
