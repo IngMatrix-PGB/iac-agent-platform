@@ -144,8 +144,8 @@ def test_application_config_has_no_terraform_module_path_field():
     never read from the environment (always computed from a fixed
     internal constant identical to `build_sqs_workflow`'s own default),
     so `open_application` passing it through changed nothing at
-    runtime. Trusted-module-directory resolution lives entirely in
-    `iac_agent.graph.workflow._DEFAULT_TRUSTED_MODULE_DIRS` now."""
+    runtime. Trusted-module-directory resolution lives in
+    `iac_agent.graph.modules.default_trusted_module_dirs` now."""
     field_names = {f for f in ApplicationConfig.__dataclass_fields__}
     assert "terraform_module_path" not in field_names
 

@@ -156,6 +156,7 @@ from iac_agent.domain.workflow import (
 from iac_agent.execution.plan_analyzer import PlanAnalysisError, analyze_plan
 from iac_agent.execution.terraform_runner import TerraformError, TerraformRunner
 from iac_agent.git.port import SourceControlError, SourceControlPort
+from iac_agent.graph.modules import default_trusted_module_dirs
 from iac_agent.graph.state import WorkflowState
 from iac_agent.policies.composition import (
     REQUIRED_COMPOSITION_POLICY_IDS_BY_COMPOSITION_TYPE,
@@ -170,21 +171,6 @@ from iac_agent.security.checkov import CheckovAdapter, CheckovError
 from iac_agent.security.checkov_profiles import checkov_profile_for
 from iac_agent.security.composition_checkov_profiles import composition_checkov_profile_for
 from iac_agent.security.gate import SecurityGateError, evaluate_security_gate
-
-#: Repository root, computed relative to this installed package
-#: (src/iac_agent/graph/workflow.py -> repo root).
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-
-#: Default trusted-module directory per resource type. Overridable at
-#: construction time; never inferred from the process working directory.
-_DEFAULT_TRUSTED_MODULE_DIRS: dict[ResourceType, Path] = {
-    ResourceType.SQS: _REPO_ROOT / "terraform" / "modules" / "sqs",
-    ResourceType.S3: _REPO_ROOT / "terraform" / "modules" / "s3",
-    ResourceType.DYNAMODB: _REPO_ROOT / "terraform" / "modules" / "dynamodb",
-    ResourceType.LAMBDA: _REPO_ROOT / "terraform" / "modules" / "lambda",
-    ResourceType.API_GATEWAY: _REPO_ROOT / "terraform" / "modules" / "api_gateway",
-    ResourceType.ECR: _REPO_ROOT / "terraform" / "modules" / "ecr",
-}
 
 #: Human-readable resource-kind label for commit/PR text. Batch 16's
 #: `resource_type_of(...).value.upper()` happened to be correct for
@@ -395,7 +381,7 @@ def build_iac_workflow(
     checkov_adapter: CheckovAdapter,
     source_control_port: SourceControlPort,
     workspace_root: Path,
-    trusted_module_dirs: Mapping[ResourceType, Path] = _DEFAULT_TRUSTED_MODULE_DIRS,
+    trusted_module_dirs: Mapping[ResourceType, Path] | None = None,
     base_branch: str = "main",
     checkpointer: BaseCheckpointSaver | None = None,
     serverless_worker_renderer: ServerlessWorkerTerraformRenderer | None = None,
@@ -419,6 +405,10 @@ def build_iac_workflow(
     `SourceControlPort` itself always receives it explicitly and never
     assumes a default on its own.
 
+    `trusted_module_dirs` defaults to the application-controlled map from
+    `default_trusted_module_dirs`. Callers never pass a root chosen by
+    the request.
+
     `serverless_worker_renderer` (Batch 19) and `api_lambda_renderer`
     (Batch 20) are both optional, each defaulting to a fresh concrete
     renderer when not supplied, exactly like every existing renderer/
@@ -429,6 +419,8 @@ def build_iac_workflow(
     an `ApiLambdaSpec` request was something any pre-Batch-19 caller
     ever submitted.
     """
+    if trusted_module_dirs is None:
+        trusted_module_dirs = default_trusted_module_dirs()
     iac_renderer = IacRenderer(
         aws_renderer=renderer,
         serverless_worker_renderer=serverless_worker_renderer,
@@ -674,7 +666,7 @@ def build_sqs_workflow(
     checkov_adapter: CheckovAdapter,
     source_control_port: SourceControlPort,
     workspace_root: Path,
-    trusted_module_dir: Path = _DEFAULT_TRUSTED_MODULE_DIRS[ResourceType.SQS],
+    trusted_module_dir: Path | None = None,
     base_branch: str = "main",
     checkpointer: BaseCheckpointSaver | None = None,
 ) -> CompiledStateGraph:
@@ -688,8 +680,10 @@ def build_sqs_workflow(
     through this same graph).
     """
     dispatch_renderer = AWSResourceRenderer(sqs_renderer=renderer)
-    trusted_module_dirs = dict(_DEFAULT_TRUSTED_MODULE_DIRS)
-    trusted_module_dirs[ResourceType.SQS] = trusted_module_dir
+    trusted_module_dirs = default_trusted_module_dirs()
+    if trusted_module_dir is not None:
+        trusted_module_dirs = dict(trusted_module_dirs)
+        trusted_module_dirs[ResourceType.SQS] = trusted_module_dir
 
     return build_iac_workflow(
         renderer=dispatch_renderer,
