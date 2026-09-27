@@ -183,6 +183,7 @@ _DEFAULT_TRUSTED_MODULE_DIRS: dict[ResourceType, Path] = {
     ResourceType.DYNAMODB: _REPO_ROOT / "terraform" / "modules" / "dynamodb",
     ResourceType.LAMBDA: _REPO_ROOT / "terraform" / "modules" / "lambda",
     ResourceType.API_GATEWAY: _REPO_ROOT / "terraform" / "modules" / "api_gateway",
+    ResourceType.ECR: _REPO_ROOT / "terraform" / "modules" / "ecr",
 }
 
 #: Human-readable resource-kind label for commit/PR text. Batch 16's
@@ -198,6 +199,7 @@ _RESOURCE_KIND_DISPLAY_NAMES: dict[ResourceType, str] = {
     ResourceType.DYNAMODB: "DynamoDB",
     ResourceType.LAMBDA: "Lambda",
     ResourceType.API_GATEWAY: "API Gateway",
+    ResourceType.ECR: "ECR",
 }
 
 #: Placeholder-only credentials for the credential-free Terraform plan

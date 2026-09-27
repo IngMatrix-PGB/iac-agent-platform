@@ -11,6 +11,7 @@ from iac_agent.providers.aws.dynamodb.contract import (
     DynamoDBKeyType,
     DynamoDBResourceSpec,
 )
+from iac_agent.providers.aws.ecr.contract import EcrResourceSpec
 from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec
 from iac_agent.providers.aws.resource import resource_type_of
 from iac_agent.providers.aws.s3.contract import S3ResourceSpec
@@ -42,6 +43,11 @@ def test_lambda_spec_classified_as_lambda():
 def test_api_gateway_spec_classified_as_api_gateway():
     spec = ApiGatewayResourceSpec(name="orders-api")
     assert resource_type_of(spec) is ResourceType.API_GATEWAY
+
+
+def test_ecr_spec_classified_as_ecr():
+    spec = EcrResourceSpec(name="orders")
+    assert resource_type_of(spec) is ResourceType.ECR
 
 
 def test_unsupported_spec_type_fails_closed():

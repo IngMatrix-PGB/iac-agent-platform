@@ -27,6 +27,7 @@ from iac_agent.providers.aws.dynamodb.contract import (
     DynamoDBKeyType,
     DynamoDBResourceSpec,
 )
+from iac_agent.providers.aws.ecr.contract import EcrResourceSpec
 from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec
 from iac_agent.providers.aws.renderer import AWSResourceRenderer
 from iac_agent.providers.aws.resource import AWSResourceSpec, resource_type_of
@@ -46,6 +47,7 @@ _EXAMPLE_SPECS: dict[ResourceType, AWSResourceSpec] = {
     ),
     ResourceType.LAMBDA: LambdaResourceSpec(name="orders-processor", handler="app.handler"),
     ResourceType.API_GATEWAY: ApiGatewayResourceSpec(name="orders-api"),
+    ResourceType.ECR: EcrResourceSpec(name="orders"),
 }
 
 

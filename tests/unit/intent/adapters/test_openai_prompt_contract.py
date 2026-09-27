@@ -34,7 +34,7 @@ def _prompt_contract() -> tuple[str, str]:
 
 def test_prompt_version_is_3():
     version, _ = _prompt_contract()
-    assert version == "3"
+    assert version == "4"
 
 
 def test_prompt_distinguishes_architecture_ambiguity_from_implementation_detail():
@@ -76,6 +76,15 @@ def test_prompt_states_object_storage_is_not_persistence():
     assert "persistence" in lowered
     assert "not natural-language synonyms" in lowered
     assert "do not additionally emit persistence" in lowered
+
+
+def test_prompt_distinguishes_container_registry_from_object_storage():
+    _, instructions = _prompt_contract()
+    lowered = instructions.lower()
+    assert "container_registry" in lowered
+    assert "object_storage" in lowered
+    assert "do not emit object_storage for a container registry" in lowered
+    assert "do not emit container_registry for object or blob storage" in lowered
 
 
 def test_prompt_states_http_api_does_not_imply_synchronous():

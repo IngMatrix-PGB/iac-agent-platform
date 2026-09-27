@@ -56,6 +56,16 @@ def test_lambda_profile_has_exactly_the_five_approved_skips():
     )
 
 
+def test_ecr_profile_has_exactly_the_one_empirical_skip():
+    """Checkov 3.3.13 on the secure-default ECR module: passed=3,
+    failed=1, skipped=0. The only failure was CKV_AWS_136, KMS
+    encryption. AES256-only is the approved Batch 27 decision, so the
+    id is frozen and no other id is skipped."""
+    profile = checkov_profile_for(ResourceType.ECR)
+    assert isinstance(profile, CheckovScanProfile)
+    assert profile.skipped_checks == ("CKV_AWS_136",)
+
+
 def test_api_gateway_profile_has_exactly_the_one_approved_skip():
     """Batch 20: a real Checkov scan of the trusted API Gateway
     module's secure baseline reported exactly one finding (CKV_AWS_76,

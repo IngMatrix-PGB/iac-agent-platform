@@ -418,6 +418,67 @@ fresh-process durable-HITL reconstruction/resume proof.
 **Next: not automatically implemented.** Gate B requires separate
 explicit authorization.
 
+## Phase 2 — ECR (Batch 27) (Gate A and Gate B complete)
+
+**Goal:** add a standalone ECR repository without turning it into a
+composition and without changing the three existing compositions.
+See `docs/resources/ecr.md`.
+
+Intent is `WorkloadType.STORAGE` plus exactly
+`{Capability.CONTAINER_REGISTRY}`, any interaction pattern, resolving
+to `EcrResourceSpec`. `OBJECT_STORAGE` stays S3. Mixed capability sets
+stay unsupported.
+
+Theoretical inventory, unchanged: 20 production dispatch/registration
+sites, 1 prompt site, 24 test/eval rows. Actual production files are
+those 20 sites plus the prompt file. No extra dispatch file. The 24
+test/eval rows all exist. Three additional test/eval files were
+required by exact assertions the inventory did not list
+(`tests/unit/graph/test_state.py`,
+`tests/unit/intent/adapters/test_openai_adapter.py`,
+`evals/evaluators/architecture_intent_resolver.py`).
+
+What changed, by kind:
+
+- Semantic/domain: ECR contract and name rules, the trusted module,
+  the renderer, `Capability.CONTAINER_REGISTRY`, the resolver arm, and
+  the prompt sentence (`_PROMPT_VERSION` `"4"`).
+- Mechanical registration: `ResourceType.ECR`, the Checkov profile
+  entry, the module-directory entry, and the display name `"ECR"`.
+- Explicit type-dispatch: `AWSResourceSpec`, `resource_type_of`,
+  `AWSResourceRenderer`, and `evaluate_platform_policies`.
+- Presentation: fail-closed CLI labels and ECR component lines.
+- Persistence registration: three checkpoint allowlist tuples.
+- Security/policy registration: three ECR policy ids, plus the
+  empirical skip `CKV_AWS_136` only.
+- Eval/test registration: the inventory rows, including the three Gate
+  B real-tool tests.
+
+`CKV_AWS_136` ("Ensure that ECR repositories are encrypted using KMS")
+was the only zero-skip Checkov finding (3.3.13, passed=3, failed=1).
+It is an accepted AES256 trade-off, not a copied skip list.
+Credential-free `terraform plan` accepted repository name `1orders`.
+
+Missing a dispatch arm fails loudly. Missing the checkpoint allowlist
+or the component-line branch does not. Those two are covered by
+dedicated tests. Registry/catalog is deferred:
+`docs/adr/2026-09-27-registry-catalog-deferred.md`.
+
+The `AWSResourceRenderer` wiring commit landed after the resolver
+commit. That order was not rewritten. The final tree contains the
+wiring.
+
+Future pressure tests, documentation only, not Batch 27 scope:
+customer-managed KMS, CloudFront + S3 + origin access control, SNS /
+EventBridge, Secrets Manager, ECS/Fargate together with this ECR
+repository, ALB / networking, RDS / Aurora, and registry-level ECR
+scanning.
+
+Agent Observability / LLMOps, potentially using Langfuse, is a future
+platform capability. Langfuse is not Checkov, not a platform policy,
+and not AWS infrastructure monitoring. It is not implemented here, and
+this batch adds no Langfuse dependency.
+
 ## Not yet started
 
 EventBridge, SNS, a second Lambda in one composition, chaining

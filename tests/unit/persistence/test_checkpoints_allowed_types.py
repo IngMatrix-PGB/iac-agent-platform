@@ -24,6 +24,7 @@ from iac_agent.providers.aws.dynamodb.contract import (
     DynamoDBKeyType,
     DynamoDBResourceSpec,
 )
+from iac_agent.providers.aws.ecr.contract import EcrResourceSpec
 from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec
 from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
 
@@ -93,3 +94,16 @@ def test_existing_composition_types_still_round_trip_unchanged():
 
     assert type(_round_trip(worker_spec)) is ServerlessWorkerSpec
     assert type(_round_trip(api_lambda_spec)) is ApiLambdaSpec
+
+
+def test_ecr_spec_survives_serialization_round_trip_as_the_concrete_type():
+    spec = EcrResourceSpec(name="team/service", tags={"owner": "platform"})
+
+    result = _round_trip(spec)
+
+    assert type(result) is EcrResourceSpec
+    assert not isinstance(result, dict)
+    assert result.image_tag_mutability is spec.image_tag_mutability
+    assert result.scan_on_push is True
+    assert result.encryption.enabled is True
+    assert result == spec

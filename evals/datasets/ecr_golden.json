@@ -1,0 +1,119 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "basic_secure_repository",
+      "description": "A minimal valid repository. Defaults are immutable tags, scan on push, and encryption enabled.",
+      "input": {
+        "name": "orders"
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders",
+        "image_tag_mutability": "IMMUTABLE",
+        "scan_on_push": true,
+        "encryption_enabled": true,
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "namespaced_repository_name",
+      "description": "A slash-delimited repository name is valid and stays on the secure defaults.",
+      "input": {
+        "name": "team/service"
+      },
+      "expected": {
+        "valid": true,
+        "name": "team/service",
+        "image_tag_mutability": "IMMUTABLE",
+        "scan_on_push": true,
+        "encryption_enabled": true,
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "scan_on_push_disabled_warns",
+      "description": "Disabling scan on push is valid and warns via ECR_SCAN_ON_PUSH_RECOMMENDED.",
+      "input": {
+        "name": "orders",
+        "scan_on_push": false
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders",
+        "image_tag_mutability": "IMMUTABLE",
+        "scan_on_push": false,
+        "encryption_enabled": true,
+        "overall_security_status": "warn",
+        "policy_id": "ECR_SCAN_ON_PUSH_RECOMMENDED"
+      }
+    },
+    {
+      "id": "mutable_tags_warn",
+      "description": "Mutable tags are valid and warn via ECR_IMAGE_TAG_MUTABILITY_RECOMMENDED.",
+      "input": {
+        "name": "orders",
+        "image_tag_mutability": "MUTABLE"
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders",
+        "image_tag_mutability": "MUTABLE",
+        "scan_on_push": true,
+        "encryption_enabled": true,
+        "overall_security_status": "warn",
+        "policy_id": "ECR_IMAGE_TAG_MUTABILITY_RECOMMENDED"
+      }
+    },
+    {
+      "id": "uppercase_name_rejected",
+      "description": "An uppercase repository name is rejected.",
+      "input": {
+        "name": "Orders"
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "empty_name_rejected",
+      "description": "An empty repository name is rejected.",
+      "input": {
+        "name": ""
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "leading_slash_rejected",
+      "description": "A leading slash is rejected.",
+      "input": {
+        "name": "/team"
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "name_too_long_rejected",
+      "description": "A 257-character name exceeds the 256-character bound and is rejected.",
+      "input": {
+        "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_character_rejected",
+      "description": "A space is not a legal repository-name character and is rejected.",
+      "input": {
+        "name": "order events"
+      },
+      "expected": {
+        "valid": false
+      }
+    }
+  ]
+}

@@ -10,6 +10,7 @@ from iac_agent.providers.aws.dynamodb.contract import (
     DynamoDBKeyType,
     DynamoDBResourceSpec,
 )
+from iac_agent.providers.aws.ecr.contract import EcrResourceSpec
 from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec
 from iac_agent.providers.aws.renderer import AWSResourceRenderer
 from iac_agent.providers.aws.s3.contract import S3ResourceSpec
@@ -32,6 +33,7 @@ def _dispatcher(**overrides):
         "dynamodb_renderer": _RecordingRenderer(),
         "lambda_renderer": _RecordingRenderer(),
         "api_gateway_renderer": _RecordingRenderer(),
+        "ecr_renderer": _RecordingRenderer(),
     }
     defaults.update(overrides)
     return AWSResourceRenderer(**defaults), defaults
@@ -114,6 +116,29 @@ def test_api_gateway_spec_dispatches_to_api_gateway_renderer():
     assert renderers["lambda_renderer"].calls == []
 
 
+def test_ecr_spec_dispatches_to_ecr_renderer():
+    dispatcher, renderers = _dispatcher()
+
+    spec = EcrResourceSpec(name="orders")
+    result = dispatcher.render(spec, module_source="../../terraform/modules/ecr")
+
+    assert result == "rendered"
+    assert len(renderers["ecr_renderer"].calls) == 1
+    assert renderers["ecr_renderer"].calls[0]["spec"] is spec
+    assert renderers["sqs_renderer"].calls == []
+    assert renderers["s3_renderer"].calls == []
+    assert renderers["dynamodb_renderer"].calls == []
+    assert renderers["lambda_renderer"].calls == []
+    assert renderers["api_gateway_renderer"].calls == []
+
+
+def test_default_ecr_renderer_emits_an_ecr_module():
+    composition = AWSResourceRenderer().render(
+        EcrResourceSpec(name="orders"), module_source="../../terraform/modules/ecr"
+    )
+    assert 'module "ecr"' in composition.files["main.tf"]
+
+
 def test_unsupported_spec_type_fails_closed_never_defaults_to_sqs():
     dispatcher, renderers = _dispatcher()
 
@@ -125,6 +150,7 @@ def test_unsupported_spec_type_fails_closed_never_defaults_to_sqs():
     assert renderers["dynamodb_renderer"].calls == []
     assert renderers["lambda_renderer"].calls == []
     assert renderers["api_gateway_renderer"].calls == []
+    assert renderers["ecr_renderer"].calls == []
 
 
 def test_default_construction_uses_real_renderers():
