@@ -25,7 +25,7 @@ from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSp
 from iac_agent.domain.composition import CompositionType
 from iac_agent.domain.plan import PlanAction, PlanSummary, ResourceChange
 from iac_agent.domain.resource import ResourceType
-from iac_agent.graph.workflow import _DEFAULT_TRUSTED_MODULE_DIRS
+from iac_agent.graph.modules import default_trusted_module_dirs
 from iac_agent.persistence.checkpoints import _ALLOWED_WORKFLOW_TYPES
 from iac_agent.policies.composition import (
     REQUIRED_COMPOSITION_POLICY_IDS_BY_COMPOSITION_TYPE,
@@ -76,7 +76,7 @@ _EXAMPLE_SPECS: dict[CompositionType, CompositionSpec] = {
 
 #: Every trusted-module resource type each composition's constituent
 #: sub-resources need registered under `ResourceType` — used to prove
-#: `_DEFAULT_TRUSTED_MODULE_DIRS` covers what each composition actually
+#: `default_trusted_module_dirs()` covers what each composition actually
 #: needs, without inventing a second `CompositionType`-keyed mapping.
 _CONSTITUENT_RESOURCE_TYPES: dict[CompositionType, tuple[ResourceType, ...]] = {
     CompositionType.SQS_LAMBDA_DYNAMODB: (
@@ -131,13 +131,13 @@ def test_every_composition_type_has_a_request_level_renderer_dispatch_case():
     renderer = IacRenderer()
     for composition_type, spec in _EXAMPLE_SPECS.items():
         module_source_dirs = {
-            resource_type: _DEFAULT_TRUSTED_MODULE_DIRS[resource_type]
+            resource_type: default_trusted_module_dirs()[resource_type]
             for resource_type in _CONSTITUENT_RESOURCE_TYPES[composition_type]
         }
         composition = renderer.render(
             spec,
             trusted_module_dirs=module_source_dirs,
-            workspace=_DEFAULT_TRUSTED_MODULE_DIRS[ResourceType.SQS].parent.parent / "artifacts",
+            workspace=default_trusted_module_dirs()[ResourceType.SQS].parent.parent / "artifacts",
         )
         assert "main.tf" in composition.files
 
@@ -191,11 +191,11 @@ def test_api_gateway_lambda_dynamodb_checkov_profile_is_frozen_to_the_empirical_
 def test_every_composition_types_constituent_resource_types_have_trusted_module_dirs():
     """A composition needs no separate `CompositionType`-keyed trusted-
     module-directory mapping — but every `ResourceType` it is built
-    from must already be registered in
-    `_DEFAULT_TRUSTED_MODULE_DIRS`, and that directory must exist."""
+    from must already be registered through `default_trusted_module_dirs`,
+    and that directory must exist."""
     for composition_type in CompositionType:
         for resource_type in _CONSTITUENT_RESOURCE_TYPES[composition_type]:
-            module_dir = _DEFAULT_TRUSTED_MODULE_DIRS[resource_type]
+            module_dir = default_trusted_module_dirs()[resource_type]
             assert module_dir.is_dir(), f"trusted module dir does not exist: {module_dir}"
 
 

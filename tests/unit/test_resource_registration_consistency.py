@@ -15,7 +15,8 @@ from __future__ import annotations
 
 from iac_agent.domain.plan import PlanAction, PlanSummary, ResourceChange
 from iac_agent.domain.resource import ResourceType
-from iac_agent.graph.workflow import _DEFAULT_TRUSTED_MODULE_DIRS, _RESOURCE_KIND_DISPLAY_NAMES
+from iac_agent.graph.modules import default_trusted_module_dirs
+from iac_agent.graph.workflow import _RESOURCE_KIND_DISPLAY_NAMES
 from iac_agent.policies.platform import (
     REQUIRED_PLATFORM_POLICY_IDS_BY_RESOURCE_TYPE,
     TF_NO_DESTRUCTIVE_CHANGES,
@@ -119,7 +120,7 @@ def test_every_resource_type_has_a_checkov_profile():
 
 def test_every_resource_type_has_a_trusted_module_dir_that_exists_on_disk():
     for resource_type in ResourceType:
-        module_dir = _DEFAULT_TRUSTED_MODULE_DIRS[resource_type]
+        module_dir = default_trusted_module_dirs()[resource_type]
         assert module_dir.is_dir(), f"trusted module dir does not exist: {module_dir}"
 
 

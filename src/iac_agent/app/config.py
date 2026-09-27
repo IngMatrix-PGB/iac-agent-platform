@@ -94,8 +94,8 @@ class ApplicationConfig:
     passing it through to `build_sqs_workflow` in
     `iac_agent.app.composition.open_application` changed nothing at
     runtime. Trusted-module-directory resolution is fully resource/
-    composition-aware in `iac_agent.graph.workflow`'s own
-    `_DEFAULT_TRUSTED_MODULE_DIRS` (Batches 16-20); this config layer
+    composition-aware in `iac_agent.graph.modules.default_trusted_module_dirs`
+    (Batches 16-20, Batch 30); this config layer
     has no reason to carry a second, narrower, SQS-only copy of that
     resolution at all.
     """
@@ -290,6 +290,28 @@ class ObservabilitySettings:
     """Non-secret observability selection. Keys never live here."""
 
     mode: ObservabilityMode = ObservabilityMode.OFF
+
+
+def load_trusted_module_root(env: Mapping[str, str] | None = None) -> Path:
+    """Return the application-controlled root for trusted Terraform modules.
+
+    An unset or blank ``IAC_AGENT_TRUSTED_MODULE_ROOT`` keeps checkout
+    behavior. A configured value must be absolute. The request never
+    selects this path.
+    """
+    source = os.environ if env is None else env
+    raw = source.get("IAC_AGENT_TRUSTED_MODULE_ROOT", "").strip()
+    if not raw:
+        from iac_agent.graph.modules import checkout_module_root
+
+        return checkout_module_root()
+    root = Path(raw)
+    if not root.is_absolute():
+        raise MissingConfigurationError(
+            "IAC_AGENT_TRUSTED_MODULE_ROOT must be an absolute path, "
+            f"got {raw!r}"
+        )
+    return root
 
 
 def load_observability_settings_from_env(
