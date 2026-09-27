@@ -7,7 +7,16 @@ produces the component lines."""
 from __future__ import annotations
 
 from iac_agent.app.service import WorkflowView
-from iac_agent.cli.present import render_interpreter_error, render_submission, render_workflow
+from iac_agent.cli.present import (
+    _architecture_label,
+    _component_lines,
+    render_interpreter_error,
+    render_submission,
+    render_workflow,
+)
+from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec, HttpMethod, RouteSpec
+from iac_agent.compositions.api_lambda_dynamodb.contract import ApiLambdaDynamoDbSpec
+from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
 from iac_agent.domain.approval import ApprovalDecision
 from iac_agent.domain.plan import PlanSummary
 from iac_agent.domain.security import (
@@ -23,6 +32,11 @@ from iac_agent.intent.models import ArchitectureIntent, Capability, InteractionP
 from iac_agent.intent.port import IntentProviderTimeoutError
 from iac_agent.intent.resolver import ArchitectureResolver
 from iac_agent.intent.service import IntentSubmissionResult
+from iac_agent.providers.aws.api_gateway.contract import ApiGatewayResourceSpec
+from iac_agent.providers.aws.dynamodb.contract import DynamoDBKeySpec, DynamoDBResourceSpec
+from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec
+from iac_agent.providers.aws.s3.contract import S3ResourceSpec
+from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
 
 _REQUEST_ID = "req-001"
 
@@ -250,3 +264,64 @@ def test_normal_output_contains_no_sensitive_markers():
 def test_no_ansi_escapes():
     output = render_submission(_awaiting_approval_worker_result())
     assert "\x1b" not in output
+
+
+# ---------------------------------------------------------------------------
+# _architecture_label / _component_lines (Batch 26) — direct unit tests.
+# No test previously exercised these two functions directly; this is
+# exactly the gap that let _architecture_label's unconditional "s3"
+# fallback go unnoticed for a type it had never seen before.
+# ---------------------------------------------------------------------------
+
+
+def _api_lambda_dynamodb_spec() -> ApiLambdaDynamoDbSpec:
+    return ApiLambdaDynamoDbSpec(
+        name="orders-api-worker",
+        api=ApiGatewayResourceSpec(name="orders-api"),
+        function=LambdaResourceSpec(name="orders-handler", handler="app.handler"),
+        route=RouteSpec(method=HttpMethod.POST, path="/orders"),
+        table=DynamoDBResourceSpec(
+            name="orders-table", partition_key=DynamoDBKeySpec(name="id", type="S")
+        ),
+    )
+
+
+def test_architecture_label_for_api_lambda_dynamodb_spec():
+    assert _architecture_label(_api_lambda_dynamodb_spec()) == "API Gateway + Lambda + DynamoDB"
+
+
+def test_architecture_label_for_api_lambda_dynamodb_spec_never_falls_through_to_s3():
+    """The exact regression found during Batch 26 design: an
+    unconditional `return "s3"` fallback would otherwise silently
+    mislabel this composition."""
+    assert _architecture_label(_api_lambda_dynamodb_spec()) != "s3"
+
+
+def test_architecture_label_for_existing_compositions_and_s3_unchanged():
+    worker_spec = ServerlessWorkerSpec(
+        name="orders-worker",
+        queue=SQSResourceSpec(name="orders-queue"),
+        function=LambdaResourceSpec(name="orders-processor", handler="app.handler"),
+        table=DynamoDBResourceSpec(
+            name="orders-table", partition_key=DynamoDBKeySpec(name="pk", type="S")
+        ),
+    )
+    api_lambda_spec = ApiLambdaSpec(
+        name="orders-api",
+        api=ApiGatewayResourceSpec(name="orders-api-gw"),
+        function=LambdaResourceSpec(name="orders-fn", handler="app.handler"),
+        route=RouteSpec(method=HttpMethod.GET, path="/orders"),
+    )
+    assert _architecture_label(worker_spec) == "serverless_worker"
+    assert _architecture_label(api_lambda_spec) == "api_lambda"
+    assert _architecture_label(S3ResourceSpec(name="orders-bucket")) == "s3"
+
+
+def test_component_lines_for_api_lambda_dynamodb_spec_lists_all_three_resources():
+    lines = _component_lines(_api_lambda_dynamodb_spec())
+    assert lines == [
+        "  api: orders-api",
+        "  route: POST /orders",
+        "  function: orders-handler",
+        "  table: orders-table",
+    ]
