@@ -1,0 +1,25 @@
+# CI-owned Terraform provider override (Batch 25, design spec §0.1).
+#
+# Execution-boundary configuration ONLY. This file is never part of
+# `generated/<request_id>/` and is never referenced by the production
+# renderer (src/iac_agent/providers/aws/terraform_render.py) or any
+# other code under src/iac_agent/. The AWS-plan CI job (implementation
+# plan Task 13) copies this file into the temporary plan workspace as
+# exactly `override.tf` (or another `*_override.tf` name) — the literal
+# generated `provider "aws" { ... }` block this repo ships is never
+# edited; Terraform merges this override on top of it at plan time
+# only, for that one execution.
+#
+# Terraform's override-merge semantics replace an argument only when it
+# is EXPLICITLY present here — omitting an argument does nothing, so
+# every skip flag the generated artifact sets to `true` is explicitly
+# set to `false` below, and a real region is supplied.
+
+provider "aws" {
+  region = "us-east-1"
+
+  skip_credentials_validation = false
+  skip_requesting_account_id  = false
+  skip_metadata_api_check     = false
+  skip_region_validation      = false
+}
