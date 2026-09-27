@@ -17,7 +17,11 @@ import iac_agent.compositions.api_lambda.contract as api_lambda_contract
 from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec, HttpMethod, RouteSpec
 from iac_agent.compositions.api_lambda_dynamodb.contract import (
     ApiLambdaDynamoDbSpec,
+)
+from iac_agent.compositions.api_lambda_dynamodb.contract import (
     HttpMethod as ReexportedHttpMethod,
+)
+from iac_agent.compositions.api_lambda_dynamodb.contract import (
     RouteSpec as ReexportedRouteSpec,
 )
 from iac_agent.providers.aws.api_gateway.contract import ApiGatewayResourceSpec
