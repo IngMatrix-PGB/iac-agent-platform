@@ -418,6 +418,62 @@ fresh-process durable-HITL reconstruction/resume proof.
 **Next: not automatically implemented.** Gate B requires separate
 explicit authorization.
 
+## Phase 2 — ECR (Batch 27) (Gate A)
+
+**Goal:** add a standalone ECR repository without turning it into a
+composition and without changing the three existing compositions.
+See `docs/resources/ecr.md`.
+
+Intent is `WorkloadType.STORAGE` plus exactly
+`{Capability.CONTAINER_REGISTRY}`, any interaction pattern, resolving
+to `EcrResourceSpec`. `OBJECT_STORAGE` stays S3. Mixed capability sets
+stay unsupported.
+
+Theoretical dispatch and registration sites from the design inventory
+(the actual-versus-theoretical comparison is filled in by Task 22):
+
+- `domain/resource.py` — `ResourceType.ECR`.
+- `providers/aws/ecr/contract.py` — `EcrResourceSpec`,
+  `EcrImageTagMutability`, `EcrEncryptionSpec`.
+- `providers/aws/ecr/renderer.py` — `EcrTerraformCompositionRenderer`.
+- `providers/aws/resource.py` — `AWSResourceSpec` union and
+  `resource_type_of()`.
+- `providers/aws/renderer.py` — `AWSResourceRenderer` constructor
+  parameter and `case` arm.
+- `policies/platform.py` — three policy IDs, the required-ID entry,
+  and the `evaluate_platform_policies()` arm.
+- `security/checkov_profiles.py` — `skipped_checks=()` until Gate B.
+- `graph/workflow.py` — trusted module directory and display name
+  `"ECR"`.
+- `persistence/checkpoints.py` — three serializer allowlist tuples.
+- `cli/present.py` — fail-closed architecture labels and ECR component
+  lines.
+- `intent/models.py` — `Capability.CONTAINER_REGISTRY` and
+  `AwsServiceHint.ECR`.
+- `intent/resolver.py` — one `case` arm and `_build_ecr_spec()`.
+- `terraform/modules/ecr/` — one `aws_ecr_repository`, AES256 hardcoded.
+
+That is 20 theoretical dispatch/registration sites. One further
+production site is not dispatch: `intent/adapters/openai.py` bumps
+`_PROMPT_VERSION` to `"4"` and states that a container registry is not
+object storage. `request.py` is not a site. The comparison of this list
+with the files Gate A actually changed is Task 22, not this section.
+
+Future pressure tests, documentation only, not Batch 27 scope:
+customer-managed KMS, CloudFront + S3 + origin access control, SNS /
+EventBridge, Secrets Manager, ECS/Fargate together with this ECR
+repository, ALB / networking, RDS / Aurora, and registry-level ECR
+scanning.
+
+Agent Observability / LLMOps, potentially using Langfuse, is a future
+platform capability. Langfuse is not Checkov, not a platform policy,
+and not AWS infrastructure monitoring. It is not implemented here, and
+this batch adds no Langfuse dependency.
+
+**Gate B (not started):** empirical Checkov discovery, a real
+`terraform plan` including the leading-digit name probe, a real-tool
+golden eval, and a fresh-process HITL proof. Gate A does not run those.
+
 ## Not yet started
 
 EventBridge, SNS, a second Lambda in one composition, chaining

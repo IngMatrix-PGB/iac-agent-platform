@@ -4,11 +4,12 @@ Agentic Infrastructure-as-Code Platform — natural-language infrastructure
 intent turned into safe, deterministic, reviewable Terraform changes.
 
 **Status:** Phase 1 (AWS SQS) and Phase 2 (AWS S3, AWS DynamoDB, AWS
-Lambda, AWS API Gateway, and two compositions) are working, validated
-vertical slices, proving the same design generalizes across individual
-resource types and multi-resource architectures alike. Currently
-supported resources: **SQS queues, S3 buckets, DynamoDB tables, Lambda
-functions, and API Gateway HTTP APIs** — not generic AWS support.
+Lambda, AWS API Gateway, AWS ECR, and two compositions) are working,
+validated vertical slices, proving the same design generalizes across
+individual resource types and multi-resource architectures alike.
+Currently supported resources: **SQS queues, S3 buckets, DynamoDB
+tables, Lambda functions, API Gateway HTTP APIs, and ECR repositories**
+— not generic AWS support.
 Lambda includes a trusted execution IAM role internally (trust policy +
 a narrowly scoped CloudWatch Logs permission, generated via
 `aws_iam_policy_document` — never a hand-authored policy, never an
@@ -30,7 +31,7 @@ graph/DAG composer, and this platform does not claim to generate
 arbitrary AWS architectures.
 
 ```
-AWS resource spec (SQS queue, S3 bucket, DynamoDB table, Lambda function, or API Gateway HTTP API)
+AWS resource spec (SQS queue, S3 bucket, DynamoDB table, Lambda function, API Gateway HTTP API, or ECR repository)
   or a composition (SQS → Lambda → DynamoDB, or API Gateway → Lambda)
   → deterministic Terraform rendering
   → Terraform validation/plan (credential-free)
@@ -63,13 +64,15 @@ A request is only ever *proposed* as a reviewable pull request — it is
 never deployed. See `docs/application.md`, `docs/hitl.md`,
 `docs/source-control.md`, `docs/resources/s3.md`,
 `docs/resources/dynamodb.md`, `docs/resources/lambda.md`,
+`docs/resources/ecr.md`,
 `docs/compositions/serverless-worker.md`,
 `docs/compositions/api-lambda.md`,
 `docs/compositions/api-lambda-dynamodb.md`, `docs/roadmap.md`,
 `docs/ci.md`, `docs/real-llm-intent-interpreter.md`, and
 `docs/aws-plan-boundary.md` for the composition root, the
 approval gate, the GitHub adapter, the S3 resource, the DynamoDB
-resource, the Lambda resource, the serverless-worker composition, the
+resource, the Lambda resource, the ECR repository, the serverless-worker
+composition, the
 API-Gateway-to-Lambda composition, the (Gate A complete, Gate B
 pending) API-Gateway-to-Lambda-to-DynamoDB composition, the project
 roadmap, the CI quality gates, the optional real LLM intent
