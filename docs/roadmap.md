@@ -461,8 +461,8 @@ Credential-free `terraform plan` accepted repository name `1orders`.
 
 Missing a dispatch arm fails loudly. Missing the checkpoint allowlist
 or the component-line branch does not. Those two are covered by
-dedicated tests. A registry would relocate the existing maps more than
-it would remove that omission risk. It is not implemented here.
+dedicated tests. Registry/catalog is deferred:
+`docs/adr/2026-09-27-registry-catalog-deferred.md`.
 
 The `AWSResourceRenderer` wiring commit landed after the resolver
 commit. That order was not rewritten. The final tree contains the
