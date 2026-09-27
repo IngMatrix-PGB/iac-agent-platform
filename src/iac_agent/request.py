@@ -33,6 +33,11 @@ from iac_agent.compositions.api_lambda.renderer import (
     ApiLambdaModuleSources,
     ApiLambdaTerraformRenderer,
 )
+from iac_agent.compositions.api_lambda_dynamodb.contract import ApiLambdaDynamoDbSpec
+from iac_agent.compositions.api_lambda_dynamodb.renderer import (
+    ApiLambdaDynamoDbModuleSources,
+    ApiLambdaDynamoDbTerraformRenderer,
+)
 from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
 from iac_agent.compositions.serverless_worker.renderer import (
     ServerlessWorkerModuleSources,
@@ -43,7 +48,7 @@ from iac_agent.providers.aws.renderer import AWSResourceRenderer
 from iac_agent.providers.aws.resource import AWSResourceSpec, resource_type_of
 from iac_agent.providers.aws.terraform_render import GeneratedTerraformComposition
 
-IacRequestSpec = AWSResourceSpec | ServerlessWorkerSpec | ApiLambdaSpec
+IacRequestSpec = AWSResourceSpec | ServerlessWorkerSpec | ApiLambdaSpec | ApiLambdaDynamoDbSpec
 
 
 class IacRenderer:
@@ -60,6 +65,7 @@ class IacRenderer:
         aws_renderer: AWSResourceRenderer | None = None,
         serverless_worker_renderer: ServerlessWorkerTerraformRenderer | None = None,
         api_lambda_renderer: ApiLambdaTerraformRenderer | None = None,
+        api_lambda_dynamodb_renderer: ApiLambdaDynamoDbTerraformRenderer | None = None,
     ) -> None:
         self._aws_renderer = aws_renderer if aws_renderer is not None else AWSResourceRenderer()
         self._serverless_worker_renderer = (
@@ -69,6 +75,11 @@ class IacRenderer:
         )
         self._api_lambda_renderer = (
             api_lambda_renderer if api_lambda_renderer is not None else ApiLambdaTerraformRenderer()
+        )
+        self._api_lambda_dynamodb_renderer = (
+            api_lambda_dynamodb_renderer
+            if api_lambda_dynamodb_renderer is not None
+            else ApiLambdaDynamoDbTerraformRenderer()
         )
 
     def render(
@@ -101,6 +112,25 @@ class IacRenderer:
                     ),
                 )
                 return self._serverless_worker_renderer.render(spec, module_sources=module_sources)
+            case ApiLambdaDynamoDbSpec():
+                # Checked before ApiLambdaSpec() only for readability —
+                # the two are structurally distinct types, so match's
+                # isinstance semantics make ordering irrelevant to
+                # correctness here (see compositions/resource.py).
+                api_lambda_dynamodb_module_sources = ApiLambdaDynamoDbModuleSources(
+                    api=os.path.relpath(
+                        trusted_module_dirs[ResourceType.API_GATEWAY], start=workspace
+                    ),
+                    function=os.path.relpath(
+                        trusted_module_dirs[ResourceType.LAMBDA], start=workspace
+                    ),
+                    table=os.path.relpath(
+                        trusted_module_dirs[ResourceType.DYNAMODB], start=workspace
+                    ),
+                )
+                return self._api_lambda_dynamodb_renderer.render(
+                    spec, module_sources=api_lambda_dynamodb_module_sources
+                )
             case ApiLambdaSpec():
                 api_module_sources = ApiLambdaModuleSources(
                     api=os.path.relpath(

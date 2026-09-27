@@ -55,6 +55,7 @@ _ALLOWED_WORKFLOW_TYPES: tuple[tuple[str, str], ...] = (
     ("iac_agent.compositions.api_lambda.contract", "ApiLambdaSpec"),
     ("iac_agent.compositions.api_lambda.contract", "HttpMethod"),
     ("iac_agent.compositions.api_lambda.contract", "RouteSpec"),
+    ("iac_agent.compositions.api_lambda_dynamodb.contract", "ApiLambdaDynamoDbSpec"),
     ("iac_agent.domain.plan", "PlanAction"),
     ("iac_agent.domain.plan", "ResourceChange"),
     ("iac_agent.domain.plan", "PlanSummary"),

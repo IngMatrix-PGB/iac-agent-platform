@@ -15,6 +15,14 @@ against the composition's own rendered, secure-default baseline, and
 the actual reported findings were compared against the constituent
 skip lists — only then was a profile written.
 
+Batch 26 followed the identical, ordered procedure for a *third*
+composition (`ApiLambdaDynamoDbSpec`): render a real, secure-default
+composition; run the existing strict, zero-skip real Checkov path
+against it; capture every actual finding; classify each one
+individually (genuine defect / accepted trade-off / false positive)
+before writing anything here. See that composition's own result below,
+after the Batch 19/20 results this module originally documented.
+
 Empirical result (2026-09, Checkov 3.3.13, real scan of the rendered
 `ServerlessWorkerSpec` secure baseline — 10 managed resources: SQS
 queue + DLQ, Lambda function + execution role + inline logs policy +
@@ -92,12 +100,59 @@ _API_GATEWAY_LAMBDA_SKIPPED_CHECKS: tuple[str, ...] = (
     "CKV_AWS_309",
 )
 
+#: Verified empirically (Batch 26, 2026-09, Checkov 3.3.13, real scan
+#: of the rendered `ApiLambdaDynamoDbSpec` secure baseline — 11 managed
+#: resources: HTTP API + $default stage, Lambda function + execution
+#: role + inline logs policy + log group, DynamoDB table, the
+#: integration, the route, the Lambda permission, and the composition-
+#: owned `aws_iam_role_policy.dynamodb_write` — resource_count=11,
+#: passed=56, failed=8).
+#:
+#: Every one of the 8 real findings was classified individually, not
+#: assumed from either existing profile:
+#: - `CKV_AWS_116`/`CKV_AWS_117`/`CKV_AWS_158`/`CKV_AWS_173`/
+#:   `CKV_AWS_272` — the same 5 Lambda deferrals both existing
+#:   compositions already carry, because this composition reuses the
+#:   identical, unchanged trusted Lambda module — an accepted
+#:   architectural trade-off, not a new decision.
+#: - `CKV_AWS_119` — the same DynamoDB customer-managed-KMS deferral
+#:   `serverless_worker` already carries, because this composition
+#:   reuses the identical, unchanged trusted DynamoDB module.
+#: - `CKV_AWS_76`/`CKV_AWS_309` — the same 2 API Gateway deferrals
+#:   `api_lambda` already carries (access logging; route authorization
+#:   type), because this composition reuses the identical, unchanged
+#:   API-Gateway integration/route model and the same declared
+#:   Batch 20 non-goal (no authorization mechanism of any kind) still
+#:   holds here — not a newly-discovered finding, and not re-escalated
+#:   via `AskUserQuestion` since it is a direct carry-forward of an
+#:   already-approved decision, not a new one.
+#:
+#: The result happens to equal the union of the other two profiles'
+#: skip lists — exactly like `serverless_worker`'s own result did in
+#: Batch 19 — but this was *discovered*, not assumed: no finding was
+#: predicted in advance, and the real scan was run first with zero
+#: composition-specific skips. No genuinely new finding appeared, and
+#: none of the 8 findings required a renderer/composition fix.
+_API_GATEWAY_LAMBDA_DYNAMODB_SKIPPED_CHECKS: tuple[str, ...] = (
+    "CKV_AWS_76",
+    "CKV_AWS_117",
+    "CKV_AWS_116",
+    "CKV_AWS_119",
+    "CKV_AWS_158",
+    "CKV_AWS_173",
+    "CKV_AWS_272",
+    "CKV_AWS_309",
+)
+
 _PROFILES_BY_COMPOSITION_TYPE: dict[CompositionType, CheckovScanProfile] = {
     CompositionType.SQS_LAMBDA_DYNAMODB: CheckovScanProfile(
         skipped_checks=_SQS_LAMBDA_DYNAMODB_SKIPPED_CHECKS
     ),
     CompositionType.API_GATEWAY_LAMBDA: CheckovScanProfile(
         skipped_checks=_API_GATEWAY_LAMBDA_SKIPPED_CHECKS
+    ),
+    CompositionType.API_GATEWAY_LAMBDA_DYNAMODB: CheckovScanProfile(
+        skipped_checks=_API_GATEWAY_LAMBDA_DYNAMODB_SKIPPED_CHECKS
     ),
 }
 

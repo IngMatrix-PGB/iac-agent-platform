@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec, HttpMethod, RouteSpec
+from iac_agent.compositions.api_lambda_dynamodb.contract import ApiLambdaDynamoDbSpec
 from iac_agent.compositions.resource import composition_type_of
 from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
 from iac_agent.domain.composition import CompositionType
@@ -39,12 +40,40 @@ def _api_lambda_spec() -> ApiLambdaSpec:
     )
 
 
+def _api_lambda_dynamodb_spec() -> ApiLambdaDynamoDbSpec:
+    return ApiLambdaDynamoDbSpec(
+        name="orders-api-worker",
+        api=ApiGatewayResourceSpec(name="orders-api"),
+        function=LambdaResourceSpec(name="orders-handler", handler="app.handler"),
+        route=RouteSpec(method=HttpMethod.POST, path="/orders"),
+        table=DynamoDBResourceSpec(
+            name="orders-table", partition_key=DynamoDBKeySpec(name="id", type="S")
+        ),
+    )
+
+
 def test_serverless_worker_spec_classified_as_sqs_lambda_dynamodb():
     assert composition_type_of(_serverless_worker_spec()) is CompositionType.SQS_LAMBDA_DYNAMODB
 
 
 def test_api_lambda_spec_classified_as_api_gateway_lambda():
     assert composition_type_of(_api_lambda_spec()) is CompositionType.API_GATEWAY_LAMBDA
+
+
+def test_api_lambda_dynamodb_spec_classified_as_api_gateway_lambda_dynamodb():
+    assert (
+        composition_type_of(_api_lambda_dynamodb_spec())
+        is CompositionType.API_GATEWAY_LAMBDA_DYNAMODB
+    )
+
+
+def test_api_lambda_dynamodb_spec_is_never_classified_as_api_gateway_lambda():
+    """The core mis-dispatch regression: a structurally distinct third
+    composition must never be caught by the second composition's own
+    `case ApiLambdaSpec():` arm."""
+    spec = _api_lambda_dynamodb_spec()
+    assert not isinstance(spec, ApiLambdaSpec)
+    assert composition_type_of(spec) is not CompositionType.API_GATEWAY_LAMBDA
 
 
 def test_unsupported_spec_type_raises_value_error():
