@@ -15,8 +15,13 @@ from dataclasses import dataclass
 from iac_agent.app.service import IacApplication, WorkflowView
 from iac_agent.domain.workflow import WorkflowStatus
 from iac_agent.intent.models import ArchitectureIntent
-from iac_agent.intent.port import IntentInterpreterPort
+from iac_agent.intent.port import IntentInterpreterError, IntentInterpreterPort
 from iac_agent.intent.resolver import ArchitectureResolver, ResolutionResult, ResolvedArchitecture
+from iac_agent.observability.failopen import FailOpenObservability
+from iac_agent.observability.noop import NoOpObservability
+from iac_agent.observability.port import ObservabilityPort
+from iac_agent.observability.project import project_generation, project_resolution
+from iac_agent.observability.sanitize import sanitize_telemetry
 
 
 @dataclass(frozen=True)
@@ -57,16 +62,31 @@ class IntentResolutionService:
         interpreter: IntentInterpreterPort,
         resolver: ArchitectureResolver,
         application: IacApplication,
+        observability: ObservabilityPort | None = None,
     ) -> None:
         self._interpreter = interpreter
         self._resolver = resolver
         self._application = application
+        self._observability = (
+            observability
+            if observability is not None
+            else FailOpenObservability(NoOpObservability())
+        )
 
     def submit(self, *, request_id: str, natural_language_request: str) -> IntentSubmissionResult:
-        intent = self._interpreter.interpret(
-            natural_language_request=natural_language_request, request_id=request_id
-        )
+        try:
+            intent = self._interpreter.interpret(
+                natural_language_request=natural_language_request, request_id=request_id
+            )
+        except IntentInterpreterError:
+            self._emit_generation(request_id)
+            raise
+        self._emit_generation(request_id)
         result = self._resolver.resolve(intent=intent, request_id=request_id)
+        self._observability.record_resolution(
+            sanitize_telemetry(project_resolution(request_id, intent, result))
+        )
+        self._observability.flush()
 
         match result:
             case ResolvedArchitecture():
@@ -78,3 +98,9 @@ class IntentResolutionService:
                 return IntentSubmissionResult(
                     request_id=request_id, intent=intent, resolution=result, workflow_view=None
                 )
+
+    def _emit_generation(self, request_id: str) -> None:
+        metadata = getattr(self._interpreter, "last_call_metadata", None)
+        if metadata is None:
+            return
+        self._observability.record_generation(sanitize_telemetry(project_generation(metadata)))
