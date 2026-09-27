@@ -31,6 +31,14 @@ variable "iac_plan_role_name" {
 
 variable "max_session_duration_seconds" {
   type        = number
-  default     = 900
-  description = "Short session duration (design spec §6) — just enough for init/validate/plan/Checkov."
+  default     = 3600
+  description = <<-EOT
+    AWS enforces a hard minimum of 3600 seconds for an IAM role's own
+    max_session_duration (range 3600-43200) — this is the role-level
+    CEILING, not the actual session length. The real, short-lived
+    per-run duration (design spec §6) is requested independently, at
+    AssumeRoleWithWebIdentity time, via the CI job's own
+    role-duration-seconds input (implementation plan Task 13) — which
+    can be any value at or below this ceiling, e.g. 900s.
+  EOT
 }
