@@ -17,6 +17,8 @@ from iac_agent.providers.aws.api_gateway.contract import ApiGatewayResourceSpec
 from iac_agent.providers.aws.api_gateway.renderer import ApiGatewayTerraformCompositionRenderer
 from iac_agent.providers.aws.dynamodb.contract import DynamoDBResourceSpec
 from iac_agent.providers.aws.dynamodb.renderer import DynamoDBTerraformCompositionRenderer
+from iac_agent.providers.aws.ecr.contract import EcrResourceSpec
+from iac_agent.providers.aws.ecr.renderer import EcrTerraformCompositionRenderer
 from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec
 from iac_agent.providers.aws.lambda_function.renderer import LambdaTerraformCompositionRenderer
 from iac_agent.providers.aws.resource import AWSResourceSpec
@@ -42,6 +44,7 @@ class AWSResourceRenderer:
         dynamodb_renderer: DynamoDBTerraformCompositionRenderer | None = None,
         lambda_renderer: LambdaTerraformCompositionRenderer | None = None,
         api_gateway_renderer: ApiGatewayTerraformCompositionRenderer | None = None,
+        ecr_renderer: EcrTerraformCompositionRenderer | None = None,
     ) -> None:
         self._sqs_renderer = (
             sqs_renderer if sqs_renderer is not None else TerraformCompositionRenderer()
@@ -62,6 +65,9 @@ class AWSResourceRenderer:
             if api_gateway_renderer is not None
             else ApiGatewayTerraformCompositionRenderer()
         )
+        self._ecr_renderer = (
+            ecr_renderer if ecr_renderer is not None else EcrTerraformCompositionRenderer()
+        )
 
     def render(self, spec: AWSResourceSpec, *, module_source: str) -> GeneratedTerraformComposition:
         match spec:
@@ -75,4 +81,6 @@ class AWSResourceRenderer:
                 return self._lambda_renderer.render(spec, module_source=module_source)
             case ApiGatewayResourceSpec():
                 return self._api_gateway_renderer.render(spec, module_source=module_source)
+            case EcrResourceSpec():
+                return self._ecr_renderer.render(spec, module_source=module_source)
         raise ValueError(f"unsupported resource spec type: {type(spec).__name__}")
