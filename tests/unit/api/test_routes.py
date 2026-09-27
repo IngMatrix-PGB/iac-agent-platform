@@ -1,0 +1,221 @@
+"""HTTP routes against an injected holder. No cloud calls."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from fastapi.testclient import TestClient
+
+from iac_agent.api.app import create_app
+from iac_agent.app.service import WorkflowView
+from iac_agent.domain.workflow import WorkflowStage, WorkflowStatus
+from iac_agent.intent.models import ArchitectureIntent, Capability, InteractionPattern, WorkloadType
+from iac_agent.intent.port import IntentProviderUnavailableError
+from iac_agent.intent.resolver import (
+    ClarificationReason,
+    ClarificationRequest,
+    ClarificationRequired,
+    ResolvedArchitecture,
+    UnsupportedArchitecture,
+    UnsupportedReason,
+)
+from iac_agent.intent.service import IntentSubmissionResult
+from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
+
+_PROMPT = "build a bucket named order-events"
+
+
+class FakeApplication:
+    def __init__(self) -> None:
+        self.stored: dict[str, object] = {}
+        self.get_state_calls: list[str] = []
+        self.resume_calls: list[tuple] = []
+
+    def read(self, request_id: str):
+        return self.stored.get(request_id)
+
+    def get_state(self, request_id: str):
+        self.get_state_calls.append(request_id)
+        raise AssertionError("HTTP must not call get_state")
+
+    def resume(self, request_id: str, decision):
+        self.resume_calls.append((request_id, decision))
+        raise AssertionError("resume is not part of POST")
+
+
+class FakeIntent:
+    def __init__(self, result=None, error=None) -> None:
+        self.result = result
+        self.error = error
+        self.calls: list[tuple[str, str]] = []
+
+    def submit(self, *, request_id: str, natural_language_request: str):
+        self.calls.append((request_id, natural_language_request))
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+class Holder:
+    def __init__(self, result=None, error=None) -> None:
+        self.application = FakeApplication()
+        self.intent_service = FakeIntent(result=result, error=error)
+
+
+def _resolved_view() -> WorkflowView:
+    return WorkflowView(
+        request_id="req-001",
+        workflow_status=WorkflowStatus.AWAITING_APPROVAL,
+        current_stage=WorkflowStage.APPROVAL,
+        resource_name="order-events",
+        security_status="pass",
+        plan_summary=None,
+        approval_decision=None,
+        pull_request=None,
+        error=None,
+        security_gate=None,
+    )
+
+
+def _resolved(request_id: str = "req-001") -> IntentSubmissionResult:
+    return IntentSubmissionResult(
+        request_id=request_id,
+        intent=ArchitectureIntent(
+            workload_type=WorkloadType.STORAGE,
+            interaction_pattern=InteractionPattern.UNSPECIFIED,
+            capabilities=frozenset({Capability.OBJECT_STORAGE}),
+        ),
+        resolution=ResolvedArchitecture(
+            request_spec=SQSResourceSpec(name="order-events"),
+            matched_pattern="storage+object_storage",
+        ),
+        workflow_view=_resolved_view(),
+    )
+
+
+def _client(holder: Holder, **state):
+    app = create_app(holder=holder)
+    for key, value in state.items():
+        setattr(app.state, key, value)
+    return TestClient(app)
+
+
+def test_missing_natural_language_request_is_400():
+    holder = Holder()
+    response = _client(holder).post("/api/v1/requests", json={})
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_request"
+    assert holder.intent_service.calls == []
+
+
+def test_invalid_request_id_does_not_submit():
+    holder = Holder(result=_resolved())
+    response = _client(holder).post(
+        "/api/v1/requests",
+        json={"natural_language_request": _PROMPT, "request_id": "foo/bar"},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_request_id"
+    assert holder.intent_service.calls == []
+
+
+def test_existing_checkpoint_is_conflict_without_submit():
+    holder = Holder(result=_resolved("req-dup"))
+    holder.application.stored["req-dup"] = _resolved_view()
+    response = _client(holder).post(
+        "/api/v1/requests",
+        json={"natural_language_request": _PROMPT, "request_id": "req-dup"},
+    )
+    assert response.status_code == 409
+    assert response.json()["error"] == "request_exists"
+    assert holder.intent_service.calls == []
+    assert holder.application.get_state_calls == []
+
+
+def test_clarification_is_200_without_workflow():
+    holder = Holder(
+        result=IntentSubmissionResult(
+            request_id="req-clarify",
+            intent=ArchitectureIntent(
+                workload_type=WorkloadType.UNSPECIFIED,
+                interaction_pattern=InteractionPattern.UNSPECIFIED,
+                capabilities=frozenset(),
+            ),
+            resolution=ClarificationRequired(
+                request=ClarificationRequest(
+                    reason=ClarificationReason.WORKLOAD_TYPE_REQUIRED,
+                    field="workload_type",
+                    allowed_values=("api", "worker", "storage"),
+                )
+            ),
+            workflow_view=None,
+        )
+    )
+    response = _client(holder).post(
+        "/api/v1/requests",
+        json={"natural_language_request": "hello", "request_id": "req-clarify"},
+    )
+    assert response.status_code == 200
+    assert response.json()["workflow"] is None
+    assert response.json()["outcome"] == "clarification_required"
+
+
+def test_unsupported_is_200():
+    holder = Holder(
+        result=IntentSubmissionResult(
+            request_id="req-nope",
+            intent=ArchitectureIntent(
+                workload_type=WorkloadType.STORAGE,
+                interaction_pattern=InteractionPattern.UNSPECIFIED,
+                capabilities=frozenset({Capability.OBJECT_STORAGE}),
+            ),
+            resolution=UnsupportedArchitecture(
+                reason=UnsupportedReason.UNSUPPORTED_CAPABILITY,
+                detail="no such capability",
+            ),
+            workflow_view=None,
+        )
+    )
+    response = _client(holder).post(
+        "/api/v1/requests",
+        json={"natural_language_request": "hello", "request_id": "req-nope"},
+    )
+    assert response.status_code == 200
+    assert response.json()["outcome"] == "unsupported"
+
+
+def test_resolved_request_is_201_and_hides_the_prompt():
+    holder = Holder(result=_resolved("req-001"))
+    response = _client(holder).post(
+        "/api/v1/requests",
+        json={"natural_language_request": _PROMPT, "request_id": "req-001"},
+    )
+    assert response.status_code == 201
+    assert response.headers["location"] == "/api/v1/requests/req-001"
+    body = response.json()
+    assert body["outcome"] == "awaiting_approval"
+    assert body["resolution"]["name"] == "order-events"
+    assert _PROMPT not in response.text
+
+
+def test_omitted_request_id_uses_injected_clock():
+    holder = Holder(result=_resolved("req-20260927T191300Z-a1b2c3d4e5f6"))
+    response = _client(
+        holder,
+        clock=lambda: datetime(2026, 9, 27, 19, 13, tzinfo=UTC),
+        entropy=lambda: "a1b2c3d4e5f6",
+    ).post("/api/v1/requests", json={"natural_language_request": "queue"})
+    assert response.status_code == 201
+    assert holder.intent_service.calls[0][0] == "req-20260927T191300Z-a1b2c3d4e5f6"
+
+
+def test_interpreter_failure_hides_exception_text():
+    holder = Holder(error=IntentProviderUnavailableError("secret downstream"))
+    response = _client(holder).post(
+        "/api/v1/requests",
+        json={"natural_language_request": "queue", "request_id": "req-down"},
+    )
+    assert response.status_code == 503
+    assert response.json()["error"] == "intent_provider_unavailable"
+    assert response.json()["message"] == "Intent provider unavailable."
+    assert "secret downstream" not in response.text
