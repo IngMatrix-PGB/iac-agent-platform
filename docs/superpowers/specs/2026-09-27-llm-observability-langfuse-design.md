@@ -250,9 +250,11 @@ The CLI process exits while the workflow is paused. The adapter must
 flush before `submit` and `resume` return to the CLI. A failed flush is
 an observability failure, not a workflow failure.
 
-`request_id` values are second-resolution timestamps. Two proposes in
-the same UTC second collide today, independent of Langfuse. This design
-does not change id generation.
+`request_id` values generated before this closure are second-resolution
+timestamps. Two proposes in the same UTC second collide. That collision
+is a platform identity bug, not only a Langfuse bug. Section 29 locks
+the generator change. Observability still uses the exact `request_id`
+as its correlation key. It does not invent a second id.
 
 `get_state` must not emit. Reconstruction for a human reading state is
 not a new observation.
@@ -302,25 +304,54 @@ Never sent, even if present on an object the caller already holds:
 
 ## 11. Redaction and minimization
 
-Minimization happens before any SDK call, in a pure function that
-builds the allowlisted payload. The Langfuse client receives that
-payload only.
+The primary control is structural allowlisting. A projection function
+builds a small telemetry model by naming the fields it copies. Regex
+scanning does not make an arbitrary object safe to send, and the
+implementation must not pass a raw object through a scanner and then
+on to a vendor.
 
-Defense in depth, in that same function, not in business code:
+Order, locked:
 
-- drop any key not on the allowlist
-- replace matches of `sk-...`, `sk-lf-...`, `ghp_...`, `github_pat_...`,
-  `AKIA...`, `ASIA...`, `Bearer `, and JWT-shaped strings with
-  `[redacted]`
-- if a string value contains `BEGIN PRIVATE KEY` or `AWS_SECRET_ACCESS_KEY`,
-  drop the field
+```
+domain / workflow object
+        |
+        v
+explicit telemetry projection
+        |
+        v
+small allowlisted telemetry model
+        |
+        v
+defense-in-depth secret-pattern sanitation
+        |
+        v
+ObservabilityPort
+        |
+        v
+optional vendor adapter
+```
 
-Langfuse masking configuration is not the control. The project does not
-rely on a vendor to notice a secret after it was uploaded.
+The projection accepts an `ArchitectureIntent`, a `ResolutionResult`,
+or a `WorkflowView`, and returns a telemetry dataclass. It never
+returns the input. `WorkflowState`, Terraform results, Checkov
+results, exception objects, environment mappings, and provider
+responses are not parameters of the port and are not parameters of
+the vendor adapter.
 
-`WorkflowError.message` continues to exist for the local CLI. Telemetry
-does not read it. That preserves the existing presenter rule and still
-keeps exception text off the wire.
+Defense in depth runs only on strings that already sit on the
+allowlisted model. It replaces `sk-`, `sk-lf-`, `ghp_`, `github_pat_`,
+`AKIA`, `ASIA`, `Bearer`, JWT-shaped strings, `BEGIN PRIVATE KEY`, and
+the env-var names `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+`AWS_SESSION_TOKEN`, `OPENAI_API_KEY`, and `GITHUB_TOKEN` with
+`[redacted]`. A string that needed this replacement is a bug in the
+projection. The tests for resource names, prompts, and
+`WorkflowError.message` must fail because those fields do not exist on
+the model, not because a regex deleted them.
+
+Langfuse masking configuration is not the control.
+
+`WorkflowError.message` continues to exist for the local CLI. The
+projection does not read it.
 
 ## 12. Fail-open behavior
 
@@ -472,12 +503,17 @@ failed workflow. Section 12 is the mechanism.
 
 A later implementation would touch:
 
-- new `src/iac_agent/observability/` package: port, NoOp, allowlisted
-  event model, redaction function
+- new `src/iac_agent/observability/` package: port, NoOp, fail-open
+  wrapper, allowlisted event model, projection, defense-in-depth
+  sanitation
 - new `src/iac_agent/observability/adapters/langfuse.py`, imported only
   when the optional extra is installed and keys are set
-- `src/iac_agent/app/config.py`: load Langfuse settings as `SecretStr`,
-  separate from `ApplicationConfig`
+- `src/iac_agent/cli/ids.py`: section 29 generator. Validators stay
+- `src/iac_agent/intent/adapters/openai.py`: retain the safe metadata
+  dict the adapter already logs, so the service can project it. No
+  Langfuse import
+- `src/iac_agent/app/config.py`: observability off by default. Langfuse
+  secrets, when added, stay `SecretStr` and off `ApplicationConfig`
 - `src/iac_agent/app/composition.py`: choose NoOp or the adapter
 - `src/iac_agent/intent/service.py`: emit interpret and resolve events
 - `src/iac_agent/app/service.py`: emit submit and resume events from
@@ -521,9 +557,10 @@ migration.
 - `WorkflowError.message` and `finding.resource` are easy to forward by
   accident because they are already on objects the application holds.
   Tests 5, 7, and 14 exist to stop that.
-- Deterministic trace ids are only as unique as `request_id`. The
-  second-resolution CLI id can collide. Fixing that is a separate
-  product decision, not a Langfuse feature.
+- Deterministic trace ids are only as unique as `request_id`.
+  Section 29 changes the CLI generator so two proposes in the same
+  UTC second do not share a thread, workspace, or branch. Caller-supplied
+  `--request-id` can still name an existing thread on purpose.
 - SDK v4 context managers feel like the natural API and will not
   survive `resume`. The adapter must use the explicit trace id.
 - Cloud data leaves the machine. The allowlist is the mitigation.
@@ -586,33 +623,161 @@ The registry ADR is unchanged.
 - Estimated dollar cost
 - Per-node Langfuse spans in the first implementation gate
 
-## 27. Open human decisions
+## 27. Human decisions
 
-1. Confirm NoOp as the default, with Cloud opt-in later, versus
-   postponing the whole implementation.
-2. Confirm the denylist includes resource names and PR URLs. The CLI
-   may keep showing both.
-3. Confirm finding messages stay off the wire. Policy id and status
-   remain on.
-4. Whether a later gate should time Terraform and Checkov. This design
-   says not in the first gate.
-5. Whether CLI `request_id` collision within one second should be fixed
-   before any real Langfuse project is created. Not required for the
-   port itself.
+Closed in the design-closure review. None of these authorizes prompt
+upload, a Langfuse account, or a live telemetry call.
 
-No decision here authorizes uploading prompts.
+1. Architecture: `ObservabilityPort`, default `NoOpObservability`,
+   optional Langfuse adapter. Business and workflow code do not import
+   the Langfuse SDK.
+2. Default: off. `git clone`, install, and pytest need no Langfuse
+   account, credentials, network, or telemetry.
+3. If a later real integration is exercised, Langfuse Cloud. Do not
+   self-host for this portfolio stage. Do not create the project in
+   the planning pass.
+4. Denylist in section 10 is approved, including resource names, PR
+   URLs, `finding.resource`, `finding.message`, and
+   `WorkflowError.message`. The CLI may keep showing those locally.
+5. Security findings on the wire are `policy_id`, `status`, and
+   `severity` only.
+6. Raw prompt and model-output capture are prohibited. There is no
+   configuration toggle for them in this batch.
+7. Token metadata is copied only when the provider supplied it.
+   Missing usage is valid. Cost estimation is deferred.
+8. Langfuse does not participate in policy, Checkov, the security
+   gate, HITL, or Terraform correctness.
+9. Telemetry failure never changes a workflow result. Isolation lives
+   inside the observability boundary, not in caller `try` blocks.
+10. First-stage observations are `intent.interpret` (generation),
+    `intent.resolve` (event), `workflow.submit`, `workflow.resume`,
+    and `workflow.terminal` (events). `get_state` emits nothing.
+    Terraform and Checkov timing spans are deferred.
+11. The correlation key is the durable `request_id`, recomputed after
+    process restart. Section 29 locks how that id is generated.
+    In-memory span stacks are not the resume mechanism.
 
 ## 28. Recommended implementation gates
 
-**Gate A, still offline.** Port, NoOp, allowlist model, redaction
-function, fake adapter, the section 16 tests, wiring with default NoOp.
-No Langfuse package. `pytest -m "not real_tool and not real_llm"` stays
-green. No AWS, no OpenAI, no GitHub writes.
+The task list is
+`docs/superpowers/plans/2026-09-27-llm-observability-langfuse.md`.
 
-**Gate B, optional and human-gated.** Optional extra, `SecretStr`
-settings, one adapter, a `real_observability` marker that CI does not
-run. A smoke test skips when keys are absent. Still no prompt upload.
-Still no `terraform apply`.
+**Gate A — platform core, no vendor.** Request-id generator fix from
+section 29. Telemetry models, projection, defense-in-depth sanitation,
+port, NoOp, fail-open wrapper, default-off configuration, and
+instrumentation of `IntentResolutionService` and `IacApplication`.
+Normal pytest does not import Langfuse and does not open a socket.
 
-Gate B does not start until Gate A is reviewed and a human has created
-credentials outside this repository.
+**Gate B — optional adapter, still no live call.** Optional extra,
+Langfuse adapter against a fake client, deterministic seed, flush,
+import isolation, documentation. Gate B tests must pass without
+network and without credentials.
+
+**Gate C — not part of this plan.** A live Cloud smoke test is not
+required to prove the boundary. It would need credentials and a
+network call, and it cannot prove more about allowlisting than the
+fake adapter already proves. If a human later wants that smoke, it is
+a separate authorized gate, marked like `real_llm`, and excluded from
+`pytest -m "not real_tool and not real_llm"`. It is not a task in the plan.
+
+## 29. Request-id collision
+
+### What the code does today
+
+`generate_request_id` (`src/iac_agent/cli/ids.py`) formats
+`req-%Y%m%dT%H%M%SZ`. The CLI (`src/iac_agent/cli/main.py`) uses that
+only when `--request-id` is omitted. `propose --request-id` and
+`resume <request_id>` (`src/iac_agent/cli/parser.py`) pass the caller's
+string through unchanged.
+
+`workflow_config` (`src/iac_agent/persistence/checkpoints.py`) sets
+LangGraph `thread_id` to that exact string. The workspace directory is
+`<workspace_root>/<request_id>`
+(`src/iac_agent/graph/workflow.py`, `_resolve_request_workspace`).
+`derive_branch_name` returns `iac-agent/<request_id>`
+(`src/iac_agent/domain/source_control.py`). Published files land at
+`generated/<request_id>/...`. `GitHubSourceControl.publish_change`
+(`src/iac_agent/git/github.py`) treats an existing branch as a conflict
+and says a second publish of the same `request_id` always collides.
+When `logical_name_hint` is absent, `fallback_base_name`
+(`src/iac_agent/intent/naming.py`) derives the resource name from
+`request_id`. `normalize_hint` keeps at most 40 characters.
+
+The only test that asserts the generated shape is
+`tests/unit/cli/test_ids.py`. Other tests and evals pass literal ids
+(`req-001`, `req-ecr-durable-001`, `layer2-eval-fixture-request`).
+The historical tree `generated/req-20260926T215226Z/` on `main` is a
+past artifact, not a generator output this batch should rename.
+
+`validate_request_id` allows any non-empty single path segment.
+`derive_branch_name` further requires
+`^[A-Za-z0-9][A-Za-z0-9._-]*$`.
+
+### What a same-second collision does
+
+Two generated ids that compare equal are the same platform identity:
+
+- the second `invoke` uses the first run's SQLite thread
+- the second render writes the first run's workspace directory
+- publication targets the same branch and the same `generated/` path
+- a later resume can approve the wrong paused workflow
+- a Langfuse seed derived from that id would alias the two requests
+
+A caller who passes an existing `--request-id` is selecting that
+identity on purpose. The generator must not rewrite stored ids, and
+it must not probe the database to see whether an id is free.
+
+### Options
+
+| | Mechanism | Readability | Checkpoint collision | Dependency | Name fallback |
+|---|---|---|---|---|---|
+| A | UTC second + 12 hex from `uuid.uuid4()` | Stamp stays visible | New ids differ within the same second | stdlib | 33-character id fits the 40-character `normalize_hint` window |
+| B | `req-` + UUID4 | No time stamp | Unique | stdlib | A 40-character id is truncated by `normalize_hint` before `fallback_base_name` adds its own prefix, so hint-less names can lose entropy |
+| C | ULID | Sortable and compact | Unique | No stdlib ULID. A new package or a hand-rolled encoder | Not justified. The timestamp prefix already sorts to the second |
+| D | Keep the timestamp id and add a second correlation id | Old id unchanged | Thread, workspace, and branch still collide | None | Does not fix the platform bug |
+
+### Locked choice
+
+Option A.
+
+```
+req-%Y%m%dT%H%M%SZ-<12 lowercase hex>
+```
+
+Example: `req-20260918T232211Z-a1b2c3d4e5f6`.
+
+`generate_request_id(now=None, *, entropy=None)` keeps the injectable
+clock. `entropy` defaults to `uuid.uuid4().hex`; the generator uses
+the first 12 characters and rejects a value that is not 12 lowercase
+hex digits. Tests inject both `now` and `entropy`. Naive datetimes
+stay rejected.
+
+Twelve hex digits is 48 bits from `uuid4`, which is enough for a local
+CLI. It is not a distributed consensus id. The character class already
+accepted by `validate_request_id` and `derive_branch_name` includes
+digits and hyphens, so no validator change is required.
+
+The id is 33 characters. `normalize_hint` keeps it. `fallback_base_name`
+then prefixes `req-`, producing a 37-character base, inside the
+existing 40-character hint budget. Hint-less names of two same-second
+requests stay distinct.
+
+### Compatibility
+
+- Existing checkpoints resume with the id they were stored under.
+  There is no migration and no rewrite of SQLite rows.
+- `generated/req-20260926T215226Z/` stays where it is.
+- Literal ids in tests and evals stay valid.
+- `--request-id` and `resume <request_id>` stay caller-supplied
+  strings. This batch does not add a format check beyond the
+  validators those strings already pass through.
+- Observability stores and seeds from the exact `request_id`. The
+  Langfuse adapter may call `create_trace_id(seed=request_id)` because
+  that vendor wants a 32-hex trace id. That derivation is recomputed
+  in the resume process. It is not a second platform identifier and
+  it is not written to the checkpoint.
+
+### What this closure does not implement
+
+The generator change is specified here and tasked in the plan. This
+commit does not edit `src/iac_agent/cli/ids.py`.
