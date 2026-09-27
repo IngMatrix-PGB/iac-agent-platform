@@ -116,15 +116,21 @@ _API_GATEWAY_SKIPPED_CHECKS: tuple[str, ...] = (
     "CKV_AWS_76",
 )
 
+#: Verified empirically (2026-09-27, Checkov 3.3.13, real scan of the
+#: trusted ECR module's secure-default baseline — resource_count=1,
+#: passed=3, failed=1, skipped=0): exactly this one check fails.
+#: "Ensure that ECR repositories are encrypted using KMS" (CKV_AWS_136).
+#: Accepted architectural trade-off: Batch 27 hardcodes AES256 and
+#: forbids a KMS key. Not copied from any other resource profile.
+_ECR_SKIPPED_CHECKS: tuple[str, ...] = ("CKV_AWS_136",)
+
 _PROFILES_BY_RESOURCE_TYPE: dict[ResourceType, CheckovScanProfile] = {
     ResourceType.SQS: CheckovScanProfile(skipped_checks=()),
     ResourceType.S3: CheckovScanProfile(skipped_checks=_S3_SKIPPED_CHECKS),
     ResourceType.DYNAMODB: CheckovScanProfile(skipped_checks=_DYNAMODB_SKIPPED_CHECKS),
     ResourceType.LAMBDA: CheckovScanProfile(skipped_checks=_LAMBDA_SKIPPED_CHECKS),
     ResourceType.API_GATEWAY: CheckovScanProfile(skipped_checks=_API_GATEWAY_SKIPPED_CHECKS),
-    # Gate A: explicit empty tuple so lookup fails closed rather than
-    # missing. Gate B replaces this only with empirically justified skips.
-    ResourceType.ECR: CheckovScanProfile(skipped_checks=()),
+    ResourceType.ECR: CheckovScanProfile(skipped_checks=_ECR_SKIPPED_CHECKS),
 }
 
 

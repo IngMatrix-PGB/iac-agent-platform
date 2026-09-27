@@ -57,10 +57,19 @@ not run `terraform apply` or `terraform destroy`.
 
 ## Checkov
 
-Gate A registers `ResourceType.ECR` with `skipped_checks=()`. The tuple
-is empty because registration consistency requires a profile. It is not
-an empirical skip list. The empirical profile is Gate B (plan Task 19)
-and is not frozen here.
+A zero-skip scan of the secure-default module (Checkov 3.3.13,
+`resource_count=1`, `passed=3`, `failed=1`, `skipped=0`) produced one
+finding:
+
+- `CKV_AWS_136` — "Ensure that ECR repositories are encrypted using KMS."
+  Accepted architectural trade-off. The module hardcodes `AES256` and
+  Batch 27 does not add a KMS key. This is not a defect in the
+  repository, and it is not a false positive: Checkov is asking for a
+  customer-managed key that this batch refuses.
+
+The frozen profile is `skipped_checks=("CKV_AWS_136",)`. No other id is
+skipped. The list was not copied from S3, DynamoDB, Lambda, or API
+Gateway.
 
 ## CLI
 
