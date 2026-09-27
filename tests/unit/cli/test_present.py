@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from iac_agent.app.service import WorkflowView
 from iac_agent.cli.present import (
+    _STANDALONE_RESOURCE_LABELS,
     _architecture_label,
     _component_lines,
     render_interpreter_error,
@@ -19,6 +20,7 @@ from iac_agent.compositions.api_lambda_dynamodb.contract import ApiLambdaDynamoD
 from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
 from iac_agent.domain.approval import ApprovalDecision
 from iac_agent.domain.plan import PlanSummary
+from iac_agent.domain.resource import ResourceType
 from iac_agent.domain.security import (
     FindingSource,
     PolicyStatus,
@@ -34,6 +36,7 @@ from iac_agent.intent.resolver import ArchitectureResolver
 from iac_agent.intent.service import IntentSubmissionResult
 from iac_agent.providers.aws.api_gateway.contract import ApiGatewayResourceSpec
 from iac_agent.providers.aws.dynamodb.contract import DynamoDBKeySpec, DynamoDBResourceSpec
+from iac_agent.providers.aws.ecr.contract import EcrResourceSpec
 from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec
 from iac_agent.providers.aws.s3.contract import S3ResourceSpec
 from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
@@ -324,4 +327,41 @@ def test_component_lines_for_api_lambda_dynamodb_spec_lists_all_three_resources(
         "  route: POST /orders",
         "  function: orders-handler",
         "  table: orders-table",
+    ]
+
+
+def test_every_resource_type_has_a_cli_architecture_label():
+    for resource_type in ResourceType:
+        assert resource_type in _STANDALONE_RESOURCE_LABELS
+
+
+def test_architecture_label_for_ecr_is_ecr_not_s3():
+    assert _architecture_label(EcrResourceSpec(name="orders")) == "ecr"
+
+
+_STANDALONE_LABEL_CASES = (
+    (SQSResourceSpec(name="order-events"), "sqs"),
+    (
+        DynamoDBResourceSpec(
+            name="orders-table", partition_key=DynamoDBKeySpec(name="pk", type="S")
+        ),
+        "dynamodb",
+    ),
+    (LambdaResourceSpec(name="orders-processor", handler="app.handler"), "lambda"),
+    (ApiGatewayResourceSpec(name="orders-api"), "api_gateway"),
+    (S3ResourceSpec(name="orders-bucket"), "s3"),
+)
+
+
+def test_standalone_architecture_labels_match_resource_type_values():
+    for spec, label in _STANDALONE_LABEL_CASES:
+        assert _architecture_label(spec) == label
+
+
+def test_ecr_component_lines_include_name_mutability_and_scan():
+    lines = _component_lines(EcrResourceSpec(name="orders"))
+    assert lines == [
+        "  repository: orders",
+        "  image_tag_mutability: IMMUTABLE",
+        "  scan_on_push: true",
     ]
