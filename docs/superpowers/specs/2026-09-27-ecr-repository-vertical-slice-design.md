@@ -901,9 +901,10 @@ Comparing this ECR inventory with Batch 26's composition inventory:
 - which omissions failed loudly versus silently, checked against what
   the tests actually caught.
 
-Only after that comparison should Batch 28 reopen the registry
-question. Moving maps into another abstraction is not, by itself,
-enough reason (§20, §21).
+That comparison is recorded in
+`docs/adr/2026-09-27-registry-catalog-deferred.md`. It does not
+schedule a registry batch. Moving maps into another abstraction is
+not, by itself, enough reason (§20, §21).
 
 ## 18. Implementation gates proposal (design intent only — not the plan)
 
@@ -1062,10 +1063,12 @@ interpreter-prompt sentence (§16) is a third silent class, and a
 resource-metadata registry would not cover it, because it is prose
 rather than a `ResourceType`-keyed map. Implementing ECR as designed,
 then comparing theoretical sites with actual sites, is the evidence
-Batch 28 should use. A registry is not ruled out. It is not this
-batch's deliverable.
+for the deferred decision below. A registry is not ruled out. It is
+not this batch's deliverable.
 
-Not implemented this batch.
+Not implemented this batch. After Gate B, the decision is deferred:
+`docs/adr/2026-09-27-registry-catalog-deferred.md`. Reopen it only when
+a condition in that record is met.
 
 ## 22. Future roadmap — documentation only
 

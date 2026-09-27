@@ -121,4 +121,5 @@ existed:
 A registry would mostly move the dicts and `match` arms that already
 fail loudly. It would not, by itself, own checkpoint allowlisting or
 CLI component lines. Those two silent spots already have dedicated
-tests. No registry is implemented in this batch.
+tests. The registry/catalog decision is deferred:
+`docs/adr/2026-09-27-registry-catalog-deferred.md`.
