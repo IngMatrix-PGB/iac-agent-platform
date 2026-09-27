@@ -30,7 +30,7 @@ def _render_module_block(spec: EcrResourceSpec, module_source: str) -> str:
     )
     return (
         'module "ecr" {\n'
-        f"  source               = {hcl_string(module_source)}\n\n"
+        f"  source = {hcl_string(module_source)}\n\n"
         f"  name                 = {hcl_string(spec.name)}\n"
         f"  image_tag_mutability = {hcl_string(spec.image_tag_mutability.value)}\n"
         f"  scan_on_push         = {hcl_bool(spec.scan_on_push)}\n"
