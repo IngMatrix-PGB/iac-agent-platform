@@ -7,6 +7,7 @@ import typing
 from langgraph.graph import MessagesState
 
 from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec
+from iac_agent.compositions.api_lambda_dynamodb.contract import ApiLambdaDynamoDbSpec
 from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
 from iac_agent.graph.state import WorkflowState
 from iac_agent.providers.aws.api_gateway.contract import ApiGatewayResourceSpec
@@ -31,7 +32,9 @@ def test_workflow_state_declares_request_id_and_resource_spec():
     and Lambda to it. Batch 19 widened it again to `IacRequestSpec`
     (`AWSResourceSpec | ServerlessWorkerSpec`) so a composition request
     can flow through the same field. Batch 20 added `ApiGatewayResourceSpec`
-    (a new AWS resource type) and `ApiLambdaSpec` (a second composition)."""
+    (a new AWS resource type) and `ApiLambdaSpec` (a second composition).
+    Batch 26 added `ApiLambdaDynamoDbSpec` (a third composition, no new
+    AWS resource type)."""
     resolved = typing.get_type_hints(WorkflowState)
     assert resolved["request_id"] is str
     assert resolved["resource_spec"] is IacRequestSpec
@@ -43,6 +46,7 @@ def test_workflow_state_declares_request_id_and_resource_spec():
         | ApiGatewayResourceSpec
         | ServerlessWorkerSpec
         | ApiLambdaSpec
+        | ApiLambdaDynamoDbSpec
     )
 
 
