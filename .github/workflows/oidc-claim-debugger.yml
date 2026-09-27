@@ -1,0 +1,60 @@
+# TEMPORARY workflow — Batch 25, Task 11 (OIDC claim discovery).
+#
+# Deleted immediately after the discovery run per docs/aws-plan-boundary.md.
+# Never the real ci.yml, never enables any AWS trust boundary.
+#
+# The plan originally specified github/actions-oidc-debugger, but that
+# repository was archived on 2025-09-22 (read-only, maintainers
+# recommend a fork). Rather than depend on an unmaintained third-party
+# action for a security-sensitive discovery step, this requests and
+# decodes the OIDC token directly via GitHub's own documented
+# ACTIONS_ID_TOKEN_REQUEST_URL/TOKEN mechanism — same objective, no
+# third-party action dependency. The raw token/JWT string is never
+# echoed or logged — only the decoded, non-secret claim payload.
+name: OIDC Claim Discovery (temporary)
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  discover-oidc-claims:
+    name: Discover sanitized OIDC claims
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Request and decode OIDC claims (never prints the raw token)
+        shell: python3 {0}
+        run: |
+          import base64
+          import json
+          import os
+          import urllib.request
+
+          request_token = os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]
+          request_url = os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"]
+
+          req = urllib.request.Request(
+              f"{request_url}&audience=sts.amazonaws.com",
+              headers={"Authorization": f"bearer {request_token}"},
+          )
+          with urllib.request.urlopen(req) as resp:
+              token = json.load(resp)["value"]
+
+          payload_b64 = token.split(".")[1]
+          padded = payload_b64 + "=" * (-len(payload_b64) % 4)
+          claims = json.loads(base64.urlsafe_b64decode(padded))
+
+          # Only non-secret claims relevant to the trust policy are
+          # printed — the raw token variable above is never logged and
+          # goes out of scope once this step ends.
+          relevant = (
+              "aud", "sub", "repository", "repository_owner",
+              "repository_id", "repository_owner_id", "event_name",
+              "ref", "workflow_ref", "job_workflow_ref", "iss",
+          )
+          print(json.dumps({k: claims.get(k) for k in relevant if k in claims}, indent=2))
