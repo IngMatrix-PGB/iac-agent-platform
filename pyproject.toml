@@ -22,6 +22,9 @@ dev = [
 openai = [
     "openai>=3.0,<4",
 ]
+langfuse = [
+    "langfuse>=4,<5",
+]
 
 [project.scripts]
 iac-agent = "iac_agent.cli.main:main"
