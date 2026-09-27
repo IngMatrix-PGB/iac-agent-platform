@@ -122,6 +122,9 @@ _PROFILES_BY_RESOURCE_TYPE: dict[ResourceType, CheckovScanProfile] = {
     ResourceType.DYNAMODB: CheckovScanProfile(skipped_checks=_DYNAMODB_SKIPPED_CHECKS),
     ResourceType.LAMBDA: CheckovScanProfile(skipped_checks=_LAMBDA_SKIPPED_CHECKS),
     ResourceType.API_GATEWAY: CheckovScanProfile(skipped_checks=_API_GATEWAY_SKIPPED_CHECKS),
+    # Gate A: explicit empty tuple so lookup fails closed rather than
+    # missing. Gate B replaces this only with empirically justified skips.
+    ResourceType.ECR: CheckovScanProfile(skipped_checks=()),
 }
 
 
