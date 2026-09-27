@@ -482,9 +482,14 @@ platform policy, and not AWS infrastructure monitoring.
 
 ## Not yet started
 
+The local FastAPI adapter is documented in `docs/api.md`. It is
+unauthenticated, binds to loopback, and is not a public production
+boundary. Docker is the next runtime-packaging boundary and is not
+part of this adapter.
+
 EventBridge, SNS, a second Lambda in one composition, chaining
 compositions together, Cognito/JWT/Lambda authorizers, WAF, custom
-domains, a FastAPI/HTTP adapter, any UI, a composition-registry/plugin
+domains, any UI, Docker, authentication, a composition-registry/plugin
 abstraction, and any DynamoDB action beyond `PutItem` for the new
-composition remain entirely out of scope until a future phase is
-explicitly approved.
+composition remain not started until a future phase is explicitly
+approved.
