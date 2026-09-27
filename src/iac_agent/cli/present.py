@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from iac_agent.app.service import WorkflowView
 from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec
+from iac_agent.compositions.api_lambda_dynamodb.contract import ApiLambdaDynamoDbSpec
 from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
 from iac_agent.domain.security import PolicyStatus
 from iac_agent.domain.workflow import WorkflowStatus
@@ -60,9 +61,25 @@ def _intent_lines(intent: ArchitectureIntent) -> list[str]:
     ]
 
 
+#: Batch 26 closed decision: a human-readable label ("API Gateway +
+#: Lambda + DynamoDB"), deliberately different in format from
+#: `serverless_worker`/`api_lambda`'s existing snake_case labels below
+#: — the human explicitly specified this exact string for this
+#: composition, and the other two are left unchanged (existing
+#: behavioral-compatibility invariant), so this is a one-off, not a new
+#: general convention.
+_API_LAMBDA_DYNAMODB_ARCHITECTURE_LABEL = "API Gateway + Lambda + DynamoDB"
+
+
 def _architecture_label(spec: IacRequestSpec) -> str:
     if isinstance(spec, ServerlessWorkerSpec):
         return "serverless_worker"
+    if isinstance(spec, ApiLambdaDynamoDbSpec):
+        # Checked before ApiLambdaSpec() only for readability — the two
+        # are structurally distinct types (see
+        # compositions/resource.py), so isinstance ordering doesn't
+        # affect correctness here.
+        return _API_LAMBDA_DYNAMODB_ARCHITECTURE_LABEL
     if isinstance(spec, ApiLambdaSpec):
         return "api_lambda"
     return "s3"
@@ -72,6 +89,13 @@ def _component_lines(spec: IacRequestSpec) -> list[str]:
     if isinstance(spec, ServerlessWorkerSpec):
         return [
             f"  queue: {spec.queue.name}",
+            f"  function: {spec.function.name}",
+            f"  table: {spec.table.name}",
+        ]
+    if isinstance(spec, ApiLambdaDynamoDbSpec):
+        return [
+            f"  api: {spec.api.name}",
+            f"  route: {spec.route.method.value} {spec.route.path}",
             f"  function: {spec.function.name}",
             f"  table: {spec.table.name}",
         ]
