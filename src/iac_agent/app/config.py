@@ -269,3 +269,44 @@ def load_openai_api_key_from_env(env: Mapping[str, str] | None = None) -> Secret
             f"{_ENV_OPENAI_API_KEY} must be set explicitly — there is no default API key"
         )
     return SecretStr(api_key)
+
+
+_ENV_OBSERVABILITY = "IAC_AGENT_OBSERVABILITY"
+
+
+class ObservabilityMode(StrEnum):
+    OFF = "off"
+    LANGFUSE = "langfuse"
+
+
+class ObservabilityConfigurationError(MissingConfigurationError):
+    """The process asked for an observability backend this build cannot
+    construct. Distinct from a telemetry failure after a workflow has
+    already produced its result."""
+
+
+@dataclass(frozen=True)
+class ObservabilitySettings:
+    """Non-secret observability selection. Keys never live here."""
+
+    mode: ObservabilityMode = ObservabilityMode.OFF
+
+
+def load_observability_settings_from_env(
+    env: Mapping[str, str] | None = None,
+) -> ObservabilitySettings:
+    """Read `IAC_AGENT_OBSERVABILITY`.
+
+    Unset, empty, `off`, and `noop` select the disabled mode.
+    `langfuse` is a recognized backend name. Any other value is an
+    invalid configuration.
+    """
+    source = os.environ if env is None else env
+    raw = source.get(_ENV_OBSERVABILITY, "off").strip().lower()
+    if raw in ("", "off", "noop"):
+        return ObservabilitySettings(mode=ObservabilityMode.OFF)
+    if raw == ObservabilityMode.LANGFUSE.value:
+        return ObservabilitySettings(mode=ObservabilityMode.LANGFUSE)
+    raise MissingConfigurationError(
+        f"{_ENV_OBSERVABILITY} must be 'off' or 'langfuse', got {raw!r}"
+    )

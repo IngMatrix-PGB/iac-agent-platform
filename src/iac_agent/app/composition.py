@@ -23,7 +23,8 @@ supports — see `tests/integration/test_application_composition.py`.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import os
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -35,12 +36,19 @@ from iac_agent.app.config import (
     ApplicationConfig,
     IntentInterpreterConfig,
     IntentInterpreterProvider,
+    ObservabilityConfigurationError,
+    ObservabilityMode,
+    ObservabilitySettings,
+    load_observability_settings_from_env,
 )
 from iac_agent.domain.source_control import GitCommitIdentity
 from iac_agent.execution.terraform_runner import TerraformRunner
 from iac_agent.git.github import GitHubRepository, GitHubSourceControl, HttpTransport
 from iac_agent.graph.workflow import build_sqs_workflow
 from iac_agent.intent.port import IntentInterpreterPort
+from iac_agent.observability.failopen import FailOpenObservability
+from iac_agent.observability.noop import NoOpObservability
+from iac_agent.observability.port import ObservabilityPort
 from iac_agent.persistence.checkpoints import open_sqlite_checkpointer
 from iac_agent.providers.aws.sqs.renderer import TerraformCompositionRenderer
 from iac_agent.security.checkov import CheckovAdapter
@@ -108,6 +116,59 @@ def open_application(
         yield Application(config=config, graph=graph)
 
 
+def build_observability(
+    settings: ObservabilitySettings,
+    *,
+    env: Mapping[str, str] | None = None,
+    adapter_factory=None,
+) -> ObservabilityPort:
+    """Select the observability sink.
+
+    Disabled settings return a fail-open no-op. An explicit `langfuse`
+    selection with missing keys, or a client that cannot be constructed,
+    is a configuration error. It is not downgraded to NoOp. Runtime
+    failures after a sink exists stay inside FailOpenObservability.
+    """
+    if settings.mode is ObservabilityMode.OFF:
+        return FailOpenObservability(NoOpObservability())
+    if settings.mode is not ObservabilityMode.LANGFUSE:
+        raise ObservabilityConfigurationError(
+            "IAC_AGENT_OBSERVABILITY="
+            f"{settings.mode.value} is not a supported observability backend"
+        )
+    source = os.environ if env is None else env
+    missing = [
+        name
+        for name in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY")
+        if not source.get(name)
+    ]
+    if missing:
+        raise ObservabilityConfigurationError(
+            "IAC_AGENT_OBSERVABILITY=langfuse requires " + " and ".join(missing)
+        )
+    factory = adapter_factory if adapter_factory is not None else _default_langfuse_factory
+    try:
+        inner = factory(source)
+    except ObservabilityConfigurationError:
+        raise
+    except Exception as exc:
+        raise ObservabilityConfigurationError(
+            "IAC_AGENT_OBSERVABILITY=langfuse could not be constructed "
+            f"({type(exc).__name__})"
+        ) from exc
+    if inner is None:
+        raise ObservabilityConfigurationError(
+            "IAC_AGENT_OBSERVABILITY=langfuse did not construct an adapter"
+        )
+    return FailOpenObservability(inner)
+
+
+def _default_langfuse_factory(env: Mapping[str, str]):
+    from iac_agent.observability.adapters.langfuse import build_langfuse_observability
+
+    return build_langfuse_observability(env)
+
+
 @dataclass(frozen=True)
 class IntentApplication:
     """Composition holder — lifetime only, no business decisions.
@@ -144,11 +205,13 @@ def open_intent_application(
     with open_application(
         config, github_token=github_token, github_transport=github_transport
     ) as application:
-        iac = IacApplication.from_application(application)
+        observability = build_observability(load_observability_settings_from_env())
+        iac = IacApplication(application.graph, observability=observability)
         service = IntentResolutionService(
             interpreter=interpreter,
             resolver=resolver if resolver is not None else _ArchitectureResolver(),
             application=iac,
+            observability=observability,
         )
         yield IntentApplication(config=application.config, intent_service=service, application=iac)
 

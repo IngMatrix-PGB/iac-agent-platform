@@ -33,6 +33,11 @@ from iac_agent.domain.plan import PlanSummary
 from iac_agent.domain.security import SecurityGateResult
 from iac_agent.domain.source_control import PullRequestResult
 from iac_agent.domain.workflow import WorkflowError, WorkflowStage, WorkflowStatus
+from iac_agent.observability.failopen import FailOpenObservability
+from iac_agent.observability.noop import NoOpObservability
+from iac_agent.observability.port import ObservabilityPort
+from iac_agent.observability.project import project_workflow
+from iac_agent.observability.sanitize import sanitize_telemetry
 from iac_agent.persistence.checkpoints import workflow_config
 from iac_agent.request import IacRequestSpec
 
@@ -87,8 +92,18 @@ class IacApplication:
     graph/checkpointer's own guarantee, already proven in Batch 12).
     """
 
-    def __init__(self, graph: CompiledStateGraph) -> None:
+    def __init__(
+        self,
+        graph: CompiledStateGraph,
+        *,
+        observability: ObservabilityPort | None = None,
+    ) -> None:
         self._graph = graph
+        self._observability = (
+            observability
+            if observability is not None
+            else FailOpenObservability(NoOpObservability())
+        )
 
     @classmethod
     def from_application(cls, application: Application) -> IacApplication:
@@ -100,7 +115,7 @@ class IacApplication:
         `AWAITING_APPROVAL`."""
         config = workflow_config(request_id)
         result = self._graph.invoke({"request_id": request_id, "resource_spec": spec}, config)
-        return _to_view(request_id, result)
+        return self._emit(request_id, result, kind="submit")
 
     def resume(self, request_id: str, decision: ApprovalDecision) -> WorkflowView:
         """Resume a durably-paused workflow with a human decision. Never
@@ -108,7 +123,7 @@ class IacApplication:
         service ever supplies a decision to the graph."""
         config = workflow_config(request_id)
         result = self._graph.invoke(Command(resume=decision.value), config)
-        return _to_view(request_id, result)
+        return self._emit(request_id, result, kind="resume")
 
     def get_state(self, request_id: str) -> WorkflowView:
         """Read the current durable state. Never executes a node, never
@@ -117,6 +132,16 @@ class IacApplication:
         config = workflow_config(request_id)
         snapshot = self._graph.get_state(config)
         return _to_view(request_id, snapshot.values)
+
+    def _emit(self, request_id: str, values: dict, *, kind: str) -> WorkflowView:
+        view = _to_view(request_id, values)
+        self._observability.record_workflow(sanitize_telemetry(project_workflow(view, kind=kind)))
+        if view.workflow_status is not WorkflowStatus.AWAITING_APPROVAL:
+            self._observability.record_workflow(
+                sanitize_telemetry(project_workflow(view, kind="terminal"))
+            )
+        self._observability.flush()
+        return view
 
 
 #: Zero-cost backward-compatible alias — mirrors `build_sqs_workflow`
