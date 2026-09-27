@@ -8,11 +8,18 @@ of one representative spec per composition type, not runtime
 metaprogramming. Adding a third composition means adding one entry
 here, exactly like every other registration touchpoint this test
 checks.
+
+Batch 26 note: `API_GATEWAY_LAMBDA_DYNAMODB`'s Checkov profile was a
+temporary `xfail(strict=True)` forward reference through Gate A; Gate
+B's empirical, real-scan discovery (Task 16) closed it — see
+`iac_agent.security.composition_checkov_profiles`'s own module
+docstring for the real scan result.
 """
 
 from __future__ import annotations
 
 from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec, HttpMethod, RouteSpec
+from iac_agent.compositions.api_lambda_dynamodb.contract import ApiLambdaDynamoDbSpec
 from iac_agent.compositions.resource import CompositionSpec, composition_type_of
 from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
 from iac_agent.domain.composition import CompositionType
@@ -54,6 +61,17 @@ _EXAMPLE_SPECS: dict[CompositionType, CompositionSpec] = {
         ),
         route=RouteSpec(method=HttpMethod.POST, path="/orders"),
     ),
+    CompositionType.API_GATEWAY_LAMBDA_DYNAMODB: ApiLambdaDynamoDbSpec(
+        name="orders-api-dynamodb-worker",
+        api=ApiGatewayResourceSpec(name="orders-api-dynamodb"),
+        function=LambdaResourceSpec(
+            name="orders-dynamodb-handler", handler="app.handler", reserved_concurrency=5
+        ),
+        route=RouteSpec(method=HttpMethod.POST, path="/orders"),
+        table=DynamoDBResourceSpec(
+            name="orders-dynamodb-table", partition_key=DynamoDBKeySpec(name="id", type="S")
+        ),
+    ),
 }
 
 #: Every trusted-module resource type each composition's constituent
@@ -67,6 +85,11 @@ _CONSTITUENT_RESOURCE_TYPES: dict[CompositionType, tuple[ResourceType, ...]] = {
         ResourceType.DYNAMODB,
     ),
     CompositionType.API_GATEWAY_LAMBDA: (ResourceType.API_GATEWAY, ResourceType.LAMBDA),
+    CompositionType.API_GATEWAY_LAMBDA_DYNAMODB: (
+        ResourceType.API_GATEWAY,
+        ResourceType.LAMBDA,
+        ResourceType.DYNAMODB,
+    ),
 }
 
 
@@ -140,8 +163,29 @@ def test_every_composition_type_policy_evaluation_covers_its_required_ids():
 
 
 def test_every_composition_type_has_a_checkov_profile():
+    # Gate B, Task 16 closed this forward reference: every CompositionType
+    # now has a real, empirically-derived profile (see
+    # iac_agent.security.composition_checkov_profiles's own module
+    # docstring for the API_GATEWAY_LAMBDA_DYNAMODB discovery result).
     for composition_type in CompositionType:
         composition_checkov_profile_for(composition_type)  # must not raise
+
+
+def test_api_gateway_lambda_dynamodb_checkov_profile_is_frozen_to_the_empirical_result():
+    """Freezes the exact, empirically-derived skip list (Batch 26, Gate
+    B, Task 16) — a regression here means the profile silently drifted
+    from the real scan result it was derived from."""
+    profile = composition_checkov_profile_for(CompositionType.API_GATEWAY_LAMBDA_DYNAMODB)
+    assert set(profile.skipped_checks) == {
+        "CKV_AWS_76",
+        "CKV_AWS_116",
+        "CKV_AWS_117",
+        "CKV_AWS_119",
+        "CKV_AWS_158",
+        "CKV_AWS_173",
+        "CKV_AWS_272",
+        "CKV_AWS_309",
+    }
 
 
 def test_every_composition_types_constituent_resource_types_have_trusted_module_dirs():

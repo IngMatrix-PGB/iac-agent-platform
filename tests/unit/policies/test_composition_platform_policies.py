@@ -11,11 +11,17 @@ from __future__ import annotations
 import pytest
 
 from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec, HttpMethod, RouteSpec
+from iac_agent.compositions.api_lambda_dynamodb.contract import ApiLambdaDynamoDbSpec
 from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
 from iac_agent.domain.composition import CompositionType
 from iac_agent.domain.plan import PlanAction, PlanSummary, ResourceChange
 from iac_agent.domain.security import PolicyStatus
 from iac_agent.policies.composition import (
+    API_LAMBDA_DYNAMODB_INVOKE_PERMISSION_REQUIRED,
+    API_LAMBDA_DYNAMODB_NO_WILDCARD_IAM,
+    API_LAMBDA_DYNAMODB_NO_WILDCARD_PRINCIPAL,
+    API_LAMBDA_DYNAMODB_ROUTE_EXPLICIT,
+    API_LAMBDA_DYNAMODB_WRITE_SCOPE_REQUIRED,
     API_LAMBDA_INVOKE_PERMISSION_REQUIRED,
     API_LAMBDA_NO_WILDCARD_PRINCIPAL,
     API_LAMBDA_ROUTE_EXPLICIT,
@@ -50,6 +56,20 @@ def _api_lambda_spec(**overrides) -> ApiLambdaSpec:
     }
     defaults.update(overrides)
     return ApiLambdaSpec(**defaults)
+
+
+def _api_lambda_dynamodb_spec(**overrides) -> ApiLambdaDynamoDbSpec:
+    defaults = {
+        "name": "orders-api-worker",
+        "api": ApiGatewayResourceSpec(name="orders-api"),
+        "function": LambdaResourceSpec(name="orders-handler", handler="app.handler"),
+        "route": RouteSpec(method=HttpMethod.POST, path="/orders"),
+        "table": DynamoDBResourceSpec(
+            name="orders-table", partition_key=DynamoDBKeySpec(name="id", type="S")
+        ),
+    }
+    defaults.update(overrides)
+    return ApiLambdaDynamoDbSpec(**defaults)
 
 
 def _spec(**overrides) -> ServerlessWorkerSpec:
@@ -295,3 +315,138 @@ def test_required_api_lambda_composition_policy_ids_registration_is_complete():
 def test_unsupported_composition_spec_type_raises_value_error():
     with pytest.raises(ValueError, match="unsupported composition spec type"):
         evaluate_composition_policies(object(), _clean_plan_summary())  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# ApiLambdaDynamoDbSpec (Batch 26)
+# ---------------------------------------------------------------------------
+
+
+def test_all_nine_api_lambda_dynamodb_policies_are_present_and_pass_for_a_secure_composition():
+    spec = _api_lambda_dynamodb_spec(
+        function=LambdaResourceSpec(
+            name="orders-handler", handler="app.handler", reserved_concurrency=5
+        )
+    )
+    evaluation = evaluate_composition_policies(spec, _clean_plan_summary())
+    findings_by_id = {f.policy_id: f for f in evaluation.findings}
+
+    assert set(findings_by_id) == {
+        API_LAMBDA_DYNAMODB_INVOKE_PERMISSION_REQUIRED,
+        API_LAMBDA_DYNAMODB_NO_WILDCARD_PRINCIPAL,
+        API_LAMBDA_DYNAMODB_ROUTE_EXPLICIT,
+        API_LAMBDA_DYNAMODB_WRITE_SCOPE_REQUIRED,
+        API_LAMBDA_DYNAMODB_NO_WILDCARD_IAM,
+        LAMBDA_TRACING_RECOMMENDED,
+        LAMBDA_RESERVED_CONCURRENCY_RECOMMENDED,
+        DDB_PITR_RECOMMENDED,
+        DDB_DELETION_PROTECTION_RECOMMENDED,
+        TF_NO_DESTRUCTIVE_CHANGES,
+    }
+    assert all(f.status is PolicyStatus.PASS for f in findings_by_id.values())
+    assert evaluation.overall_status is PolicyStatus.PASS
+
+
+def test_api_lambda_dynamodb_tracing_pass_through_warns_inside_a_composition():
+    spec = _api_lambda_dynamodb_spec(
+        function=LambdaResourceSpec(
+            name="orders-handler",
+            handler="app.handler",
+            reserved_concurrency=5,
+            tracing_mode=LambdaTracingMode.PASS_THROUGH,
+        )
+    )
+    evaluation = evaluate_composition_policies(spec, _clean_plan_summary())
+    finding = next(f for f in evaluation.findings if f.policy_id == LAMBDA_TRACING_RECOMMENDED)
+    assert finding.status is PolicyStatus.WARN
+    assert evaluation.overall_status is PolicyStatus.WARN
+
+
+def test_api_lambda_dynamodb_reserved_concurrency_omitted_warns_inside_a_composition():
+    evaluation = evaluate_composition_policies(_api_lambda_dynamodb_spec(), _clean_plan_summary())
+    finding = next(
+        f for f in evaluation.findings if f.policy_id == LAMBDA_RESERVED_CONCURRENCY_RECOMMENDED
+    )
+    assert finding.status is PolicyStatus.WARN
+    assert evaluation.overall_status is PolicyStatus.WARN
+
+
+def test_api_lambda_dynamodb_pitr_disabled_warns_inside_a_composition():
+    spec = _api_lambda_dynamodb_spec(
+        table=DynamoDBResourceSpec(
+            name="orders-table",
+            partition_key=DynamoDBKeySpec(name="pk", type="S"),
+            point_in_time_recovery=False,
+        )
+    )
+    evaluation = evaluate_composition_policies(spec, _clean_plan_summary())
+    finding = next(f for f in evaluation.findings if f.policy_id == DDB_PITR_RECOMMENDED)
+    assert finding.status is PolicyStatus.WARN
+    assert evaluation.overall_status is PolicyStatus.WARN
+
+
+def test_api_lambda_dynamodb_deletion_protection_disabled_warns_inside_a_composition():
+    spec = _api_lambda_dynamodb_spec(
+        table=DynamoDBResourceSpec(
+            name="orders-table",
+            partition_key=DynamoDBKeySpec(name="pk", type="S"),
+            deletion_protection=False,
+        )
+    )
+    evaluation = evaluate_composition_policies(spec, _clean_plan_summary())
+    finding = next(
+        f for f in evaluation.findings if f.policy_id == DDB_DELETION_PROTECTION_RECOMMENDED
+    )
+    assert finding.status is PolicyStatus.WARN
+    assert evaluation.overall_status is PolicyStatus.WARN
+
+
+def test_api_lambda_dynamodb_invoke_permission_policy_names_the_function():
+    evaluation = evaluate_composition_policies(_api_lambda_dynamodb_spec(), _clean_plan_summary())
+    finding = next(
+        f
+        for f in evaluation.findings
+        if f.policy_id == API_LAMBDA_DYNAMODB_INVOKE_PERMISSION_REQUIRED
+    )
+    assert "orders-handler" in finding.message
+
+
+def test_api_lambda_dynamodb_route_explicit_policy_names_the_route():
+    evaluation = evaluate_composition_policies(_api_lambda_dynamodb_spec(), _clean_plan_summary())
+    finding = next(
+        f for f in evaluation.findings if f.policy_id == API_LAMBDA_DYNAMODB_ROUTE_EXPLICIT
+    )
+    assert "POST /orders" in finding.message
+
+
+def test_api_lambda_dynamodb_write_scope_policy_names_the_table_and_grants_only_put_item():
+    evaluation = evaluate_composition_policies(_api_lambda_dynamodb_spec(), _clean_plan_summary())
+    finding = next(
+        f for f in evaluation.findings if f.policy_id == API_LAMBDA_DYNAMODB_WRITE_SCOPE_REQUIRED
+    )
+    assert "orders-table" in finding.message
+    assert "dynamodb:PutItem" in finding.message
+    for forbidden in ("GetItem", "UpdateItem", "DeleteItem", "Query", "Scan", "BatchWriteItem"):
+        assert forbidden not in finding.message
+
+
+def test_api_lambda_dynamodb_destructive_plan_blocks_via_the_shared_platform_wide_policy():
+    evaluation = evaluate_composition_policies(
+        _api_lambda_dynamodb_spec(), _destructive_plan_summary()
+    )
+    finding = next(f for f in evaluation.findings if f.policy_id == TF_NO_DESTRUCTIVE_CHANGES)
+    assert finding.status is PolicyStatus.BLOCK
+    assert evaluation.overall_status is PolicyStatus.BLOCK
+
+
+def test_required_api_lambda_dynamodb_composition_policy_ids_registration_is_complete():
+    required_ids = REQUIRED_COMPOSITION_POLICY_IDS_BY_COMPOSITION_TYPE[
+        CompositionType.API_GATEWAY_LAMBDA_DYNAMODB
+    ]
+    spec = _api_lambda_dynamodb_spec(
+        function=LambdaResourceSpec(
+            name="orders-handler", handler="app.handler", reserved_concurrency=5
+        )
+    )
+    evaluation = evaluate_composition_policies(spec, _clean_plan_summary())
+    assert set(required_ids) == {f.policy_id for f in evaluation.findings}

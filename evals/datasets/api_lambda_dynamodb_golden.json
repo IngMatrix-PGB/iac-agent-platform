@@ -1,0 +1,207 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "secure_defaults",
+      "description": "A minimal valid composition with an explicit reserved concurrency (needed for a clean PASS) and the table left at its safe defaults (PITR on, deletion protection on).",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler", "reserved_concurrency": 5},
+        "route": {"method": "POST", "path": "/orders"},
+        "table": {"name": "orders-table", "partition_key": {"name": "id", "type": "S"}}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-api-worker",
+        "api_name": "orders-api",
+        "function_name": "orders-handler",
+        "route_key": "POST /orders",
+        "table_name": "orders-table",
+        "point_in_time_recovery": true,
+        "deletion_protection": true,
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "get_route",
+      "description": "A valid composition with an explicit GET / route.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler", "reserved_concurrency": 5},
+        "route": {"method": "GET", "path": "/"},
+        "table": {"name": "orders-table", "partition_key": {"name": "id", "type": "S"}}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-api-worker",
+        "api_name": "orders-api",
+        "function_name": "orders-handler",
+        "route_key": "GET /",
+        "table_name": "orders-table",
+        "overall_security_status": "pass"
+      }
+    },
+    {
+      "id": "tracing_pass_through_warns",
+      "description": "A valid composition whose Lambda function has X-Ray tracing set to PassThrough, proving WARN propagates from the constituent Lambda's own tracing policy into the composition's overall security status.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler", "tracing_mode": "PassThrough", "reserved_concurrency": 5},
+        "route": {"method": "POST", "path": "/orders"},
+        "table": {"name": "orders-table", "partition_key": {"name": "id", "type": "S"}}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-api-worker",
+        "api_name": "orders-api",
+        "function_name": "orders-handler",
+        "route_key": "POST /orders",
+        "table_name": "orders-table",
+        "tracing_mode": "PassThrough",
+        "overall_security_status": "warn"
+      }
+    },
+    {
+      "id": "no_reserved_concurrency_warns",
+      "description": "A valid composition whose Lambda function omits reserved concurrency, proving WARN propagates from the constituent Lambda's own reserved-concurrency policy.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler"},
+        "route": {"method": "POST", "path": "/orders"},
+        "table": {"name": "orders-table", "partition_key": {"name": "id", "type": "S"}}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-api-worker",
+        "api_name": "orders-api",
+        "function_name": "orders-handler",
+        "route_key": "POST /orders",
+        "table_name": "orders-table",
+        "reserved_concurrency": null,
+        "overall_security_status": "warn"
+      }
+    },
+    {
+      "id": "pitr_disabled_warns",
+      "description": "A valid composition whose table has point-in-time recovery explicitly disabled, proving WARN propagates from the constituent DynamoDB table's own PITR policy.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler", "reserved_concurrency": 5},
+        "route": {"method": "POST", "path": "/orders"},
+        "table": {"name": "orders-table", "partition_key": {"name": "id", "type": "S"}, "point_in_time_recovery": false}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-api-worker",
+        "api_name": "orders-api",
+        "function_name": "orders-handler",
+        "route_key": "POST /orders",
+        "table_name": "orders-table",
+        "point_in_time_recovery": false,
+        "overall_security_status": "warn"
+      }
+    },
+    {
+      "id": "deletion_protection_disabled_warns",
+      "description": "A valid composition whose table has deletion protection explicitly disabled, proving WARN propagates from the constituent DynamoDB table's own deletion-protection policy.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler", "reserved_concurrency": 5},
+        "route": {"method": "POST", "path": "/orders"},
+        "table": {"name": "orders-table", "partition_key": {"name": "id", "type": "S"}, "deletion_protection": false}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-api-worker",
+        "api_name": "orders-api",
+        "function_name": "orders-handler",
+        "route_key": "POST /orders",
+        "table_name": "orders-table",
+        "deletion_protection": false,
+        "overall_security_status": "warn"
+      }
+    },
+    {
+      "id": "invalid_route_missing_slash",
+      "description": "A route path missing its required leading '/' must be rejected at construction.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler"},
+        "route": {"method": "POST", "path": "orders"},
+        "table": {"name": "orders-table", "partition_key": {"name": "id", "type": "S"}}
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_route_method",
+      "description": "An unsupported HTTP method (ANY) must be rejected.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler"},
+        "route": {"method": "ANY", "path": "/orders"},
+        "table": {"name": "orders-table", "partition_key": {"name": "id", "type": "S"}}
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_duplicate_api_and_table_names",
+      "description": "A composition whose api and table share the same name — this platform never silently renames a resource to force uniqueness, so this must be rejected.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders"},
+        "function": {"name": "orders-handler", "handler": "app.handler"},
+        "route": {"method": "POST", "path": "/orders"},
+        "table": {"name": "orders", "partition_key": {"name": "id", "type": "S"}}
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "invalid_missing_partition_key",
+      "description": "A table missing its required partition key must be rejected at construction.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler"},
+        "route": {"method": "POST", "path": "/orders"},
+        "table": {"name": "orders-table"}
+      },
+      "expected": {
+        "valid": false
+      }
+    },
+    {
+      "id": "deterministic_defaults",
+      "description": "Constructing the same minimal input twice must yield identical field values.",
+      "input": {
+        "name": "orders-api-worker",
+        "api": {"name": "orders-api"},
+        "function": {"name": "orders-handler", "handler": "app.handler", "reserved_concurrency": 5},
+        "route": {"method": "POST", "path": "/orders"},
+        "table": {"name": "orders-table", "partition_key": {"name": "id", "type": "S"}}
+      },
+      "expected": {
+        "valid": true,
+        "name": "orders-api-worker",
+        "api_name": "orders-api",
+        "function_name": "orders-handler",
+        "route_key": "POST /orders",
+        "table_name": "orders-table",
+        "overall_security_status": "pass"
+      }
+    }
+  ]
+}

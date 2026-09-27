@@ -133,6 +133,8 @@ from langgraph.types import interrupt
 
 from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec
 from iac_agent.compositions.api_lambda.renderer import ApiLambdaTerraformRenderer
+from iac_agent.compositions.api_lambda_dynamodb.contract import ApiLambdaDynamoDbSpec
+from iac_agent.compositions.api_lambda_dynamodb.renderer import ApiLambdaDynamoDbTerraformRenderer
 from iac_agent.compositions.resource import composition_type_of
 from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
 from iac_agent.compositions.serverless_worker.renderer import ServerlessWorkerTerraformRenderer
@@ -321,6 +323,18 @@ def _pr_body(state: WorkflowState) -> str:
                 f"Lambda: {spec.function.name}\n"
                 f"DynamoDB: {spec.table.name}\n"
             )
+        case ApiLambdaDynamoDbSpec():
+            # Checked before ApiLambdaSpec() only for readability — the
+            # two are structurally distinct types (see
+            # compositions/resource.py), so match's isinstance semantics
+            # make ordering irrelevant to correctness here.
+            identity_lines = (
+                f"Composition type: {composition_type_of(spec).value}\n"
+                f"API: {spec.api.name}\n"
+                f"Route: {spec.route.route_key}\n"
+                f"Lambda: {spec.function.name}\n"
+                f"Table: {spec.table.name}\n"
+            )
         case ApiLambdaSpec():
             identity_lines = (
                 f"Composition type: {composition_type_of(spec).value}\n"
@@ -343,6 +357,35 @@ def _pr_body(state: WorkflowState) -> str:
     )
 
 
+def _resource_kind_of(spec: IacRequestSpec) -> str:
+    """The human-readable "kind" name used in the generated commit
+    message (`"feat(iac): add {kind} proposal <request_id>"`).
+    Extracted to module level (Batch 26) so it's directly unit-testable
+    without invoking the full graph — mirrors `_pr_body`'s own,
+    already-existing module-level pattern.
+    """
+    match spec:
+        case ServerlessWorkerSpec():
+            # Matches the batch's own example verbatim:
+            # "feat(iac): add serverless worker proposal <request_id>".
+            return "serverless worker"
+        case ApiLambdaDynamoDbSpec():
+            # Checked before ApiLambdaSpec() only for readability — see
+            # the identity_lines match in _pr_body above for why
+            # ordering doesn't affect correctness here.
+            #
+            # Batch 26 closed decision: "api lambda dynamodb"
+            # (lowercase-with-spaces, matching "serverless worker"'s
+            # style — not ApiLambdaSpec's own "API Lambda" casing).
+            return "api lambda dynamodb"
+        case ApiLambdaSpec():
+            # Matches Batch 20's own example verbatim:
+            # "feat(iac): add API Lambda proposal <request_id>".
+            return "API Lambda"
+        case _:
+            return _RESOURCE_KIND_DISPLAY_NAMES[resource_type_of(spec)]
+
+
 def build_iac_workflow(
     *,
     renderer: AWSResourceRenderer,
@@ -355,6 +398,7 @@ def build_iac_workflow(
     checkpointer: BaseCheckpointSaver | None = None,
     serverless_worker_renderer: ServerlessWorkerTerraformRenderer | None = None,
     api_lambda_renderer: ApiLambdaTerraformRenderer | None = None,
+    api_lambda_dynamodb_renderer: ApiLambdaDynamoDbTerraformRenderer | None = None,
 ) -> CompiledStateGraph:
     """Build and compile the deterministic IaC request workflow graph.
 
@@ -387,6 +431,7 @@ def build_iac_workflow(
         aws_renderer=renderer,
         serverless_worker_renderer=serverless_worker_renderer,
         api_lambda_renderer=api_lambda_renderer,
+        api_lambda_dynamodb_renderer=api_lambda_dynamodb_renderer,
     )
 
     def render_terraform(state: WorkflowState) -> dict:
@@ -444,7 +489,7 @@ def build_iac_workflow(
         try:
             spec: IacRequestSpec = state["resource_spec"]
             match spec:
-                case ServerlessWorkerSpec() | ApiLambdaSpec():
+                case ServerlessWorkerSpec() | ApiLambdaSpec() | ApiLambdaDynamoDbSpec():
                     platform_evaluation = evaluate_composition_policies(spec, state["plan_summary"])
                 case _:
                     platform_evaluation = evaluate_platform_policies(spec, state["plan_summary"])
@@ -461,7 +506,7 @@ def build_iac_workflow(
         try:
             spec: IacRequestSpec = state["resource_spec"]
             match spec:
-                case ServerlessWorkerSpec() | ApiLambdaSpec():
+                case ServerlessWorkerSpec() | ApiLambdaSpec() | ApiLambdaDynamoDbSpec():
                     profile = composition_checkov_profile_for(composition_type_of(spec))
                 case _:
                     profile = checkov_profile_for(resource_type_of(spec))
@@ -485,7 +530,7 @@ def build_iac_workflow(
         try:
             spec: IacRequestSpec = state["resource_spec"]
             match spec:
-                case ServerlessWorkerSpec() | ApiLambdaSpec():
+                case ServerlessWorkerSpec() | ApiLambdaSpec() | ApiLambdaDynamoDbSpec():
                     gate_result = evaluate_security_gate(
                         state["platform_evaluation"],
                         state["checkov_result"],
@@ -564,17 +609,7 @@ def build_iac_workflow(
         try:
             branch_name = derive_branch_name(request_id)
             spec: IacRequestSpec = state["resource_spec"]
-            match spec:
-                case ServerlessWorkerSpec():
-                    # Matches the batch's own example verbatim:
-                    # "feat(iac): add serverless worker proposal <request_id>".
-                    resource_kind = "serverless worker"
-                case ApiLambdaSpec():
-                    # Matches Batch 20's own example verbatim:
-                    # "feat(iac): add API Lambda proposal <request_id>".
-                    resource_kind = "API Lambda"
-                case _:
-                    resource_kind = _RESOURCE_KIND_DISPLAY_NAMES[resource_type_of(spec)]
+            resource_kind = _resource_kind_of(spec)
             pr_result = source_control_port.publish_change(
                 request_id=request_id,
                 base_branch=base_branch,

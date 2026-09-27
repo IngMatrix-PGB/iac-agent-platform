@@ -1,7 +1,8 @@
 """Tests for `ArchitectureResolver.resolve()` — the closed, fail-closed
-allowlist (Batch 21, Task 4, spec §7.1).
+allowlist (Batch 21, Task 4, spec §7.1; extended to a fourth pattern by
+Batch 26).
 
-Exactly three resolvable architecture patterns exist. There is no
+Exactly four resolvable architecture patterns exist. There is no
 best-match, nearest-match, or fallback architecture anywhere in this
 module — an unlisted combination always returns
 `UnsupportedArchitecture`, never an approximation.
@@ -12,6 +13,7 @@ from __future__ import annotations
 import pytest
 
 from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec
+from iac_agent.compositions.api_lambda_dynamodb.contract import ApiLambdaDynamoDbSpec
 from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
 from iac_agent.intent.models import ArchitectureIntent, Capability, InteractionPattern, WorkloadType
 from iac_agent.intent.resolver import (
@@ -41,6 +43,22 @@ def test_api_synchronous_http_endpoint_resolves_to_api_lambda_spec():
     assert isinstance(result, ResolvedArchitecture)
     assert isinstance(result.request_spec, ApiLambdaSpec)
     assert result.matched_pattern == "api+synchronous+http_endpoint"
+
+
+def test_api_synchronous_http_endpoint_persistence_resolves_to_api_lambda_dynamodb_spec():
+    """Batch 26: the third composition. Previously this exact
+    combination fell through to UnsupportedArchitecture (see git
+    history of this test file) — deliberately changed by design, not a
+    regression."""
+    intent = ArchitectureIntent(
+        workload_type=WorkloadType.API,
+        interaction_pattern=InteractionPattern.SYNCHRONOUS,
+        capabilities=frozenset({Capability.HTTP_ENDPOINT, Capability.PERSISTENCE}),
+    )
+    result = _resolver().resolve(intent=intent, request_id=_REQUEST_ID)
+    assert isinstance(result, ResolvedArchitecture)
+    assert isinstance(result.request_spec, ApiLambdaDynamoDbSpec)
+    assert result.matched_pattern == "api+synchronous+http_endpoint+persistence"
 
 
 def test_worker_asynchronous_queue_processing_persistence_resolves_to_serverless_worker_spec():
@@ -99,6 +117,17 @@ def test_api_unspecified_interaction_pattern_requires_clarification():
     assert result.request.reason == ClarificationReason.INTERACTION_PATTERN_REQUIRED
 
 
+def test_api_http_endpoint_persistence_unspecified_interaction_pattern_requires_clarification():
+    intent = ArchitectureIntent(
+        workload_type=WorkloadType.API,
+        interaction_pattern=InteractionPattern.UNSPECIFIED,
+        capabilities=frozenset({Capability.HTTP_ENDPOINT, Capability.PERSISTENCE}),
+    )
+    result = _resolver().resolve(intent=intent, request_id=_REQUEST_ID)
+    assert isinstance(result, ClarificationRequired)
+    assert result.request.reason == ClarificationReason.INTERACTION_PATTERN_REQUIRED
+
+
 def test_worker_unspecified_interaction_pattern_requires_clarification():
     intent = ArchitectureIntent(
         workload_type=WorkloadType.WORKER,
@@ -111,9 +140,31 @@ def test_worker_unspecified_interaction_pattern_requires_clarification():
 
 
 def test_api_synchronous_wrong_capability_set_returns_unsupported_combination():
+    # HTTP_ENDPOINT + PERSISTENCE alone is now the composition #3
+    # pattern (see test_api_synchronous_http_endpoint_persistence_
+    # resolves_to_api_lambda_dynamodb_spec above) — this uses a third,
+    # still-unmapped capability added on top to keep proving the
+    # fail-closed default for a genuinely unsupported combination.
     intent = ArchitectureIntent(
         workload_type=WorkloadType.API,
         interaction_pattern=InteractionPattern.SYNCHRONOUS,
+        capabilities=frozenset(
+            {Capability.HTTP_ENDPOINT, Capability.PERSISTENCE, Capability.QUEUE_PROCESSING}
+        ),
+    )
+    result = _resolver().resolve(intent=intent, request_id=_REQUEST_ID)
+    assert isinstance(result, UnsupportedArchitecture)
+    assert result.reason == UnsupportedReason.UNSUPPORTED_COMBINATION
+
+
+def test_api_asynchronous_with_persistence_returns_unsupported_combination():
+    """Explicit fail-closed proof (design §2): the same capability set
+    that resolves composition #3 under SYNCHRONOUS remains unsupported
+    under ASYNCHRONOUS — no async-API composition exists in this
+    batch."""
+    intent = ArchitectureIntent(
+        workload_type=WorkloadType.API,
+        interaction_pattern=InteractionPattern.ASYNCHRONOUS,
         capabilities=frozenset({Capability.HTTP_ENDPOINT, Capability.PERSISTENCE}),
     )
     result = _resolver().resolve(intent=intent, request_id=_REQUEST_ID)
@@ -233,6 +284,25 @@ def test_resolved_serverless_worker_spec_derives_pairwise_distinct_component_nam
     assert spec.queue.name == "order-worker-queue"
     assert spec.function.name == "order-worker-function"
     assert spec.table.name == "order-worker-table"
+
+
+def test_resolved_api_lambda_dynamodb_spec_derives_pairwise_distinct_component_names():
+    intent = ArchitectureIntent(
+        workload_type=WorkloadType.API,
+        interaction_pattern=InteractionPattern.SYNCHRONOUS,
+        capabilities=frozenset({Capability.HTTP_ENDPOINT, Capability.PERSISTENCE}),
+        logical_name_hint="Order API",
+    )
+    result = _resolver().resolve(intent=intent, request_id=_REQUEST_ID)
+    assert isinstance(result, ResolvedArchitecture)
+    spec: ApiLambdaDynamoDbSpec = result.request_spec
+    names = {spec.name, spec.api.name, spec.function.name, spec.table.name}
+    assert len(names) == 4
+    assert spec.name == "order-api"
+    assert spec.api.name == "order-api-api"
+    assert spec.function.name == "order-api-function"
+    assert spec.table.name == "order-api-table"
+    assert spec.route.route_key == "POST /invoke"
 
 
 def test_resolved_s3_spec_uses_normalized_logical_name_hint():

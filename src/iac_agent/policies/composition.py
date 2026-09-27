@@ -49,6 +49,7 @@ since this composition has no such sub-resource.
 from __future__ import annotations
 
 from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec
+from iac_agent.compositions.api_lambda_dynamodb.contract import ApiLambdaDynamoDbSpec
 from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
 from iac_agent.domain.composition import CompositionType
 from iac_agent.domain.plan import PlanSummary
@@ -79,6 +80,12 @@ API_LAMBDA_INVOKE_PERMISSION_REQUIRED = "API_LAMBDA_INVOKE_PERMISSION_REQUIRED"
 API_LAMBDA_NO_WILDCARD_PRINCIPAL = "API_LAMBDA_NO_WILDCARD_PRINCIPAL"
 API_LAMBDA_ROUTE_EXPLICIT = "API_LAMBDA_ROUTE_EXPLICIT"
 
+API_LAMBDA_DYNAMODB_INVOKE_PERMISSION_REQUIRED = "API_LAMBDA_DYNAMODB_INVOKE_PERMISSION_REQUIRED"
+API_LAMBDA_DYNAMODB_NO_WILDCARD_PRINCIPAL = "API_LAMBDA_DYNAMODB_NO_WILDCARD_PRINCIPAL"
+API_LAMBDA_DYNAMODB_ROUTE_EXPLICIT = "API_LAMBDA_DYNAMODB_ROUTE_EXPLICIT"
+API_LAMBDA_DYNAMODB_WRITE_SCOPE_REQUIRED = "API_LAMBDA_DYNAMODB_WRITE_SCOPE_REQUIRED"
+API_LAMBDA_DYNAMODB_NO_WILDCARD_IAM = "API_LAMBDA_DYNAMODB_NO_WILDCARD_IAM"
+
 #: The composition counterpart to `iac_agent.policies.platform.
 #: REQUIRED_PLATFORM_POLICY_IDS_BY_RESOURCE_TYPE` — the single source of
 #: truth `iac_agent.security.gate.evaluate_security_gate` reads (via its
@@ -103,11 +110,23 @@ REQUIRED_COMPOSITION_POLICY_IDS_BY_COMPOSITION_TYPE: dict[CompositionType, tuple
         LAMBDA_RESERVED_CONCURRENCY_RECOMMENDED,
         TF_NO_DESTRUCTIVE_CHANGES,
     ),
+    CompositionType.API_GATEWAY_LAMBDA_DYNAMODB: (
+        API_LAMBDA_DYNAMODB_INVOKE_PERMISSION_REQUIRED,
+        API_LAMBDA_DYNAMODB_NO_WILDCARD_PRINCIPAL,
+        API_LAMBDA_DYNAMODB_ROUTE_EXPLICIT,
+        API_LAMBDA_DYNAMODB_WRITE_SCOPE_REQUIRED,
+        API_LAMBDA_DYNAMODB_NO_WILDCARD_IAM,
+        LAMBDA_TRACING_RECOMMENDED,
+        LAMBDA_RESERVED_CONCURRENCY_RECOMMENDED,
+        DDB_PITR_RECOMMENDED,
+        DDB_DELETION_PROTECTION_RECOMMENDED,
+        TF_NO_DESTRUCTIVE_CHANGES,
+    ),
 }
 
 
 def evaluate_composition_policies(
-    spec: ServerlessWorkerSpec | ApiLambdaSpec,
+    spec: ServerlessWorkerSpec | ApiLambdaSpec | ApiLambdaDynamoDbSpec,
     plan_summary: PlanSummary,
 ) -> PolicyEvaluation:
     """Evaluate every applicable composition policy for `spec` and
@@ -122,6 +141,22 @@ def evaluate_composition_policies(
                 _evaluate_sqs_lambda_binding_policy(spec),
                 _evaluate_dynamodb_write_scope_policy(spec),
                 _evaluate_no_wildcard_iam_policy(),
+                evaluate_lambda_tracing_policy(spec.function),
+                evaluate_lambda_reserved_concurrency_policy(spec.function),
+                evaluate_dynamodb_pitr_policy(spec.table),
+                evaluate_dynamodb_deletion_protection_policy(spec.table),
+            )
+        case ApiLambdaDynamoDbSpec():
+            # Checked before ApiLambdaSpec() only for readability — the
+            # two are structurally distinct types (see
+            # compositions/resource.py), so match's isinstance semantics
+            # make ordering irrelevant to correctness here.
+            composition_findings = (
+                _evaluate_api_lambda_dynamodb_invoke_permission_policy(spec),
+                _evaluate_api_lambda_dynamodb_no_wildcard_principal_policy(),
+                _evaluate_api_lambda_dynamodb_route_explicit_policy(spec),
+                _evaluate_api_lambda_dynamodb_write_scope_policy(spec),
+                _evaluate_api_lambda_dynamodb_no_wildcard_iam_policy(),
                 evaluate_lambda_tracing_policy(spec.function),
                 evaluate_lambda_reserved_concurrency_policy(spec.function),
                 evaluate_dynamodb_pitr_policy(spec.table),
@@ -303,6 +338,121 @@ def _evaluate_api_lambda_route_explicit_policy(spec: ApiLambdaSpec) -> SecurityF
         message=(
             f"Route {spec.route.route_key!r} is explicit — never an implicit "
             "$default catch-all route."
+        ),
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+# ---------------------------------------------------------------------------
+# API Gateway -> Lambda -> DynamoDB composition policies (Batch 26)
+# ---------------------------------------------------------------------------
+
+
+def _evaluate_api_lambda_dynamodb_invoke_permission_policy(
+    spec: ApiLambdaDynamoDbSpec,
+) -> SecurityFinding:
+    """API_LAMBDA_DYNAMODB_INVOKE_PERMISSION_REQUIRED — always PASS.
+
+    Same evidence source and renderer guarantee as
+    `API_LAMBDA_INVOKE_PERMISSION_REQUIRED` — the composition renderer
+    always emits exactly one `aws_lambda_permission` granting
+    `lambda:InvokeFunction` to `apigateway.amazonaws.com`, scoped to
+    this API's own execution ARN/stage/method/path (see
+    `iac_agent.compositions.api_lambda_dynamodb.renderer`).
+    """
+    return SecurityFinding(
+        policy_id=API_LAMBDA_DYNAMODB_INVOKE_PERMISSION_REQUIRED,
+        severity=SecuritySeverity.HIGH,
+        status=PolicyStatus.PASS,
+        resource=spec.name,
+        message=(
+            f"Lambda function {spec.function.name!r} grants apigateway.amazonaws.com "
+            "exactly lambda:InvokeFunction via a resource-based permission."
+        ),
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+def _evaluate_api_lambda_dynamodb_no_wildcard_principal_policy() -> SecurityFinding:
+    """API_LAMBDA_DYNAMODB_NO_WILDCARD_PRINCIPAL — always PASS,
+    evidence-only. Mirrors `API_LAMBDA_NO_WILDCARD_PRINCIPAL`'s exact
+    evidence-only pattern."""
+    return SecurityFinding(
+        policy_id=API_LAMBDA_DYNAMODB_NO_WILDCARD_PRINCIPAL,
+        severity=SecuritySeverity.CRITICAL,
+        status=PolicyStatus.PASS,
+        resource=None,
+        message=(
+            "The composition-generated Lambda invocation permission grants only "
+            "the documented apigateway.amazonaws.com principal — never a wildcard "
+            "principal or an unrelated service."
+        ),
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+def _evaluate_api_lambda_dynamodb_route_explicit_policy(
+    spec: ApiLambdaDynamoDbSpec,
+) -> SecurityFinding:
+    """API_LAMBDA_DYNAMODB_ROUTE_EXPLICIT — always PASS. Mirrors
+    `API_LAMBDA_ROUTE_EXPLICIT`'s exact pattern — `route` is a required
+    field, so no representable spec has a missing or implicit
+    `$default` route."""
+    return SecurityFinding(
+        policy_id=API_LAMBDA_DYNAMODB_ROUTE_EXPLICIT,
+        severity=SecuritySeverity.MEDIUM,
+        status=PolicyStatus.PASS,
+        resource=spec.name,
+        message=(
+            f"Route {spec.route.route_key!r} is explicit — never an implicit "
+            "$default catch-all route."
+        ),
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+def _evaluate_api_lambda_dynamodb_write_scope_policy(
+    spec: ApiLambdaDynamoDbSpec,
+) -> SecurityFinding:
+    """API_LAMBDA_DYNAMODB_WRITE_SCOPE_REQUIRED — always PASS.
+
+    Mirrors `SERVERLESS_DDB_WRITE_SCOPE_REQUIRED`'s exact evidence
+    source: the renderer's own fixed, non-caller-configurable choice of
+    exactly one DynamoDB action (`dynamodb:PutItem` — Batch 26's closed
+    IAM decision, never a broader or wildcard set — see
+    `iac_agent.compositions.api_lambda_dynamodb.renderer`). There is no
+    field on this contract through which a caller can request a
+    different or broader DynamoDB action.
+    """
+    return SecurityFinding(
+        policy_id=API_LAMBDA_DYNAMODB_WRITE_SCOPE_REQUIRED,
+        severity=SecuritySeverity.HIGH,
+        status=PolicyStatus.PASS,
+        resource=spec.name,
+        message=(
+            f"Lambda function {spec.function.name!r} is granted dynamodb:PutItem, "
+            f"scoped to table {spec.table.name!r} only."
+        ),
+        source=FindingSource.PLATFORM_POLICY,
+    )
+
+
+def _evaluate_api_lambda_dynamodb_no_wildcard_iam_policy() -> SecurityFinding:
+    """API_LAMBDA_DYNAMODB_NO_WILDCARD_IAM — always PASS, evidence-only.
+
+    Mirrors `SERVERLESS_NO_WILDCARD_IAM`'s exact evidence-only pattern
+    — this is a trusted-renderer invariant, not a fact derivable from
+    `ApiLambdaDynamoDbSpec`'s fields.
+    """
+    return SecurityFinding(
+        policy_id=API_LAMBDA_DYNAMODB_NO_WILDCARD_IAM,
+        severity=SecuritySeverity.CRITICAL,
+        status=PolicyStatus.PASS,
+        resource=None,
+        message=(
+            "Composition-generated IAM policies grant only the documented, "
+            "narrowly-scoped API-Gateway-invoke and DynamoDB-write (PutItem-only) "
+            "actions — never a wildcard action or resource."
         ),
         source=FindingSource.PLATFORM_POLICY,
     )

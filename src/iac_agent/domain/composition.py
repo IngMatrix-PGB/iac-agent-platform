@@ -21,8 +21,10 @@ from enum import StrEnum
 class CompositionType(StrEnum):
     """A bounded, deterministic multi-resource architecture this
     platform can generate. Batch 19 introduced the first member; Batch
-    20 adds a second, proving this stays a small, explicit enum rather
-    than growing into an open-ended architecture/graph DSL."""
+    20 added a second; Batch 26 adds a third, proving this stays a
+    small, explicit enum rather than growing into an open-ended
+    architecture/graph DSL."""
 
     SQS_LAMBDA_DYNAMODB = "sqs_lambda_dynamodb"
     API_GATEWAY_LAMBDA = "api_gateway_lambda"
+    API_GATEWAY_LAMBDA_DYNAMODB = "api_gateway_lambda_dynamodb"
