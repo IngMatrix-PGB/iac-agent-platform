@@ -30,6 +30,8 @@ class FakeApplication:
         self.stored: dict[str, object] = {}
         self.get_state_calls: list[str] = []
         self.resume_calls: list[tuple] = []
+        self.resume_result = None
+        self.resume_error: BaseException | None = None
 
     def read(self, request_id: str):
         return self.stored.get(request_id)
@@ -40,7 +42,13 @@ class FakeApplication:
 
     def resume(self, request_id: str, decision):
         self.resume_calls.append((request_id, decision))
-        raise AssertionError("resume is not part of POST")
+        if self.resume_result is not None:
+            self.stored[request_id] = self.resume_result
+        if self.resume_error is not None:
+            raise self.resume_error
+        if self.resume_result is None:
+            raise RuntimeError("resume failed")
+        return self.resume_result
 
 
 class FakeIntent:
@@ -250,3 +258,175 @@ def test_get_existing_request_omits_intent_and_does_not_resume():
     assert body["outcome"] == "awaiting_approval"
     assert holder.application.resume_calls == []
     assert holder.application.get_state_calls == []
+
+
+def _terminal(status: WorkflowStatus, decision=None) -> WorkflowView:
+    return WorkflowView(
+        request_id="req-001",
+        workflow_status=status,
+        current_stage=WorkflowStage.COMPLETE,
+        resource_name="order-events",
+        security_status="block" if status is WorkflowStatus.BLOCKED else "pass",
+        plan_summary=None,
+        approval_decision=decision,
+        pull_request=None,
+        error=None,
+    )
+
+
+def test_approve_awaiting_calls_resume_once():
+    from iac_agent.domain.approval import ApprovalDecision
+
+    holder = Holder()
+    holder.application.stored["req-001"] = _resolved_view()
+    holder.application.resume_result = _terminal(
+        WorkflowStatus.PR_CREATED, ApprovalDecision.APPROVE
+    )
+    response = _client(holder).post(
+        "/api/v1/requests/req-001/approval", json={"decision": "approve"}
+    )
+    assert response.status_code == 200
+    assert response.json()["outcome"] == "pr_created"
+    assert len(holder.application.resume_calls) == 1
+
+
+def test_reject_awaiting_calls_resume_once():
+    from iac_agent.domain.approval import ApprovalDecision
+
+    holder = Holder()
+    holder.application.stored["req-001"] = _resolved_view()
+    holder.application.resume_result = _terminal(
+        WorkflowStatus.REJECTED, ApprovalDecision.REJECT
+    )
+    response = _client(holder).post(
+        "/api/v1/requests/req-001/approval", json={"decision": "reject"}
+    )
+    assert response.status_code == 200
+    assert response.json()["outcome"] == "rejected"
+    assert len(holder.application.resume_calls) == 1
+
+
+def test_repeated_approve_does_not_resume():
+    from iac_agent.domain.approval import ApprovalDecision
+
+    holder = Holder()
+    holder.application.stored["req-001"] = _terminal(
+        WorkflowStatus.PR_CREATED, ApprovalDecision.APPROVE
+    )
+    response = _client(holder).post(
+        "/api/v1/requests/req-001/approval", json={"decision": "approve"}
+    )
+    assert response.status_code == 200
+    assert response.json()["outcome"] == "pr_created"
+    assert holder.application.resume_calls == []
+
+
+def test_repeated_reject_does_not_resume():
+    from iac_agent.domain.approval import ApprovalDecision
+
+    holder = Holder()
+    holder.application.stored["req-001"] = _terminal(
+        WorkflowStatus.REJECTED, ApprovalDecision.REJECT
+    )
+    response = _client(holder).post(
+        "/api/v1/requests/req-001/approval", json={"decision": "reject"}
+    )
+    assert response.status_code == 200
+    assert holder.application.resume_calls == []
+
+
+def test_approve_after_reject_is_conflict():
+    from iac_agent.domain.approval import ApprovalDecision
+
+    holder = Holder()
+    holder.application.stored["req-001"] = _terminal(
+        WorkflowStatus.REJECTED, ApprovalDecision.REJECT
+    )
+    response = _client(holder).post(
+        "/api/v1/requests/req-001/approval", json={"decision": "approve"}
+    )
+    assert response.status_code == 409
+    body = response.json()
+    assert body["error"] == "approval_conflict"
+    assert body["request"]["outcome"] == "rejected"
+    assert holder.application.resume_calls == []
+
+
+def test_reject_after_approve_is_conflict():
+    from iac_agent.domain.approval import ApprovalDecision
+
+    holder = Holder()
+    holder.application.stored["req-001"] = _terminal(
+        WorkflowStatus.PR_CREATED, ApprovalDecision.APPROVE
+    )
+    response = _client(holder).post(
+        "/api/v1/requests/req-001/approval", json={"decision": "reject"}
+    )
+    assert response.status_code == 409
+    assert response.json()["error"] == "approval_conflict"
+    assert holder.application.resume_calls == []
+
+
+def test_approval_while_blocked_or_error_is_conflict():
+    from iac_agent.domain.approval import ApprovalDecision
+
+    holder = Holder()
+    holder.application.stored["req-blocked"] = _terminal(WorkflowStatus.BLOCKED)
+    blocked = _client(holder).post(
+        "/api/v1/requests/req-blocked/approval", json={"decision": "approve"}
+    )
+    holder.application.stored["req-error"] = _terminal(
+        WorkflowStatus.ERROR, ApprovalDecision.APPROVE
+    )
+    failed = _client(holder).post(
+        "/api/v1/requests/req-error/approval", json={"decision": "approve"}
+    )
+    assert blocked.status_code == 409
+    assert failed.status_code == 409
+    assert failed.json()["request"]["outcome"] == "error"
+    assert holder.application.resume_calls == []
+
+
+def test_unknown_approval_is_404():
+    response = _client(Holder()).post(
+        "/api/v1/requests/req-missing/approval", json={"decision": "approve"}
+    )
+    assert response.status_code == 404
+    assert response.json()["error"] == "request_not_found"
+
+
+def test_malformed_approval_decision_is_400():
+    holder = Holder()
+    holder.application.stored["req-001"] = _resolved_view()
+    response = _client(holder).post(
+        "/api/v1/requests/req-001/approval", json={"decision": "yes"}
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_approval"
+    assert holder.application.resume_calls == []
+
+
+def test_malformed_approval_request_id_is_400():
+    response = _client(Holder()).post(
+        "/api/v1/requests/%2E%2E/approval", json={"decision": "approve"}
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_request_id"
+
+
+def test_resume_exception_returns_durable_result_without_a_second_resume():
+    from iac_agent.domain.approval import ApprovalDecision
+
+    holder = Holder()
+    holder.application.stored["req-001"] = _resolved_view()
+    holder.application.resume_result = _terminal(
+        WorkflowStatus.PR_CREATED, ApprovalDecision.APPROVE
+    )
+    holder.application.resume_error = RuntimeError("sdk down secret")
+    response = _client(holder).post(
+        "/api/v1/requests/req-001/approval", json={"decision": "approve"}
+    )
+    assert response.status_code == 200
+    assert response.json()["outcome"] == "pr_created"
+    assert "sdk down" not in response.text
+    assert len(holder.application.resume_calls) == 1

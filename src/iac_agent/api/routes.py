@@ -5,8 +5,10 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from iac_agent.api.approval import decide_approval
 from iac_agent.api.project import project_submission, project_view
 from iac_agent.cli.ids import generate_request_id
+from iac_agent.domain.approval import InvalidApprovalDecisionError, parse_approval_decision
 from iac_agent.domain.workflow import validate_request_id
 from iac_agent.intent.port import (
     IntentInterpreterError,
@@ -95,6 +97,40 @@ def register_routes(app: FastAPI) -> None:
             return _error("request_not_found", "Request not found.", 404)
         return project_view(view)
 
+    @app.post("/api/v1/requests/{request_id}/approval")
+    async def submit_approval(request_id: str, request: Request):
+        try:
+            validate_request_id(request_id)
+        except ValueError:
+            return _error("invalid_request_id", "Invalid request id.", 400)
+        payload, failure = await _read_json_object(request)
+        if failure is not None:
+            return failure
+        assert payload is not None
+        try:
+            decision = parse_approval_decision(payload.get("decision"))
+        except InvalidApprovalDecisionError:
+            return _error("invalid_approval", "Invalid approval.", 400)
+        application = request.app.state.holder.application
+        view = application.read(request_id)
+        if view is None:
+            return _error("request_not_found", "Request not found.", 404)
+        action = decide_approval(view, decision)
+        if action == "conflict":
+            return _conflict(view)
+        if action == "return_current":
+            return project_view(view)
+        try:
+            view = application.resume(request_id, decision)
+        except Exception:
+            again = application.read(request_id)
+            if again is not None and decide_approval(again, decision) == "return_current":
+                return project_view(again)
+            if again is not None and decide_approval(again, decision) == "conflict":
+                return _conflict(again)
+            return _error("internal_error", "Internal error.", 500)
+        return project_view(view)
+
 
 async def _read_json_object(request: Request) -> tuple[dict | None, JSONResponse | None]:
     try:
@@ -120,6 +156,17 @@ def _request_id(request: Request, supplied: object) -> tuple[str | None, JSONRes
         return validate_request_id(supplied), None
     except ValueError:
         return None, _error("invalid_request_id", "Invalid request id.", 400)
+
+
+def _conflict(view) -> JSONResponse:
+    return JSONResponse(
+        {
+            "error": "approval_conflict",
+            "message": "This request cannot accept that decision.",
+            "request": project_view(view).model_dump(),
+        },
+        status_code=409,
+    )
 
 
 def _error(code: str, message: str, status: int, *, request_id: str | None = None) -> JSONResponse:
