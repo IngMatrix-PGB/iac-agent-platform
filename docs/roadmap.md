@@ -368,10 +368,61 @@ a real natural-language-to-`ArchitectureIntent` provider adapter
 expected before either is started; this project is not yet a full
 serverless platform.
 
+## Phase 2 — API Gateway + Lambda + DynamoDB (composition, Batch 26) (Gate A complete; Gate B pending)
+
+**Goal:** prove the composition architecture generalizes to a *third*
+composition (a synchronous REST API backed by one DynamoDB table)
+without redesigning any core abstraction — the same proof Batch 20 did
+for the second. See `docs/compositions/api-lambda-dynamodb.md` for the
+full composition writeup, and
+`docs/superpowers/specs/2026-09-27-api-lambda-dynamodb-composition-design.md`
+/ `docs/superpowers/plans/2026-09-27-api-lambda-dynamodb-composition.md`
+for the design and implementation plan.
+
+Resolved from `WorkloadType.API` + `SYNCHRONOUS` +
+`{Capability.HTTP_ENDPOINT, Capability.PERSISTENCE}` — a combination
+already representable in the existing, unchanged `ArchitectureIntent`
+vocabulary, previously falling through to `UnsupportedArchitecture`.
+
+- `CompositionType.API_GATEWAY_LAMBDA_DYNAMODB`
+  (`iac_agent.domain.composition`) — the third member.
+- `ApiLambdaDynamoDbSpec`
+  (`iac_agent.compositions.api_lambda_dynamodb.contract`) — a
+  structurally distinct type, deliberately not a subclass of
+  `ApiLambdaSpec`; reuses `RouteSpec`/`HttpMethod` verbatim from it.
+- `ApiLambdaDynamoDbTerraformRenderer` — reuses all three existing
+  trusted modules (`api_gateway`, `lambda`, `dynamodb`); no new
+  Terraform module. Grants exactly `dynamodb:PutItem`, scoped to the
+  generated table's ARN — never a broader or wildcard action.
+- Five new composition policy IDs, one new `evaluate_composition_
+  policies` dispatch arm, reusing the four Lambda/DynamoDB sub-policies
+  verbatim.
+- `graph/workflow.py`: PR body, commit message
+  (`resource_kind = "api lambda dynamodb"`), and the three grouped
+  composition-dispatch arms (`platform_policy`/`checkov_scan`/
+  `security_gate`) all widened — no new graph node.
+- `cli/present.py`: `_architecture_label`/`_component_lines` recognize
+  the new type (fixing a pre-existing unconditional `"s3"` fallback
+  that would otherwise have silently mislabeled it).
+- `persistence/checkpoints.py`: one new checkpoint-serializer allowlist
+  entry — an easy-to-miss dispatch boundary that would otherwise
+  silently break durable HITL resume for this composition only.
+- Golden-eval dataset/loader/runner/evaluator, mirroring `api_lambda`'s
+  pattern.
+
+**Gate B (deferred, not yet authorized):** the empirical, real-tool
+Checkov profile discovery (never a union of the other two profiles),
+a real-Terraform renderer proof, a real-tool golden eval, and a
+fresh-process durable-HITL reconstruction/resume proof.
+
+**Next: not automatically implemented.** Gate B requires separate
+explicit authorization.
+
 ## Not yet started
 
-EventBridge, SNS, a second Lambda in one composition, chaining the two
-existing compositions together, Cognito/JWT/Lambda authorizers, WAF,
-custom domains, a FastAPI/HTTP adapter, a real LLM-backed
-`IntentInterpreterPort` adapter, and any UI remain entirely out of
-scope until a future phase is explicitly approved.
+EventBridge, SNS, a second Lambda in one composition, chaining
+compositions together, Cognito/JWT/Lambda authorizers, WAF, custom
+domains, a FastAPI/HTTP adapter, any UI, a composition-registry/plugin
+abstraction, and any DynamoDB action beyond `PutItem` for the new
+composition remain entirely out of scope until a future phase is
+explicitly approved.
