@@ -23,7 +23,8 @@ supports — see `tests/integration/test_application_composition.py`.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+import os
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -115,21 +116,57 @@ def open_application(
         yield Application(config=config, graph=graph)
 
 
-def build_observability(settings: ObservabilitySettings) -> ObservabilityPort:
+def build_observability(
+    settings: ObservabilitySettings,
+    *,
+    env: Mapping[str, str] | None = None,
+    adapter_factory=None,
+) -> ObservabilityPort:
     """Select the observability sink.
 
-    Disabled settings return a fail-open no-op. A recognized backend
-    that this build cannot construct is a configuration error, not a
-    silent no-op. Runtime failures of a constructed sink stay inside
-    FailOpenObservability and are not this function's concern.
+    Disabled settings return a fail-open no-op. An explicit `langfuse`
+    selection with missing keys, or a client that cannot be constructed,
+    is a configuration error. It is not downgraded to NoOp. Runtime
+    failures after a sink exists stay inside FailOpenObservability.
     """
     if settings.mode is ObservabilityMode.OFF:
         return FailOpenObservability(NoOpObservability())
-    raise ObservabilityConfigurationError(
-        "IAC_AGENT_OBSERVABILITY="
-        f"{settings.mode.value} requests a backend this build does not provide. "
-        "Supported setting: off."
-    )
+    if settings.mode is not ObservabilityMode.LANGFUSE:
+        raise ObservabilityConfigurationError(
+            "IAC_AGENT_OBSERVABILITY="
+            f"{settings.mode.value} is not a supported observability backend"
+        )
+    source = os.environ if env is None else env
+    missing = [
+        name
+        for name in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY")
+        if not source.get(name)
+    ]
+    if missing:
+        raise ObservabilityConfigurationError(
+            "IAC_AGENT_OBSERVABILITY=langfuse requires " + " and ".join(missing)
+        )
+    factory = adapter_factory if adapter_factory is not None else _default_langfuse_factory
+    try:
+        inner = factory(source)
+    except ObservabilityConfigurationError:
+        raise
+    except Exception as exc:
+        raise ObservabilityConfigurationError(
+            "IAC_AGENT_OBSERVABILITY=langfuse could not be constructed "
+            f"({type(exc).__name__})"
+        ) from exc
+    if inner is None:
+        raise ObservabilityConfigurationError(
+            "IAC_AGENT_OBSERVABILITY=langfuse did not construct an adapter"
+        )
+    return FailOpenObservability(inner)
+
+
+def _default_langfuse_factory(env: Mapping[str, str]):
+    from iac_agent.observability.adapters.langfuse import build_langfuse_observability
+
+    return build_langfuse_observability(env)
 
 
 @dataclass(frozen=True)
