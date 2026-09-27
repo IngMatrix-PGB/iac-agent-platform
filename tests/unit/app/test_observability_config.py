@@ -46,11 +46,71 @@ def test_disabled_settings_build_a_silent_port(raw, caplog):
     assert caplog.records == []
 
 
-def test_langfuse_is_recognized_and_rejected_until_the_adapter_exists():
+def test_langfuse_without_keys_fails_clearly_and_does_not_construct(monkeypatch):
+    monkeypatch.delenv("LANGFUSE_PUBLIC_KEY", raising=False)
+    monkeypatch.delenv("LANGFUSE_SECRET_KEY", raising=False)
+
+    def factory(env):
+        raise AssertionError("factory must not run without both keys")
+
     settings = load_observability_settings_from_env({"IAC_AGENT_OBSERVABILITY": "langfuse"})
     assert settings.mode is ObservabilityMode.LANGFUSE
-    with pytest.raises(ObservabilityConfigurationError, match="langfuse"):
-        build_observability(settings)
+    with pytest.raises(ObservabilityConfigurationError, match="LANGFUSE_SECRET_KEY"):
+        build_observability(
+            settings,
+            env={"LANGFUSE_PUBLIC_KEY": "pk-lf-not-a-real-key"},
+            adapter_factory=factory,
+        )
+
+
+def test_langfuse_with_keys_uses_the_injected_factory_and_not_noop():
+    sentinel_calls = []
+
+    class _Sentinel:
+        def record_generation(self, event) -> None:
+            sentinel_calls.append(event.request_id)
+
+        def record_resolution(self, event) -> None:
+            return None
+
+        def record_workflow(self, event) -> None:
+            return None
+
+        def flush(self) -> None:
+            return None
+
+    port = build_observability(
+        ObservabilitySettings(mode=ObservabilityMode.LANGFUSE),
+        env={"LANGFUSE_PUBLIC_KEY": "pk-lf-test", "LANGFUSE_SECRET_KEY": "sk-lf-test"},
+        adapter_factory=lambda env: _Sentinel(),
+    )
+    port.record_generation(_generation())
+    assert sentinel_calls == ["req-001"]
+
+
+def test_disabled_mode_does_not_call_the_langfuse_factory():
+    def factory(env):
+        raise AssertionError("NoOp must not construct Langfuse")
+
+    port = build_observability(
+        ObservabilitySettings(mode=ObservabilityMode.OFF),
+        adapter_factory=factory,
+    )
+    port.flush()
+
+
+def test_langfuse_construction_failure_hides_secret_text():
+    def factory(env):
+        raise RuntimeError(env["LANGFUSE_SECRET_KEY"])
+
+    with pytest.raises(ObservabilityConfigurationError) as caught:
+        build_observability(
+            ObservabilitySettings(mode=ObservabilityMode.LANGFUSE),
+            env={"LANGFUSE_PUBLIC_KEY": "pk-lf-test", "LANGFUSE_SECRET_KEY": "sk-lf-do-not-log"},
+            adapter_factory=factory,
+        )
+    assert "sk-lf-do-not-log" not in str(caught.value)
+    assert "pk-lf-test" not in str(caught.value)
 
 
 def test_unknown_backend_fails_at_load():
