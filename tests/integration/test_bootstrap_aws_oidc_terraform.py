@@ -39,7 +39,13 @@ _PLAN_ENV_OVERRIDES = {
     "AWS_ACCESS_KEY_ID": "test",
     "AWS_SECRET_ACCESS_KEY": "test",
     "TF_VAR_aws_region": "us-east-1",
-    "TF_VAR_github_oidc_subject": "repo:IngMatrix-PGB/iac-agent-platform:pull_request",
+    # Observed empirically in Batch 25 Task 11 (immutable format — this
+    # repository was created 2026-09-13, after GitHub's 2026-07-15
+    # immutable-subject cutover, so the legacy `owner/repo` shape never
+    # applied here).
+    "TF_VAR_github_oidc_subject": (
+        "repo:IngMatrix-PGB@167713460/iac-agent-platform@1368782253:pull_request"
+    ),
     "TF_VAR_github_oidc_thumbprints": '["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]',
 }
 

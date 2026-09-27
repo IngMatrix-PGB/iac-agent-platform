@@ -13,10 +13,16 @@ control the authority boundary that constrains it.
 
 ## Before applying
 
-1. Confirm this repository's actual GitHub OIDC `sub` claim using the
-   discovery runbook in `docs/aws-plan-boundary.md` — do not guess or
-   reuse a value from another repository or from this module's own
-   comments.
+1. This repository's `sub` claim was confirmed empirically in Batch 25
+   Task 11 (see `docs/aws-plan-boundary.md` Step 1 and design spec
+   §5): the immutable-format
+   `repo:IngMatrix-PGB@167713460/iac-agent-platform@1368782253:pull_request`
+   — never the legacy `repo:IngMatrix-PGB/iac-agent-platform:pull_request`
+   shape (this repository was created after GitHub's 2026-07-15
+   immutable-subject cutover, so the legacy shape never applied to it).
+   If this module is ever reused for a **different** repository, do
+   not reuse this value — repeat the discovery runbook for that
+   repository instead.
 2. Verify AWS's current guidance for the GitHub Actions OIDC provider
    thumbprint(s) at apply time (this has changed before).
 
@@ -28,7 +34,7 @@ cd bootstrap/aws-oidc
 terraform init
 terraform plan \
   -var "aws_region=us-east-1" \
-  -var "github_oidc_subject=<value confirmed by the discovery runbook>" \
+  -var "github_oidc_subject=repo:IngMatrix-PGB@167713460/iac-agent-platform@1368782253:pull_request" \
   -var 'github_oidc_thumbprints=["<current AWS/GitHub guidance>"]'
 terraform apply   # same -var flags
 ```
