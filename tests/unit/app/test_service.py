@@ -10,7 +10,7 @@ tests/integration/test_application_composition.py.
 
 from __future__ import annotations
 
-from iac_agent.app.service import Phase1Application, WorkflowView, _to_view
+from iac_agent.app.service import IacApplication, Phase1Application, WorkflowView, _to_view
 from iac_agent.domain.approval import ApprovalDecision
 from iac_agent.domain.security import (
     FindingSource,
@@ -416,3 +416,34 @@ def test_to_view_exposes_warn_security_gate():
     )
     assert view.security_gate is gate
     assert view.security_status == "warn"
+
+
+def test_read_returns_none_for_an_empty_snapshot_and_get_state_stays_pending():
+    class _Snapshot:
+        def __init__(self, *, created_at, values):
+            self.created_at = created_at
+            self.values = values
+
+    class _Graph:
+        def __init__(self, snapshot):
+            self._snapshot = snapshot
+
+        def get_state(self, config):
+            assert config["configurable"]["thread_id"] == "req-missing"
+            return self._snapshot
+
+    empty = IacApplication(_Graph(_Snapshot(created_at=None, values={})))
+    assert empty.read("req-missing") is None
+    assert empty.get_state("req-missing").workflow_status is WorkflowStatus.PENDING
+
+    present = IacApplication(
+        _Graph(
+            _Snapshot(
+                created_at="2026-09-27T00:00:00+00:00",
+                values={"workflow_status": WorkflowStatus.AWAITING_APPROVAL},
+            )
+        )
+    )
+    found = present.read("req-missing")
+    assert found is not None
+    assert found.workflow_status is WorkflowStatus.AWAITING_APPROVAL
