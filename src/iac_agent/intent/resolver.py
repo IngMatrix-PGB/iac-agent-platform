@@ -15,6 +15,7 @@ from enum import StrEnum
 from typing import Literal
 
 from iac_agent.compositions.api_lambda.contract import ApiLambdaSpec, HttpMethod, RouteSpec
+from iac_agent.compositions.api_lambda_dynamodb.contract import ApiLambdaDynamoDbSpec
 from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
 from iac_agent.intent.models import (
     ArchitectureIntent,
@@ -153,6 +154,23 @@ def _build_api_lambda_spec(intent: ArchitectureIntent, *, request_id: str) -> Ap
     )
 
 
+def _build_api_lambda_dynamodb_spec(
+    intent: ArchitectureIntent, *, request_id: str
+) -> ApiLambdaDynamoDbSpec:
+    base = resolve_base_name(logical_name_hint=intent.logical_name_hint, request_id=request_id)
+    return ApiLambdaDynamoDbSpec(
+        name=base,
+        api=ApiGatewayResourceSpec(name=component_name(base, "api")),
+        function=LambdaResourceSpec(
+            name=component_name(base, "function"), handler=LAMBDA_DEFAULT_HANDLER
+        ),
+        route=API_LAMBDA_DEFAULT_ROUTE,
+        table=DynamoDBResourceSpec(
+            name=component_name(base, "table"), partition_key=WORKER_DDB_DEFAULT_PARTITION_KEY
+        ),
+    )
+
+
 def _build_serverless_worker_spec(
     intent: ArchitectureIntent, *, request_id: str
 ) -> ServerlessWorkerSpec:
@@ -205,6 +223,15 @@ class ArchitectureResolver:
                     request_spec=_build_api_lambda_spec(intent, request_id=request_id),
                     matched_pattern="api+synchronous+http_endpoint",
                 )
+            case WorkloadType.API if (
+                interaction_pattern == InteractionPattern.SYNCHRONOUS
+                and capabilities
+                == frozenset({Capability.HTTP_ENDPOINT, Capability.PERSISTENCE})
+            ):
+                return ResolvedArchitecture(
+                    request_spec=_build_api_lambda_dynamodb_spec(intent, request_id=request_id),
+                    matched_pattern="api+synchronous+http_endpoint+persistence",
+                )
             case WorkloadType.WORKER if (
                 interaction_pattern == InteractionPattern.ASYNCHRONOUS
                 and capabilities == frozenset({Capability.QUEUE_PROCESSING, Capability.PERSISTENCE})
@@ -223,6 +250,12 @@ class ArchitectureResolver:
             case WorkloadType.API if (
                 interaction_pattern == InteractionPattern.UNSPECIFIED
                 and capabilities == frozenset({Capability.HTTP_ENDPOINT})
+            ):
+                return ClarificationRequired(request=_interaction_pattern_clarification())
+            case WorkloadType.API if (
+                interaction_pattern == InteractionPattern.UNSPECIFIED
+                and capabilities
+                == frozenset({Capability.HTTP_ENDPOINT, Capability.PERSISTENCE})
             ):
                 return ClarificationRequired(request=_interaction_pattern_clarification())
             case WorkloadType.WORKER if (
