@@ -157,13 +157,29 @@ SQLite handle — `plan_summary` and `error` are the same already-safe,
 already-normalized domain objects (`PlanSummary`, `WorkflowError`)
 proven safe in earlier batches, not new raw data.
 
-## No FastAPI, no CLI yet
+## CLI (Batch 24), still no FastAPI
 
-`Phase1Application` is the boundary a future FastAPI adapter will call
-— this batch adds no HTTP endpoints and no production CLI. The one
-exception is `scripts/live_github_smoke.py`, a one-off, explicitly
-confirmed script used only for this batch's single controlled live
-GitHub verification (see `docs/source-control.md`).
+`Phase1Application`/`IacApplication` is the boundary a future FastAPI
+adapter would call — this project still adds no HTTP endpoints.
+Batch 24 adds a thin stdlib-`argparse` CLI instead:
+
+```
+iac-agent propose "<natural language request>" [--request-id ID]
+iac-agent resume  REQUEST_ID --approve|--reject
+```
+
+It calls only `IntentResolutionService.submit` and
+`IacApplication.resume`/`get_state` — never LangGraph, Terraform,
+Checkov, or GitHub APIs directly — and never runs `terraform apply`.
+Required environment variables (names only; see
+`iac_agent.app.config` for what each loads):
+`GITHUB_OWNER`, `GITHUB_REPOSITORY`, `GITHUB_COMMIT_AUTHOR_NAME`,
+`GITHUB_COMMIT_AUTHOR_EMAIL`, `GITHUB_TOKEN`, `IAC_AGENT_LLM_PROVIDER`,
+`IAC_AGENT_LLM_MODEL`, `OPENAI_API_KEY`, and the optional
+`IAC_AGENT_WORKSPACE_ROOT` / `IAC_AGENT_STATE_DB`. See
+`docs/real-llm-intent-interpreter.md` for the LLM variables' own
+scope and privacy boundary. `scripts/live_github_smoke.py` remains a
+separate, one-off script — the CLI does not extend it.
 
 ## Still no Terraform apply
 

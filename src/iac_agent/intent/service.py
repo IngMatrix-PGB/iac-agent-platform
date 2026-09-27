@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from iac_agent.app.service import IacApplication, WorkflowView
+from iac_agent.domain.workflow import WorkflowStatus
+from iac_agent.intent.models import ArchitectureIntent
 from iac_agent.intent.port import IntentInterpreterPort
 from iac_agent.intent.resolver import ArchitectureResolver, ResolutionResult, ResolvedArchitecture
 
@@ -21,10 +23,22 @@ from iac_agent.intent.resolver import ArchitectureResolver, ResolutionResult, Re
 class IntentSubmissionResult:
     """`workflow_view` is non-`None` only when `resolution` is a
     `ResolvedArchitecture` — every other outcome never reaches
-    `IacApplication` at all."""
+    `IacApplication` at all. `intent` is always set: interpreter
+    failures never produce this object at all (they propagate
+    uncaught), so by the time this dataclass exists, `interpret()` has
+    already succeeded."""
 
+    request_id: str
+    intent: ArchitectureIntent
     resolution: ResolutionResult
     workflow_view: WorkflowView | None
+
+    @property
+    def approval_available(self) -> bool:
+        return (
+            self.workflow_view is not None
+            and self.workflow_view.workflow_status is WorkflowStatus.AWAITING_APPROVAL
+        )
 
 
 class IntentResolutionService:
@@ -57,6 +71,10 @@ class IntentResolutionService:
         match result:
             case ResolvedArchitecture():
                 view = self._application.submit(request_id=request_id, spec=result.request_spec)
-                return IntentSubmissionResult(resolution=result, workflow_view=view)
+                return IntentSubmissionResult(
+                    request_id=request_id, intent=intent, resolution=result, workflow_view=view
+                )
             case _:
-                return IntentSubmissionResult(resolution=result, workflow_view=None)
+                return IntentSubmissionResult(
+                    request_id=request_id, intent=intent, resolution=result, workflow_view=None
+                )

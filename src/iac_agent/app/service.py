@@ -30,6 +30,7 @@ from langgraph.types import Command
 from iac_agent.app.composition import Application
 from iac_agent.domain.approval import ApprovalDecision
 from iac_agent.domain.plan import PlanSummary
+from iac_agent.domain.security import SecurityGateResult
 from iac_agent.domain.source_control import PullRequestResult
 from iac_agent.domain.workflow import WorkflowError, WorkflowStage, WorkflowStatus
 from iac_agent.persistence.checkpoints import workflow_config
@@ -55,6 +56,7 @@ class WorkflowView:
     approval_decision: ApprovalDecision | None
     pull_request: PullRequestResult | None
     error: WorkflowError | None
+    security_gate: SecurityGateResult | None = None
 
 
 def _to_view(request_id: str, values: dict) -> WorkflowView:
@@ -70,6 +72,7 @@ def _to_view(request_id: str, values: dict) -> WorkflowView:
         approval_decision=values.get("approval_decision"),
         pull_request=values.get("pull_request"),
         error=values.get("error"),
+        security_gate=security_gate,
     )
 
 

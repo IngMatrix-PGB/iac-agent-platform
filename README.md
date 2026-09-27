@@ -47,6 +47,18 @@ composition, or terminal artifact, and unresolved or unsupported
 requests never reach Terraform at all. See
 `docs/superpowers/specs/2026-09-15-structured-architecture-intent-design.md`.
 
+A minimal stdlib-`argparse` CLI (Batch 24) exposes this natural-language
+path from a terminal:
+
+```
+iac-agent propose "Build an asynchronous worker that reads messages from a queue, processes them, and saves the result."
+iac-agent resume <request-id> --approve|--reject
+```
+
+It is a thin presentation layer only — no new orchestrator, no
+`terraform apply`. See `docs/application.md` for the exact command
+contract and required environment variables.
+
 A request is only ever *proposed* as a reviewable pull request — it is
 never deployed. See `docs/application.md`, `docs/hitl.md`,
 `docs/source-control.md`, `docs/resources/s3.md`,
