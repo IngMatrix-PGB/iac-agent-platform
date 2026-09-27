@@ -1,0 +1,291 @@
+"""Fresh-process HTTP proof. Process A checkpoints; process B resumes.
+
+The second process opens the same SQLite file with a new checkpointer,
+a new graph, and a new FastAPI app. It does not reuse process A's
+objects, and it does not call GitHub.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+
+from fastapi.testclient import TestClient
+
+from iac_agent.api.app import create_app
+from iac_agent.app.composition import IntentApplication
+from iac_agent.app.config import ApplicationConfig
+from iac_agent.app.service import IacApplication
+from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
+from iac_agent.domain.source_control import PullRequestResult
+from iac_agent.execution.terraform_runner import CommandResult
+from iac_agent.graph.workflow import build_iac_workflow
+from iac_agent.intent.models import ArchitectureIntent
+from iac_agent.intent.port import parse_intent_payload
+from iac_agent.intent.resolver import ArchitectureResolver
+from iac_agent.intent.service import IntentResolutionService
+from iac_agent.persistence.checkpoints import open_sqlite_checkpointer, workflow_config
+from iac_agent.providers.aws.dynamodb.contract import DynamoDBResourceSpec
+from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec
+from iac_agent.providers.aws.renderer import AWSResourceRenderer
+from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
+from iac_agent.security.checkov import CheckovScanResult
+
+_REQUEST_ID = "req-fresh"
+_PROMPT = "build a worker that processes a queue and stores results"
+_PR_URL = "https://example.invalid/pull/7"
+_WORKER_PAYLOAD = {
+    "schema_version": "1",
+    "workload_type": "worker",
+    "interaction_pattern": "asynchronous",
+    "capabilities": ["queue_processing", "persistence"],
+}
+_PLAN_JSON = {
+    "resource_changes": [
+        {
+            "address": "module.queue.aws_sqs_queue.this",
+            "change": {"actions": ["create"], "before": None, "after": {}},
+        }
+    ]
+}
+_DENIED = (
+    "module.queue.aws_sqs_queue.this",
+    "example-user",
+    "iac-agent-platform",
+    "example-bot@example.invalid",
+    "iac-agent/req-fresh",
+    "base_branch",
+    'resource "aws_sqs_queue"',
+    "logical_name_hint",
+)
+
+
+def _ok(*parts: str) -> CommandResult:
+    return CommandResult(
+        command=tuple(parts), returncode=0, stdout="", stderr="", duration_seconds=0.0
+    )
+
+
+class FakeIntentInterpreter:
+    def __init__(self, *, payload):
+        self._payload = payload
+        self.calls = 0
+
+    def interpret(self, *, natural_language_request: str, request_id: str) -> ArchitectureIntent:
+        self.calls += 1
+        return parse_intent_payload(self._payload)
+
+
+class RaisingInterpreter:
+    def interpret(self, *, natural_language_request: str, request_id: str) -> ArchitectureIntent:
+        raise AssertionError("fresh process must not reinterpret the request")
+
+
+class FakeTerraformRunner:
+    def fmt(self, workspace, **kwargs):
+        return _ok("terraform", "fmt")
+
+    def init(self, workspace, **kwargs):
+        return _ok("terraform", "init")
+
+    def validate(self, workspace, **kwargs):
+        return _ok("terraform", "validate")
+
+    def plan(self, workspace, plan_filename="tfplan", **kwargs):
+        return _ok("terraform", "plan")
+
+    def show_json(self, workspace, plan_filename="tfplan", **kwargs):
+        return _PLAN_JSON
+
+
+class FakeCheckovAdapter:
+    def scan(self, workspace, *, profile=None):
+        return CheckovScanResult(
+            findings=(),
+            passed_checks=5,
+            failed_checks=0,
+            skipped_checks=0,
+            scanner_version="3.3.13",
+        )
+
+
+class FakeSourceControl:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def publish_change(self, **kwargs):
+        self.calls.append(kwargs)
+        return PullRequestResult(
+            number=7,
+            url=_PR_URL,
+            branch="iac-agent/req-fresh",
+            base_branch="main",
+        )
+
+
+class RecordingObservability:
+    def __init__(self) -> None:
+        self.workflow: list = []
+
+    def record_generation(self, event) -> None:
+        return None
+
+    def record_resolution(self, event) -> None:
+        return None
+
+    def record_workflow(self, event) -> None:
+        self.workflow.append(event)
+
+    def flush(self) -> None:
+        return None
+
+
+def _holder(tmp_path, saver, *, interpreter, source_control, observability):
+    graph = build_iac_workflow(
+        renderer=AWSResourceRenderer(),
+        terraform_runner=FakeTerraformRunner(),
+        checkov_adapter=FakeCheckovAdapter(),
+        source_control_port=source_control,
+        workspace_root=tmp_path,
+        checkpointer=saver,
+    )
+    config = ApplicationConfig(
+        workspace_root=tmp_path,
+        state_db_path=tmp_path / "state.db",
+        github_owner="example-user",
+        github_repository="iac-agent-platform",
+        github_commit_author_name="Example Bot",
+        github_commit_author_email="example-bot@example.invalid",
+    )
+    application = IacApplication(graph, observability=observability)
+    service = IntentResolutionService(
+        interpreter=interpreter,
+        resolver=ArchitectureResolver(),
+        application=application,
+        observability=observability,
+    )
+    return IntentApplication(config=config, intent_service=service, application=application)
+
+
+def _checkpoint_threads(db_path) -> set[str]:
+    connection = sqlite3.connect(db_path)
+    try:
+        rows = connection.execute("select distinct thread_id from checkpoints").fetchall()
+    finally:
+        connection.close()
+    return {row[0] for row in rows}
+
+
+def _assert_public(body: str, workspace: str) -> None:
+    for needle in _DENIED:
+        assert needle not in body
+    assert workspace not in body
+    assert "pending" not in body
+
+
+def test_fresh_process_reads_and_approves_the_same_sqlite_checkpoint(tmp_path):
+    names = FakeSourceControl.publish_change.__code__.co_names
+    assert "urlopen" not in names
+    assert "httpx" not in names
+    assert "GitHubSourceControl" not in names
+
+    db_path = tmp_path / "state.db"
+    source_a = FakeSourceControl()
+    observability_a = RecordingObservability()
+    interpreter_a = FakeIntentInterpreter(payload=_WORKER_PAYLOAD)
+
+    with open_sqlite_checkpointer(db_path) as saver_a:
+        holder_a = _holder(
+            tmp_path,
+            saver_a,
+            interpreter=interpreter_a,
+            source_control=source_a,
+            observability=observability_a,
+        )
+        graph_a = holder_a.application._graph
+        graph_a_id = id(graph_a)
+        saver_a_id = id(saver_a)
+        connection_a = saver_a.conn
+        with TestClient(create_app(holder_a)) as client_a:
+            created = client_a.post(
+                "/api/v1/requests",
+                json={
+                    "natural_language_request": _PROMPT,
+                    "request_id": _REQUEST_ID,
+                },
+            )
+        assert created.status_code == 201
+        assert created.json()["outcome"] == "awaiting_approval"
+        assert interpreter_a.calls == 1
+        assert source_a.calls == []
+        assert observability_a.workflow
+        assert {event.request_id for event in observability_a.workflow} == {_REQUEST_ID}
+        assert saver_a.get_tuple(workflow_config(_REQUEST_ID)) is not None
+
+    assert db_path.is_file()
+    assert _REQUEST_ID in _checkpoint_threads(db_path)
+    try:
+        connection_a.execute("select 1")
+    except sqlite3.ProgrammingError:
+        closed = True
+    else:
+        closed = False
+    assert closed
+    del holder_a, graph_a, client_a
+
+    source_b = FakeSourceControl()
+    observability_b = RecordingObservability()
+    with open_sqlite_checkpointer(db_path) as saver_b:
+        assert id(saver_b) != saver_a_id
+        holder_b = _holder(
+            tmp_path,
+            saver_b,
+            interpreter=RaisingInterpreter(),
+            source_control=source_b,
+            observability=observability_b,
+        )
+        assert id(holder_b.application._graph) != graph_a_id
+        assert holder_b.application._graph is not None
+        with TestClient(create_app(holder_b)) as client_b:
+            unknown = client_b.get("/api/v1/requests/req-missing")
+            assert unknown.status_code == 404
+            assert unknown.json() == {
+                "error": "request_not_found",
+                "message": "Request not found.",
+            }
+            assert "pending" not in unknown.text
+            assert "awaiting_approval" not in unknown.text
+            workflows_before_get = len(observability_b.workflow)
+            loaded = client_b.get(f"/api/v1/requests/{_REQUEST_ID}")
+            assert len(observability_b.workflow) == workflows_before_get
+            approved = client_b.post(
+                f"/api/v1/requests/{_REQUEST_ID}/approval",
+                json={"decision": "approve"},
+            )
+            spec = holder_b.application._graph.get_state(workflow_config(_REQUEST_ID)).values[
+                "resource_spec"
+            ]
+
+    assert loaded.status_code == 200
+    loaded_body = loaded.json()
+    assert loaded_body["outcome"] == "awaiting_approval"
+    assert loaded_body["intent"] is None
+    assert loaded_body["resolution"]["matched_pattern"] is None
+    assert loaded_body["resolution"]["architecture"] is None
+    assert loaded_body["resolution"]["components"] == []
+    _assert_public(loaded.text, str(tmp_path))
+
+    assert isinstance(spec, ServerlessWorkerSpec)
+    assert isinstance(spec.queue, SQSResourceSpec)
+    assert isinstance(spec.function, LambdaResourceSpec)
+    assert isinstance(spec.table, DynamoDBResourceSpec)
+
+    assert approved.status_code == 200
+    approved_body = approved.json()
+    assert approved_body["outcome"] == "pr_created"
+    assert approved_body["workflow"]["pull_request"] == {"url": _PR_URL}
+    _assert_public(approved.text, str(tmp_path))
+    assert source_a.calls == []
+    assert len(source_b.calls) == 1
+    assert observability_b.workflow
+    assert {event.request_id for event in observability_b.workflow} == {_REQUEST_ID}
+    assert all(not hasattr(event, "trace_id") for event in observability_b.workflow)
