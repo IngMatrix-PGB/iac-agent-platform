@@ -14,7 +14,7 @@
 - Do not change `ArchitectureResolver.resolve` behavior, golden datasets, Checkov profiles, platform-policy decisions, Terraform modules, or Batch 25 `bootstrap/aws-oidc` work.
 - Do not reopen `docs/adr/2026-09-27-registry-catalog-deferred.md`.
 - Do not edit `.github/workflows/ci.yml`. CI installs `.[dev,openai]` and runs `pytest -m "not real_tool and not real_llm"`. That suite must stay green with no Langfuse package and no network.
-- Default observability is off. Missing keys, a missing extra, and `IAC_AGENT_OBSERVABILITY` unset all mean NoOp.
+- Default observability is off. Unset, empty, `off`, and `noop` mean NoOp. Explicit `langfuse` with missing keys is a configuration error, not NoOp.
 - No configuration flag may enable raw prompt or model-output capture.
 - No graph-node instrumentation. No Terraform or Checkov timing spans.
 - `get_state` emits nothing.
@@ -1052,41 +1052,27 @@ The fake client in the test records every `create_trace_id` seed and every obser
 
 ```python
 def build_observability(settings, *, env=None, adapter_factory=None):
+    if settings.mode is ObservabilityMode.OFF:
+        return FailOpenObservability(NoOpObservability())
     if settings.mode is not ObservabilityMode.LANGFUSE:
-        return FailOpenObservability(NoOpObservability())
+        raise ObservabilityConfigurationError(...)
     source = os.environ if env is None else env
-    public = source.get("LANGFUSE_PUBLIC_KEY")
-    secret = source.get("LANGFUSE_SECRET_KEY")
-    if not public or not secret:
-        return FailOpenObservability(NoOpObservability())
+    missing = [name for name in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY") if not source.get(name)]
+    if missing:
+        raise ObservabilityConfigurationError(...)
     factory = adapter_factory if adapter_factory is not None else _default_langfuse_factory
     try:
         inner = factory(source)
-    except Exception:
-        return FailOpenObservability(NoOpObservability())
-    if inner is None:
-        return FailOpenObservability(NoOpObservability())
+    except Exception as exc:
+        raise ObservabilityConfigurationError(...) from exc
     return FailOpenObservability(inner)
 ```
 
-`_default_langfuse_factory` is the only function that imports Langfuse:
+`_default_langfuse_factory` lazy-imports `build_langfuse_observability`. That function is the only place that imports the Langfuse SDK. Keys are `SecretStr` until the constructor. The SDK wrapper calls `create_trace_id(seed=request_id)` and `start_as_current_observation`; it does not pass prompt or completion.
 
-```python
-def _default_langfuse_factory(env: Mapping[str, str]):
-    from langfuse import Langfuse
+Unit tests always pass `adapter_factory` and never call `_default_langfuse_factory`. Missing keys raise `ObservabilityConfigurationError` without calling the factory. A factory that raises is also a configuration error, and the error text does not include the secret. Explicit `langfuse` is never downgraded to NoOp. Runtime exceptions after construction stay inside `FailOpenObservability`.
 
-    return LangfuseObservability(
-        Langfuse(
-            public_key=env["LANGFUSE_PUBLIC_KEY"],
-            secret_key=env["LANGFUSE_SECRET_KEY"],
-            base_url=env.get("LANGFUSE_BASE_URL", "https://cloud.langfuse.com"),
-        )
-    )
-```
-
-Unit tests always pass `adapter_factory` and never call `_default_langfuse_factory`. Missing keys return NoOp without calling the factory. A factory that raises returns NoOp.
-
-Replace the Gate A rejection of `ObservabilityMode.LANGFUSE` with the factory seam. With mode `LANGFUSE` and both keys set, a factory that returns a sentinel is used. Assert the sentinel is what `build_observability` wraps. With the keys absent, the factory is not called and the result is NoOp. A missing key is not the same as `IAC_AGENT_OBSERVABILITY=langfuse` while the adapter is unimplemented: Gate A rejects the latter; Gate B treats missing keys as disabled.
+Gate A rejected `ObservabilityMode.LANGFUSE` because the adapter did not exist. Gate B replaces that rejection with the factory seam above.
 
 `tests/unit/observability/test_import_isolation.py` parses AST:
 
@@ -1128,7 +1114,7 @@ Message: `feat(observability): add an optional Langfuse adapter`
 
 `docs/observability.md` states, in prose:
 
-- Observability is off unless `IAC_AGENT_OBSERVABILITY=langfuse` and both `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are set and the `langfuse` extra is installed.
+- Observability is off unless `IAC_AGENT_OBSERVABILITY=langfuse`. That mode requires both `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` and the `langfuse` extra. Missing keys fail configuration. They do not select NoOp.
 - The base URL defaults to `https://cloud.langfuse.com`. Self-hosting is not the portfolio path.
 - The correlation key is `request_id`. Resume recomputes the vendor trace id from that seed.
 - The document lists the allowlist and the denylist from the spec, including the prohibition on prompts and model output.
