@@ -64,15 +64,18 @@ never deployed. See `docs/application.md`, `docs/hitl.md`,
 `docs/source-control.md`, `docs/resources/s3.md`,
 `docs/resources/dynamodb.md`, `docs/resources/lambda.md`,
 `docs/compositions/serverless-worker.md`,
-`docs/compositions/api-lambda.md`, `docs/roadmap.md`, `docs/ci.md`,
-`docs/real-llm-intent-interpreter.md`, and
+`docs/compositions/api-lambda.md`,
+`docs/compositions/api-lambda-dynamodb.md`, `docs/roadmap.md`,
+`docs/ci.md`, `docs/real-llm-intent-interpreter.md`, and
 `docs/aws-plan-boundary.md` for the composition root, the
 approval gate, the GitHub adapter, the S3 resource, the DynamoDB
 resource, the Lambda resource, the serverless-worker composition, the
-API-Gateway-to-Lambda composition, the project roadmap, the CI quality
-gates, the optional real LLM intent interpreter, and the (implemented
-and empirically OIDC-verified; real-AWS bootstrap/plan application
-still human-gated and deferred) AWS OIDC plan boundary respectively.
+API-Gateway-to-Lambda composition, the (Gate A complete, Gate B
+pending) API-Gateway-to-Lambda-to-DynamoDB composition, the project
+roadmap, the CI quality gates, the optional real LLM intent
+interpreter, and the (implemented and empirically OIDC-verified;
+real-AWS bootstrap/plan application still human-gated and deferred)
+AWS OIDC plan boundary respectively.
 
 **Safety:** `terraform apply` is not part of this project's design and
 does not exist anywhere in this codebase. No AWS resource is ever
