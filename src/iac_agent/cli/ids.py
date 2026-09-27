@@ -1,8 +1,8 @@
 """UTC request-id generation with an injectable clock and entropy.
 
-Application APIs still require an explicit request_id. Generation is
-CLI-owned only. Caller-supplied --request-id is not passed through
-this function.
+The CLI and the HTTP adapter may call `generate_request_id`.
+`IacApplication` still requires an explicit request_id. Caller-supplied
+ids are not passed through this function.
 """
 
 from __future__ import annotations
