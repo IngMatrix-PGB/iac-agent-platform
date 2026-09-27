@@ -71,8 +71,9 @@ class _FakeParsedPayload:
 
 
 class _FakeResponse:
-    def __init__(self, *, output_parsed=None):
+    def __init__(self, *, output_parsed=None, usage=None):
         self.output_parsed = output_parsed
+        self.usage = usage
 
 
 def _valid_payload() -> dict:
@@ -361,5 +362,66 @@ def test_failure_call_logs_outcome_category_matching_the_raised_error(caplog):
             adapter.interpret(natural_language_request="x", request_id=_REQUEST_ID)
     record = caplog.records[-1]
     assert record.outcome_category == "refusal"
+
+
+_ALLOWED_METADATA_KEYS = frozenset(
+    {
+        "request_id",
+        "provider",
+        "model",
+        "prompt_version",
+        "latency_ms",
+        "attempt_count",
+        "outcome_category",
+        "input_tokens",
+        "output_tokens",
+    }
+)
+
+
+class _Usage:
+    def __init__(self, input_tokens, output_tokens):
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+
+
+class _UsageWithoutCounts:
+    pass
+
+
+def test_last_call_metadata_copies_tokens_when_the_provider_sent_them():
+    adapter, _ = _adapter(
+        [
+            _FakeResponse(
+                output_parsed=_FakeParsedPayload(_valid_payload()),
+                usage=_Usage(10, 4),
+            )
+        ]
+    )
+    adapter.interpret(natural_language_request="secret request text", request_id=_REQUEST_ID)
+    metadata = adapter.last_call_metadata
+    assert metadata is not None
+    assert set(metadata).issubset(_ALLOWED_METADATA_KEYS)
+    assert metadata["request_id"] == _REQUEST_ID
+    assert metadata["input_tokens"] == 10
+    assert metadata["output_tokens"] == 4
+    assert "secret request text" not in repr(metadata)
+
+
+def test_last_call_metadata_omits_token_keys_when_usage_has_no_counts():
+    adapter, _ = _adapter(
+        [
+            _FakeResponse(
+                output_parsed=_FakeParsedPayload(_valid_payload()),
+                usage=_UsageWithoutCounts(),
+            )
+        ]
+    )
+    adapter.interpret(natural_language_request="secret request text", request_id=_REQUEST_ID)
+    metadata = adapter.last_call_metadata
+    assert metadata is not None
+    assert "input_tokens" not in metadata
+    assert "output_tokens" not in metadata
+    assert "secret request text" not in repr(metadata)
 
 

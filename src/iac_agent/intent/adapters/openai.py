@@ -194,6 +194,11 @@ class OpenAIIntentInterpreter:
             if client is not None
             else openai.OpenAI(api_key=api_key.get_secret_value(), max_retries=0)
         )
+        self._last_call_metadata: dict[str, Any] | None = None
+
+    @property
+    def last_call_metadata(self) -> dict[str, Any] | None:
+        return self._last_call_metadata
 
     def interpret(
         self, *, natural_language_request: str, request_id: str
@@ -300,4 +305,5 @@ class OpenAIIntentInterpreter:
                 extra["input_tokens"] = input_tokens
             if output_tokens is not None:
                 extra["output_tokens"] = output_tokens
+        self._last_call_metadata = extra
         _LOGGER.info("intent interpretation %s", outcome_category, extra=extra)
