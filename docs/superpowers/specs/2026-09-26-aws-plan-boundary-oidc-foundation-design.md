@@ -247,10 +247,16 @@ with repository evidence and adopted as locked constraints for Batch
   project's existing "the agent never controls what constrains it"
   pattern (the agent never manages its own `GITHUB_TOKEN`'s scope
   either — same principle, extended to AWS).
-- **B (OIDC trust, no hardcoded `sub`):** confirmed — see §5, this
-  repo predates the July-2026 immutable-subject default and has not
-  (as far as I can determine without running the debugger workflow)
-  opted into it, but that must be *verified*, not assumed.
+- **B (OIDC trust, no hardcoded `sub`):** confirmed — see §5.
+  **Correction (Task 11, empirically verified 2026-09-26):** the
+  original assumption above was wrong. This repository's `created_at`
+  is `2026-09-13T19:18:45Z` — *after*, not before, GitHub's
+  2026-07-15 immutable-subject cutover — so it was never eligible for
+  the legacy format. The observed, authoritative `sub` for a
+  `pull_request` event is
+  `repo:IngMatrix-PGB@167713460/iac-agent-platform@1368782253:pull_request`
+  (immutable `owner_id@repo_id` shape). This is now the only value the
+  trust policy is written against — never the legacy shape.
 - **C (short-lived STS session, no static keys):** confirmed
   compatible; nothing in the current composition stores or reads
   `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` as a GitHub secret today
@@ -289,36 +295,47 @@ with repository evidence and adopted as locked constraints for Batch
 **Goal:** determine this repository's actual emitted `aud`/`sub`
 before writing any AWS trust policy — never assume the legacy format.
 
-**Method (GitHub's own documented tool, confirmed via current docs
-fetch this session):** the `github/actions-oidc-debugger` action
-visualizes the claims a workflow run would send, without ever
-integrating with a cloud provider and without exposing the raw JWT.
-Concretely:
+**Status: executed (Task 11, 2026-09-26).** The plan originally
+specified `github/actions-oidc-debugger`, but that action was found
+**archived** (2025-09-22, read-only) before use and was **not**
+depended on. Discovery instead used GitHub's own documented
+`ACTIONS_ID_TOKEN_REQUEST_URL`/`ACTIONS_ID_TOKEN_REQUEST_TOKEN`
+mechanism directly, in an inline Python step
+(`shell: python3 {0}`), decoding the JWT payload locally and printing
+only the non-secret claim subset — the raw token was never echoed,
+logged, or persisted. Concretely, what was done:
 
-1. Add a **temporary, throwaway** workflow (never the real `ci.yml`)
-   that runs `github/actions-oidc-debugger` on a `pull_request` trigger
-   from this exact repository, requesting `id-token: write` only in
-   that one temporary job.
-2. Capture only the **sanitized, decoded claim fields** the action
-   prints (`aud`, `sub`, `repository`, `repository_owner`,
-   `event_name`, `ref`) — never the encoded JWT string itself.
-3. Confirm whether `sub` is the legacy
-   `repo:IngMatrix-PGB/iac-agent-platform:pull_request` or the
-   immutable `repo:IngMatrix-PGB@<owner_id>/iac-agent-platform@<repo_id>:pull_request`
-   shape.
-4. Confirm the workflow does **not** reference a GitHub Environment
-   (it currently doesn't — `ci.yml` has no `environment:` key anywhere)
-   — if a future job added one, the `sub` shape changes to include
-   `environment:<name>` instead of `pull_request`, and the trust policy
-   would need updating.
-5. Delete the temporary debugger workflow once claims are recorded.
-   The AWS trust policy is written from the recorded claim, never from
-   assumption.
+1. Added a **temporary, throwaway** workflow (never the real
+   `ci.yml`), `.github/workflows/oidc-claim-debugger.yml`, on a
+   `pull_request` trigger from this exact repository, requesting
+   `id-token: write` only in that one temporary job.
+2. Captured only the **sanitized, decoded claim fields**
+   (`aud`, `sub`, `repository`, `repository_owner`, `repository_id`,
+   `repository_owner_id`, `event_name`, `ref`, `workflow_ref`,
+   `job_workflow_ref`, `iss`) — never the encoded JWT string itself.
+3. **Result:** `sub` is the **immutable**
+   `repo:IngMatrix-PGB@167713460/iac-agent-platform@1368782253:pull_request`
+   shape, not the legacy `repo:IngMatrix-PGB/iac-agent-platform:pull_request`
+   shape this design originally assumed (see the correction in §4,
+   item B). Root cause: this repository's `created_at` is
+   `2026-09-13T19:18:45Z`, after the 2026-07-15 cutover — it was never
+   eligible for the legacy format.
+4. Confirmed the run did **not** reference a GitHub Environment
+   (`ci.yml` has no `environment:` key anywhere) — the observed `sub`
+   ends in `:pull_request`, not `:environment:<name>`.
+5. The temporary discovery workflow, its branch, and its throwaway PR
+   (#7) are retired per the Task 11 closure runbook
+   (`docs/aws-plan-boundary.md`) — the sanitized claim evidence above
+   is preserved here and in that runbook instead of only existing in
+   the (now-deleted) PR/run.
 
-This step requires adding a temporary workflow file, which is a
-repository change — it is **not executed in this design-only
-document**; it is the first concrete action of the implementation
-plan, requiring separate authorization (§19).
+The recorded `job_workflow_ref` above belongs to this **temporary**
+discovery workflow only — it must never be copied into the production
+trust policy or into any `job_workflow_ref` restriction. The trust
+policy (§6) is written from the recorded `sub` value only, restricted
+to the `aud`/`sub` `StringEquals` condition — no workflow-pinning
+condition is added unless a future, separately human-reviewed decision
+explicitly adds it.
 
 ---
 
@@ -492,7 +509,7 @@ alternatives):
 | `pull_request` vs `pull_request_target` | Confirmed `pull_request` throughout this design; `pull_request_target` would run with the *base* repo's elevated token against attacker code — never used here. |
 | Overly broad OIDC trust | Mitigated by §5's verify-before-freeze discipline and exact `sub` match (`StringEquals`, not `StringLike` with a wildcard). |
 | Overly broad AWS permissions | Mitigated by §7–9's empirical, additive-only derivation. |
-| Compromised workflow dependency/action | `github/actions-oidc-debugger`, `aws-actions/configure-aws-credentials`, `hashicorp/setup-terraform` should be pinned to a specific commit SHA (not a floating tag) in the eventual implementation — noted here as a requirement, not yet done. |
+| Compromised workflow dependency/action | `aws-actions/configure-aws-credentials`, `hashicorp/setup-terraform` should be pinned to a specific commit SHA (not a floating tag) in the eventual production `aws-plan` job — noted here as a requirement, not yet done. (`github/actions-oidc-debugger` is **not** a production dependency: it was found archived and was never used — Task 11's one-time discovery step used GitHub's own native token-request mechanism inline instead, with no third-party action to pin.) |
 | Session lifetime | Short `DurationSeconds` (§6) bounds the exfiltration-usefulness window. |
 | Arbitrary Terraform supplied by PR | This is the credential-exfiltration risk above, restated — the honest mitigation is the three-layer human gate (§11), not a technical guarantee that untrusted Terraform code is safe to plan with real credentials attached. |
 | Head-repo restriction | **Recommended additional condition:** gate `aws-plan` on `github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name` in addition to label+actor — i.e., refuse to run the AWS-plan job at all for PRs originating from a fork, regardless of label/actor, and only allow it for branches pushed directly to this repository by a collaborator. This closes the "arbitrary fork-controlled Terraform" risk at the structural level rather than relying solely on human judgment about labels. |
@@ -617,9 +634,10 @@ agent-managed bootstrap role, static AWS credentials in GitHub.
    2026-09-26, as authoritative here, not any earlier training-data
    assumption).
 5. Action pinning (§12) — exact commit SHAs for
-   `github/actions-oidc-debugger`, `aws-actions/configure-aws-credentials`,
+   `aws-actions/configure-aws-credentials`,
    `hashicorp/setup-terraform` — is implementation-time work, not
-   decided here.
+   decided here. (`github/actions-oidc-debugger` was found archived
+   during Task 11 and was not used — see §5.)
 
 ## 19. Recommended implementation sequence (not an implementation plan)
 

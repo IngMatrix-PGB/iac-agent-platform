@@ -10,26 +10,48 @@ CI.
 
 ## Step 1 — confirm the actual OIDC claims for this repository
 
-Do not assume the `sub` claim format. GitHub changed the default
-subject format for repositories created after 2026-07-15 to an
-immutable `owner_id@repo_id` shape; this repository predates that date
-and should retain the legacy `repo:ORG/REPO:pull_request` format
-**unless** immutable subject claims were explicitly opted into — verify
-this, do not assume it.
+**Status: done (Batch 25, Task 11, 2026-09-26).** Do not assume the
+`sub` claim format from a repository's age alone. GitHub changed the
+default subject format for repositories created after 2026-07-15 to
+an immutable `owner_id@repo_id` shape. This repository's `created_at`
+is `2026-09-13T19:18:45Z` — *after* that cutover, not before — so it
+was never eligible for the legacy `repo:ORG/REPO:pull_request` format.
+This was verified empirically, not assumed:
 
-1. Add a temporary workflow (never `ci.yml` itself) running GitHub's
-   own `github/actions-oidc-debugger` action on a `pull_request`
-   trigger, requesting `id-token: write` only in that one job.
-2. Open a throwaway PR to trigger it.
-3. Record only the sanitized, decoded claim fields the action prints:
-   `aud`, `sub`, `repository`, `repository_owner`, `event_name`, `ref`.
-   Never record or persist the raw JWT.
-4. Confirm the run did **not** reference a GitHub Environment (`ci.yml`
-   has none today) — an `environment:` key would change the `sub`
-   shape to include `environment:<name>` instead of `pull_request`.
-5. Delete the temporary workflow and close the throwaway PR.
-6. Set the confirmed `sub` value as `bootstrap/aws-oidc`'s
-   `github_oidc_subject` variable (Step 2).
+1. Added a temporary workflow (never `ci.yml` itself),
+   `.github/workflows/oidc-claim-debugger.yml`, on a `pull_request`
+   trigger, requesting `id-token: write` only in that one job. The
+   plan originally specified GitHub's `github/actions-oidc-debugger`
+   action, but that action was found **archived** (2025-09-22,
+   read-only) before use and was not depended on; the workflow
+   instead requests and decodes the OIDC token directly via GitHub's
+   own documented `ACTIONS_ID_TOKEN_REQUEST_URL`/
+   `ACTIONS_ID_TOKEN_REQUEST_TOKEN` mechanism, in Python
+   (`shell: python3 {0}`) — the raw JWT is never echoed, logged, or
+   persisted, only the decoded, non-secret claim subset.
+2. Opened a throwaway PR (#7) to trigger it.
+3. Recorded only the sanitized, decoded claim fields printed:
+   `aud`, `sub`, `repository`, `repository_owner`, `repository_id`,
+   `repository_owner_id`, `event_name`, `ref`, `workflow_ref`,
+   `job_workflow_ref`, `iss`. The raw JWT was never recorded or
+   persisted.
+4. Confirmed the run did **not** reference a GitHub Environment
+   (`ci.yml` has none today) — the observed `sub` ends in
+   `:pull_request`, not `:environment:<name>`.
+5. Deleted the temporary workflow, its branch, and closed the
+   throwaway PR (#7) once this evidence was preserved here and in the
+   design spec §5.
+6. **Confirmed `sub` for this repository (`pull_request` event):**
+   ```
+   repo:IngMatrix-PGB@167713460/iac-agent-platform@1368782253:pull_request
+   ```
+   This is now the exact, authoritative value for
+   `bootstrap/aws-oidc`'s `github_oidc_subject` variable (Step 2) —
+   never the legacy shape, never a wildcard, never an OR of both
+   formats. The recorded `job_workflow_ref` above belonged to this
+   *temporary* discovery workflow only and must never be copied into
+   the production trust policy or used as a workflow-pinning
+   condition.
 
 ## Step 2 — apply the bootstrap plane
 

@@ -196,7 +196,7 @@ resolver, `IntentResolutionService`, the CLI.
 ### Task 7: OIDC claim-discovery runbook (documentation only)
 
 **Files:** `docs/aws-plan-boundary.md` (new), referencing `docs/superpowers/specs/2026-09-26-aws-plan-boundary-oidc-foundation-design.md` §5
-**Objective:** write the exact, step-by-step operator runbook for Task 11's actual discovery run: how to add the temporary `github/actions-oidc-debugger` workflow, what to record (sanitized claims only), how to delete it afterward, and how the recorded `sub` feeds Task 2's trust-policy variable.
+**Objective:** write the exact, step-by-step operator runbook for Task 11's actual discovery run: how to add the temporary claim-discovery workflow, what to record (sanitized claims only), how to delete it afterward, and how the recorded `sub` feeds Task 2's trust-policy variable. (**Post-Task-11 note:** `github/actions-oidc-debugger` was found archived at implementation time and was not used; the runbook and the actual workflow instead use GitHub's own native OIDC token-request mechanism — see `docs/aws-plan-boundary.md` and the design spec §5.)
 **Tests:** `tests/unit/test_docs_reference_aws_plan_boundary.py` — a one-line structural check that `README.md` references the new doc (mirrors the existing pattern for every other `docs/*.md` file).
 **RED evidence:** README doesn't reference it yet.
 **Minimum implementation:** the runbook doc + one README sentence, following the exact existing list-of-docs paragraph pattern.
