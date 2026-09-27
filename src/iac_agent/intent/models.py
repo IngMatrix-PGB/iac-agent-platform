@@ -37,7 +37,7 @@ class Capability(StrEnum):
     invent a member; Pydantic rejects any string outside this enum at
     parse time (see `iac_agent.intent.port.parse_intent_payload`).
 
-    Exactly these four members — `BACKGROUND_PROCESSING` was evaluated
+    Exactly these five members — `BACKGROUND_PROCESSING` was evaluated
     and rejected during design (no allowlist row's outcome ever depends
     on it) and must never be reintroduced.
     """
@@ -46,6 +46,7 @@ class Capability(StrEnum):
     QUEUE_PROCESSING = "queue_processing"
     PERSISTENCE = "persistence"
     OBJECT_STORAGE = "object_storage"
+    CONTAINER_REGISTRY = "container_registry"
 
 
 class AwsServiceHint(StrEnum):
@@ -61,6 +62,7 @@ class AwsServiceHint(StrEnum):
     DYNAMODB = "dynamodb"
     LAMBDA = "lambda"
     API_GATEWAY = "api_gateway"
+    ECR = "ecr"
 
 
 class ArchitectureIntent(BaseModel):
