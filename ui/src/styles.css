@@ -1,0 +1,45 @@
+:root {
+  color: #1c1917;
+  background: #fafaf9;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  line-height: 1.45;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  box-sizing: border-box;
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+label,
+button {
+  font: inherit;
+}
+
+textarea {
+  display: block;
+  width: 100%;
+  min-height: 8rem;
+  margin: 0.5rem 0 1rem;
+}
+
+button {
+  margin-right: 0.5rem;
+}
+
+.banner {
+  margin: 1rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid #b91c1c;
+}
+
+@media (max-width: 40rem) {
+  main {
+    padding: 1rem;
+  }
+}
