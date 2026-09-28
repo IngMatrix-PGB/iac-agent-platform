@@ -88,3 +88,24 @@ jobs:
 
       - name: Run real-tool suite
         run: pytest -m real_tool
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install, test, and build the operator UI
+        working-directory: ui
+        run: |
+          npm ci
+          npm test
+          npm run build

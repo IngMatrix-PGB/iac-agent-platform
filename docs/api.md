@@ -40,7 +40,7 @@ Batch 28 telemetry stays under the application services. `POST` and approval rec
 
 Batch 30 packages this same application as one local container. `compose.yaml` builds that image. The runtime is Python 3.12, the FastAPI application served by Uvicorn, Terraform 1.16.1, Checkov 3.3.13 in an isolated `/opt/checkov` environment, the trusted Terraform modules, and an offline filesystem mirror of `hashicorp/aws`. The container command is `python -m iac_agent.api`. The image pins `python:3.12-slim-bookworm` by digest.
 
-The container binds `0.0.0.0:8000`. Compose publishes only `127.0.0.1:8000:8000`. 0.0.0.0 inside the container is network binding, not authentication or authorization. The API remains unauthenticated and is for local use. It is not approved for public Internet exposure. Batch 31 is the operator UI. This batch did not add one, and it did not add authentication.
+The container binds `0.0.0.0:8000`. Compose publishes only `127.0.0.1:8000:8000`. 0.0.0.0 inside the container is network binding, not authentication or authorization. The API remains unauthenticated and is for local use. It is not approved for public Internet exposure. The operator UI is packaged into this same image. It does not add authentication.
 
 The process runs as user `iac`, uid 10001. Compose does not set privileged mode, does not mount the Docker socket, and does not use host networking. The runtime user cannot write `/opt/iac-agent`, the trusted modules under that root, `/opt/checkov`, the Terraform binary, or the provider mirror. It can write `/var/lib/iac-agent/state`, `/var/lib/iac-agent/workspaces`, `/home/iac`, and `/tmp`.
 
@@ -58,7 +58,21 @@ The image sets `IAC_AGENT_OBSERVABILITY=off`. Langfuse stays optional. Installin
 
 The production lifespan still requires GitHub and OpenAI configuration before `python -m iac_agent.api` serves, including for a request that would not call those integrations. That eager startup requirement is unchanged technical debt.
 
-Tests that need a Docker daemon use `@pytest.mark.docker`. Deterministic CI runs `pytest -m "not real_tool and not real_llm and not docker"`. The `real_tool` job is unchanged.
+Tests that need a Docker daemon use `@pytest.mark.docker`. Deterministic CI runs `pytest -m "not real_tool and not real_llm and not docker"`. The `real_tool` job is unchanged. The Frontend job runs `npm ci`, `npm test`, and `npm run build` in `ui/`. It does not publish an image.
+
+## Operator UI
+
+The local operator UI is a React and Vite application in `ui/`. During development, `npm run dev` serves it on `127.0.0.1:5173` and proxies `/api`, `/health`, and `/ready` to `127.0.0.1:8000`.
+
+The production UI is same-origin static files from FastAPI. The image build compiles the UI with Node and copies only the built files to `/opt/iac-agent/ui`. `IAC_AGENT_UI_DIST=/opt/iac-agent/ui`. Node is build-time only. The runtime image does not run Node, npm, or Vite, and it does not add a second service or a second host port. Compose still publishes only `127.0.0.1:8000:8000`.
+
+`GET /` returns the packaged `index.html`. `GET /requests/{request_id}` returns that same page so a reload can recover the request. The request id in the URL is the durable key. The page loads it with `GET /api/v1/requests/{request_id}`. The SQLite checkpoint remains authoritative. The browser does not store the workflow in local storage.
+
+Approve asks for confirmation before the approval POST. Reject sends immediately. A 409 `approval_conflict` replaces the displayed request with the request embedded in that response. The page polls every 5 seconds, at most 12 times, only while the status is `pending`, `running`, or `approved`.
+
+The UI renders the public request DTO only. It does not receive credentials, Terraform source, raw plan JSON, checkpoint contents, finding messages, finding resources, or `WorkflowError.message`.
+
+The operator UI does not add authentication. The operator UI does not make this API safe for public Internet exposure. GET /health and GET /ready do not prove AWS, OpenAI, GitHub, Langfuse, or Terraform Registry connectivity.
 
 ## What this batch does not do
 

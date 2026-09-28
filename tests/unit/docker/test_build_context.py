@@ -56,3 +56,23 @@ def test_api_doc_states_container_bind_is_not_authorization():
         "0.0.0.0 inside the container is network binding, "
         "not authentication or authorization."
     ) in text
+
+
+def test_image_build_compiles_the_ui_and_keeps_one_service():
+    dockerfile = Path("Dockerfile").read_text()
+    ignore = Path(".dockerignore").read_text()
+    compose = Path("compose.yaml").read_text()
+    assert "ui/node_modules" in ignore
+    assert "ui/dist" in ignore
+    assert "AS ui" in dockerfile
+    assert "npm run build" in dockerfile
+    assert "IAC_AGENT_UI_DIST=/opt/iac-agent/ui" in dockerfile
+    assert "COPY --from=ui" in dockerfile
+    runtime = dockerfile.split("FROM python:3.12-slim-bookworm@", 2)[2]
+    assert "npm" not in runtime
+    assert "apt-get install node" not in runtime
+    assert "127.0.0.1:8000:8000" in compose
+    import yaml
+
+    services = yaml.safe_load(compose)["services"]
+    assert list(services) == ["iac-agent"]
