@@ -23,7 +23,11 @@ const NETWORK: ClientNetworkError = {
 const UNEXPECTED = "The API returned an unexpected response.";
 
 export class ApiClient {
-  constructor(private readonly fetchImpl: typeof fetch = globalThis.fetch) {}
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(fetchImpl: typeof fetch = globalThis.fetch) {
+    this.fetchImpl = fetchImpl.bind(globalThis);
+  }
 
   submit(naturalLanguageRequest: string): Promise<ClientResult> {
     return this.request("/api/v1/requests", {

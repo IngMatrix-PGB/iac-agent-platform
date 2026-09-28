@@ -151,4 +151,15 @@ describe("ApiClient", () => {
     expect(fetchImpl).toHaveBeenNthCalledWith(1, "/health", { method: "GET" });
     expect(fetchImpl).toHaveBeenNthCalledWith(2, "/ready", { method: "GET" });
   });
+
+  it("invokes fetch with the global receiver", async () => {
+    const fetchImpl = vi.fn(function (this: unknown) {
+      if (this !== globalThis) {
+        throw new TypeError("Illegal invocation");
+      }
+      return Promise.resolve(jsonResponse(200, { status: "ok" }));
+    });
+    const client = new ApiClient(fetchImpl);
+    await expect(client.health()).resolves.toMatchObject({ kind: "success", status: "ok" });
+  });
 });
