@@ -1,0 +1,20 @@
+services:
+  iac-agent:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      IAC_AGENT_BIND_HOST: "0.0.0.0"
+      IAC_AGENT_PORT: "8000"
+      IAC_AGENT_STATE_DB: /var/lib/iac-agent/state/state.db
+      IAC_AGENT_WORKSPACE_ROOT: /var/lib/iac-agent/workspaces
+      IAC_AGENT_TRUSTED_MODULE_ROOT: /opt/iac-agent
+      IAC_AGENT_OBSERVABILITY: "off"
+    env_file:
+      - .env
+    volumes:
+      - iac-agent-state:/var/lib/iac-agent/state
+    stop_grace_period: 30s
+
+volumes:
+  iac-agent-state:
