@@ -5,9 +5,12 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+
+from iac_agent.api.ui_static import load_ui_dist, mount_operator_ui
 
 BIND_HOST = "127.0.0.1"
 
@@ -36,7 +39,7 @@ async def _lifespan(app: FastAPI):
         yield
 
 
-def create_app(holder=None) -> FastAPI:
+def create_app(holder=None, *, ui_dist: Path | None = None) -> FastAPI:
     app = FastAPI(title="iac-agent", lifespan=_lifespan)
     app.state.holder = holder
 
@@ -53,6 +56,8 @@ def create_app(holder=None) -> FastAPI:
     from iac_agent.api.routes import register_routes
 
     register_routes(app)
+    if ui_dist is not None:
+        mount_operator_ui(app, ui_dist)
     return app
 
 
@@ -79,4 +84,7 @@ def bind_port(env: Mapping[str, str] | None = None) -> int:
 def serve() -> None:
     import uvicorn
 
-    uvicorn.run(create_app, factory=True, host=bind_host(), port=bind_port())
+    def factory() -> FastAPI:
+        return create_app(ui_dist=load_ui_dist(os.environ))
+
+    uvicorn.run(factory, factory=True, host=bind_host(), port=bind_port())
