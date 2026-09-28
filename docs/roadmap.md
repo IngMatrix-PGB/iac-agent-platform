@@ -480,16 +480,37 @@ documented in `docs/observability.md` and
 It is off unless explicitly configured. Langfuse is not Checkov, not a
 platform policy, and not AWS infrastructure monitoring.
 
+## Batch 30 — local Docker runtime (complete)
+
+The application runs as one local container. `docs/api.md` and
+`compose.yaml` describe it. The design is
+`docs/superpowers/specs/2026-09-27-docker-runtime-design.md`.
+
+The image contains Python 3.12, the FastAPI/Uvicorn application,
+Terraform 1.16.1, Checkov 3.3.13 in `/opt/checkov`, the trusted
+modules, and an offline `hashicorp/aws` provider mirror. The command
+is `python -m iac_agent.api`. The container binds `0.0.0.0:8000`.
+Compose publishes only `127.0.0.1:8000:8000`. That publish is not
+authentication. The process user is `iac`, uid 10001. It is not
+privileged, has no Docker socket, and does not use host networking.
+
+SQLite on named volume `iac-agent-state`, mounted at
+`/var/lib/iac-agent/state`, is the durable HITL store. Workspaces at
+`/var/lib/iac-agent/workspaces` are ephemeral. Acceptance proved that
+a replacement container, mounting the same volume after the first
+container was removed, reconstructs `awaiting_approval` and resumes
+it to `pr_created`. Process-local state does not survive that
+replacement.
+
 ## Not yet started
 
-The local FastAPI adapter is documented in `docs/api.md`. It is
-unauthenticated, binds to loopback, and is not a public production
-boundary. Docker is the next runtime-packaging boundary and is not
-part of this adapter.
+The next major product boundary is Batch 31, the operator UI. It is
+not designed or implemented here.
 
-EventBridge, SNS, a second Lambda in one composition, chaining
-compositions together, Cognito/JWT/Lambda authorizers, WAF, custom
-domains, any UI, Docker, authentication, a composition-registry/plugin
-abstraction, and any DynamoDB action beyond `PutItem` for the new
-composition remain not started until a future phase is explicitly
-approved.
+The local API remains unauthenticated and is not a public production
+boundary. EventBridge, SNS, a second Lambda in one composition,
+chaining compositions together, Cognito/JWT/Lambda authorizers, WAF,
+custom domains, any UI, authentication, public deployment, a
+composition-registry/plugin abstraction, and any DynamoDB action
+beyond `PutItem` for the new composition remain not started until a
+future phase is explicitly approved.

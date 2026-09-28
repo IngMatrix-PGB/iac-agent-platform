@@ -15,7 +15,7 @@ simplification, not a behavior change. This composition root still
 needed **zero** other changes to support `ServerlessWorkerSpec` (Batch
 19) or `ApiLambdaSpec` (Batch 20) requests: `build_sqs_workflow` is a
 thin wrapper around the fully request-generalized `build_iac_workflow`,
-whose own defaults (`_DEFAULT_TRUSTED_MODULE_DIRS`, a default-
+whose own defaults (`default_trusted_module_dirs()`, a default-
 constructed `ServerlessWorkerTerraformRenderer`/`ApiLambdaTerraformRenderer`)
 already cover every resource and composition type this platform
 supports — see `tests/integration/test_application_composition.py`.

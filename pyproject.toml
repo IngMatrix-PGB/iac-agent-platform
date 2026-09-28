@@ -15,6 +15,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+api = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.32,<1",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
@@ -50,4 +54,5 @@ markers = [
     "real_llm: exercises a real natural-language-to-ArchitectureIntent model call (not a fake) — classification only, does not affect default collection; skipped whenever no provider is configured (Batch 21).",
     "real_bootstrap_tool: exercises the real Terraform binary against bootstrap/aws-oidc/, still fully credential-free (new-resource plan, no AWS auth) — classification only, does not affect default collection (Batch 25).",
     "real_aws_plan: exercises a real AWS API call via GitHub OIDC/STS-assumed credentials — classification only, does not affect default collection; human-gated, never run automatically (Batch 25).",
+    "docker: requires a Docker daemon — excluded from the deterministic CI job (Batch 30).",
 ]

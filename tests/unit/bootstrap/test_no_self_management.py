@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from iac_agent.execution.terraform_runner import TerraformRunner
-from iac_agent.graph.workflow import _DEFAULT_TRUSTED_MODULE_DIRS
+from iac_agent.graph.modules import default_trusted_module_dirs
 
 _SRC_ROOT = Path("src/iac_agent")
 _NEW_SURFACE_DIRS = (Path("bootstrap"), Path("ci/aws_plan"))
@@ -20,7 +20,7 @@ def test_terraform_runner_still_has_no_apply_or_destroy():
 
 
 def test_bootstrap_and_ci_directories_absent_from_trusted_module_dirs():
-    trusted_paths = {str(path) for path in _DEFAULT_TRUSTED_MODULE_DIRS.values()}
+    trusted_paths = {str(path) for path in default_trusted_module_dirs().values()}
     for trusted_path in trusted_paths:
         assert "bootstrap" not in trusted_path
         assert "ci/aws_plan" not in trusted_path

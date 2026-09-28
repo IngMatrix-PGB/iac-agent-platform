@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -54,7 +56,27 @@ def create_app(holder=None) -> FastAPI:
     return app
 
 
+def bind_host(env: Mapping[str, str] | None = None) -> str:
+    source = os.environ if env is None else env
+    host = source.get("IAC_AGENT_BIND_HOST", BIND_HOST).strip()
+    if not host:
+        raise ValueError("IAC_AGENT_BIND_HOST must not be blank")
+    return host
+
+
+def bind_port(env: Mapping[str, str] | None = None) -> int:
+    source = os.environ if env is None else env
+    raw = source.get("IAC_AGENT_PORT", "8000").strip()
+    try:
+        port = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"IAC_AGENT_PORT must be an integer, got {raw!r}") from exc
+    if not 1 <= port <= 65535:
+        raise ValueError(f"IAC_AGENT_PORT must be from 1 to 65535, got {port}")
+    return port
+
+
 def serve() -> None:
     import uvicorn
 
-    uvicorn.run(create_app, factory=True, host=BIND_HOST, port=8000)
+    uvicorn.run(create_app, factory=True, host=bind_host(), port=bind_port())
