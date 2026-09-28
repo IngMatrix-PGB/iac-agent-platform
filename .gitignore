@@ -33,3 +33,7 @@ crash.*.log
 *.swp
 .DS_Store
 Thumbs.db
+
+# --- Operator UI ---
+ui/node_modules/
+ui/dist/
