@@ -149,4 +149,34 @@ describe("operator shell", () => {
     await user.click(screen.getByRole("button", { name: "Submit request" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The API could not be reached.");
   });
+
+  it("says an interpreter failure was not saved", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn().mockResolvedValue({
+      kind: "http",
+      status: 502,
+      error: "intent_provider_refusal",
+      message: "Intent provider declined to produce structured output.",
+    });
+    const navigate = vi.fn();
+    render(<App client={clientWith(submit)} navigate={navigate} pathname="/" />);
+    await user.type(screen.getByRole("textbox", { name: "Infrastructure request" }), "build a queue");
+    await user.click(screen.getByRole("button", { name: "Submit request" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Intent provider declined to produce structured output.",
+    );
+    expect(screen.getByText("This request was not saved.")).toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("opens a known request id without submitting", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn();
+    const navigate = vi.fn();
+    render(<App client={clientWith(submit)} navigate={navigate} pathname="/" />);
+    await user.type(screen.getByRole("textbox", { name: "Request id" }), "req-9");
+    await user.click(screen.getByRole("button", { name: "Open request" }));
+    expect(navigate).toHaveBeenCalledWith("/requests/req-9");
+    expect(submit).not.toHaveBeenCalled();
+  });
 });
