@@ -502,15 +502,31 @@ container was removed, reconstructs `awaiting_approval` and resumes
 it to `pr_created`. Process-local state does not survive that
 replacement.
 
+## Batch 31 — operator UI (complete)
+
+The local operator UI is a React and Vite application packaged into the
+existing one-container image. `docs/api.md` describes how to run it.
+The design is
+`docs/superpowers/specs/2026-09-28-operator-ui-design.md`.
+
+`npm run dev` is the local development server and proxies to
+`127.0.0.1:8000`. The production container serves the built files from
+FastAPI on the same origin. Compose still publishes only
+`127.0.0.1:8000:8000`. There is still one service and one host port.
+`GET /requests/{request_id}` returns the UI so a deep link reloads from
+the SQLite checkpoint. Node compiles the UI during the image build and
+is not part of the runtime process.
+
+The UI does not add authentication. Public deployment is not started.
+
 ## Not yet started
 
-The next major product boundary is Batch 31, the operator UI. It is
-not designed or implemented here.
+Authentication, RBAC, multi-user access, tenants, and public deployment
+are not started. The local API and UI remain unauthenticated and are
+not a public production boundary.
 
-The local API remains unauthenticated and is not a public production
-boundary. EventBridge, SNS, a second Lambda in one composition,
-chaining compositions together, Cognito/JWT/Lambda authorizers, WAF,
-custom domains, any UI, authentication, public deployment, a
-composition-registry/plugin abstraction, and any DynamoDB action
-beyond `PutItem` for the new composition remain not started until a
-future phase is explicitly approved.
+EventBridge, SNS, a second Lambda in one composition, chaining
+compositions together, Cognito/JWT/Lambda authorizers, WAF, custom
+domains, a composition-registry/plugin abstraction, and any DynamoDB
+action beyond `PutItem` for the new composition remain not started
+until a future phase is explicitly approved.
