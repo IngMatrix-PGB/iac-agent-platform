@@ -50,6 +50,13 @@ RUN mkdir -p /tmp/tf-mirror /opt/terraform/providers /home/iac \
         '  }' \
         '}' > /home/iac/.terraformrc
 
+FROM node:22-bookworm-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c AS ui
+WORKDIR /src/ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci
+COPY ui/ ./
+RUN npm run build
+
 FROM python:3.12-slim-bookworm@sha256:392307d22300de8b5986851a12d9176dfc0fc073e65bf6523ebd7dcbeb23564e
 
 RUN groupadd --gid 10001 iac \
@@ -63,6 +70,7 @@ COPY --from=builder /opt/iac-agent /opt/iac-agent
 COPY --from=builder /opt/checkov /opt/checkov
 COPY --from=builder /opt/terraform /opt/terraform
 COPY --from=builder /home/iac/.terraformrc /home/iac/.terraformrc
+COPY --from=ui /src/ui/dist /opt/iac-agent/ui
 
 ENV IAC_AGENT_BIND_HOST=0.0.0.0 \
     IAC_AGENT_PORT=8000 \
@@ -70,6 +78,7 @@ ENV IAC_AGENT_BIND_HOST=0.0.0.0 \
     IAC_AGENT_STATE_DB=/var/lib/iac-agent/state/state.db \
     IAC_AGENT_WORKSPACE_ROOT=/var/lib/iac-agent/workspaces \
     IAC_AGENT_OBSERVABILITY=off \
+    IAC_AGENT_UI_DIST=/opt/iac-agent/ui \
     HOME=/home/iac \
     PATH="/opt/iac-agent/.venv/bin:/opt/checkov/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     PYTHONDONTWRITEBYTECODE=1
