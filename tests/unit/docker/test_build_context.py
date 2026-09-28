@@ -47,3 +47,12 @@ def test_compose_publishes_loopback_and_persists_only_state():
     assert service.get("network_mode") != "host"
     assert service.get("privileged") is not True
     assert service.get("stop_grace_period")
+
+
+def test_api_doc_states_container_bind_is_not_authorization():
+    text = Path("docs/api.md").read_text()
+    assert "127.0.0.1:8000:8000" in text
+    assert (
+        "0.0.0.0 inside the container is network binding, "
+        "not authentication or authorization."
+    ) in text
