@@ -2,12 +2,12 @@
 
 FastAPI is an inbound adapter over `IntentResolutionService` and `IacApplication`. Routes do not call LangGraph nodes, Terraform, Checkov, OpenAI, the Langfuse SDK, GitHub, or the SQLite checkpointer directly. There is no second request store. `request_id` is the workflow `thread_id`.
 
-The process listens on `127.0.0.1` port 8000. There is no authentication and no authorization. This boundary is for local development. It is not production-ready for public exposure. A later Docker batch has to choose its own bind address and network policy; Docker is not part of this batch.
+`python -m iac_agent.api` serves this same app. Outside Docker the process listens on `127.0.0.1` port 8000. There is no authentication and no authorization. This boundary is for local development. It is not production-ready for public Internet exposure.
 
 ## Routes
 
-- `GET /health` returns `{"status":"ok"}`. It does not call AWS, OpenAI, Langfuse, GitHub, or the Terraform Registry.
-- `GET /ready` returns `{"status":"ready"}` when the application holder exists, and `503 {"status":"not_ready"}` when it does not. Readiness is that local check. Langfuse is not a readiness probe and does not authorize requests.
+- `GET /health` returns `{"status":"ok"}`. It does not call AWS, OpenAI, Langfuse, GitHub, or the Terraform Registry, and it does not validate external connectivity.
+- `GET /ready` returns `{"status":"ready"}` when the application holder exists, and `503 {"status":"not_ready"}` when it does not. Readiness is that local check. It does not validate AWS, OpenAI, GitHub, Langfuse, the Terraform Registry, or any other external service. Langfuse is not a readiness probe and does not authorize requests.
 - `POST /api/v1/requests` accepts `natural_language_request` and an optional `request_id`. An omitted id is generated with the existing request-id helper. The route calls `IntentResolutionService.submit`.
 - `GET /api/v1/requests/{request_id}` calls `IacApplication.read`.
 - `POST /api/v1/requests/{request_id}/approval` accepts `{"decision":"approve"}` or `{"decision":"reject"}` and calls `IacApplication.resume` only when the durable status is `awaiting_approval`.
@@ -35,6 +35,30 @@ It does not include the raw prompt, model output, assumptions, unresolved clarif
 ## Observability
 
 Batch 28 telemetry stays under the application services. `POST` and approval receive it through `submit` and `resume`. `GET` and `read` do not emit workflow telemetry. The API does not import the Langfuse SDK and does not store a Langfuse trace id. `request_id` remains the correlation seed. The Langfuse adapter stays optional and off unless configured, as described in `docs/observability.md`.
+
+## Local Docker runtime
+
+Batch 30 packages this same application as one local container. `compose.yaml` builds that image. The runtime is Python 3.12, the FastAPI application served by Uvicorn, Terraform 1.16.1, Checkov 3.3.13 in an isolated `/opt/checkov` environment, the trusted Terraform modules, and an offline filesystem mirror of `hashicorp/aws`. The container command is `python -m iac_agent.api`. The image pins `python:3.12-slim-bookworm` by digest.
+
+The container binds `0.0.0.0:8000`. Compose publishes only `127.0.0.1:8000:8000`. 0.0.0.0 inside the container is network binding, not authentication or authorization. The API remains unauthenticated and is for local use. It is not approved for public Internet exposure. Batch 31 is the operator UI. This batch did not add one, and it did not add authentication.
+
+The process runs as user `iac`, uid 10001. Compose does not set privileged mode, does not mount the Docker socket, and does not use host networking. The runtime user cannot write `/opt/iac-agent`, the trusted modules under that root, `/opt/checkov`, the Terraform binary, or the provider mirror. It can write `/var/lib/iac-agent/state`, `/var/lib/iac-agent/workspaces`, `/home/iac`, and `/tmp`.
+
+`IAC_AGENT_TRUSTED_MODULE_ROOT=/opt/iac-agent` in the container. An unset value on the host still resolves modules from the checkout. The request does not choose that root.
+
+SQLite is the durable HITL store. The named volume `iac-agent-state` is mounted at `/var/lib/iac-agent/state`, and the database path is `/var/lib/iac-agent/state/state.db`. The database, WAL, and SHM files stay in that mounted directory. Generated workspaces at `/var/lib/iac-agent/workspaces` are ephemeral and are not on that volume.
+
+The acceptance proof removes container A after a request reaches `awaiting_approval` and the checkpoint is on the volume. Replacement container B mounts the same volume, opens a new process, checkpointer, graph, and application, and `GET` reconstructs `awaiting_approval`. Approve resumes that checkpoint to `pr_created`. Process-local state from A does not survive. B does not need A's workspace.
+
+The AWS provider mirror supplies `hashicorp/aws` without a registry download at runtime. The acceptance test ran credential-free `terraform init`, `validate`, and `plan` with container networking disabled. Checkov 3.3.13 is invoked as `checkov` on `PATH` and is not installed into the application virtualenv.
+
+The image sets `IAC_AGENT_OBSERVABILITY=off`. Langfuse stays optional. Installing the Langfuse extra does not enable telemetry.
+
+`.env.example` lists variable names and empty or example-safe values. Application credentials are runtime configuration. They are not copied into the image.
+
+The production lifespan still requires GitHub and OpenAI configuration before `python -m iac_agent.api` serves, including for a request that would not call those integrations. That eager startup requirement is unchanged technical debt.
+
+Tests that need a Docker daemon use `@pytest.mark.docker`. Deterministic CI runs `pytest -m "not real_tool and not real_llm and not docker"`. The `real_tool` job is unchanged.
 
 ## What this batch does not do
 

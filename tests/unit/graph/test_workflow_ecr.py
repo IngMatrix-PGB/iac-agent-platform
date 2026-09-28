@@ -9,8 +9,8 @@ from iac_agent.domain.approval import ApprovalDecision
 from iac_agent.domain.plan import PlanSummary
 from iac_agent.domain.resource import ResourceType
 from iac_agent.domain.security import SecurityGateResult
+from iac_agent.graph.modules import default_trusted_module_dirs
 from iac_agent.graph.workflow import (
-    _DEFAULT_TRUSTED_MODULE_DIRS,
     _RESOURCE_KIND_DISPLAY_NAMES,
     _pr_body,
     _resource_kind_of,
@@ -19,7 +19,7 @@ from iac_agent.providers.aws.ecr.contract import EcrResourceSpec
 
 
 def test_ecr_trusted_module_dir_is_registered_and_exists():
-    module_dir = _DEFAULT_TRUSTED_MODULE_DIRS[ResourceType.ECR]
+    module_dir = default_trusted_module_dirs()[ResourceType.ECR]
     assert module_dir.name == "ecr"
     assert module_dir.is_dir()
 
