@@ -1,6 +1,3 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { ApiClient } from "./client";
 import type { RequestListItem, RequestResponse } from "./types";
@@ -243,11 +240,11 @@ describe("ApiClient", () => {
   });
 
   it("does not call fetch outside the API client", () => {
-    const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-    const roots = ["components", "pages"].map((name) => join(sourceRoot, name));
-    const files = roots.flatMap((root) => collectSources(root));
-    files.push(join(sourceRoot, "app.tsx"));
-    const callers = files.filter((file) => /\bfetch\s*\(/.test(readFileSync(file, "utf8")));
+    const sources = import.meta.glob(
+      ["../components/**/*.{ts,tsx}", "../pages/**/*.{ts,tsx}", "../app.tsx"],
+      { eager: true, query: "?raw", import: "default" },
+    );
+    const callers = Object.entries(sources).filter(([, source]) => /\bfetch\s*\(/.test(String(source)));
     expect(callers).toEqual([]);
   });
 
@@ -262,13 +259,3 @@ describe("ApiClient", () => {
     await expect(client.health()).resolves.toMatchObject({ kind: "success", status: "ok" });
   });
 });
-
-function collectSources(directory: string): string[] {
-  return readdirSync(directory).flatMap((name) => {
-    const path = join(directory, name);
-    if (statSync(path).isDirectory()) {
-      return collectSources(path);
-    }
-    return path.endsWith(".ts") || path.endsWith(".tsx") ? [path] : [];
-  });
-}
