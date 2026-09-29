@@ -36,6 +36,23 @@ function clientWith(decide: ApiClient["decide"]): ApiClient {
 }
 
 describe("approval panel", () => {
+  it("moves focus into the dialog and explains that reject is immediate", async () => {
+    const user = userEvent.setup();
+    const decide = vi.fn();
+    render(<ApprovalPanel body={body(true)} client={clientWith(decide)} onResult={vi.fn()} />);
+    expect(
+      screen.getByText("Reject sends immediately and does not ask for confirmation."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Approve" }));
+    const dialog = screen.getByRole("dialog", {
+      name: "Approval resumes the workflow and publication may create a pull request. Terraform apply will not run.",
+    });
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    expect(decide).not.toHaveBeenCalled();
+  });
+
   it("hides controls when approval is not available", () => {
     render(
       <ApprovalPanel body={body(false)} client={clientWith(vi.fn())} onResult={vi.fn()} />,
