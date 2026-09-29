@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 
 from iac_agent.api.approval import decide_approval
-from iac_agent.api.project import project_submission, project_view
+from iac_agent.api.project import project_list_item, project_submission, project_view
+from iac_agent.api.schemas import RequestListResponse
 from iac_agent.cli.ids import generate_request_id
 from iac_agent.domain.approval import InvalidApprovalDecisionError, parse_approval_decision
 from iac_agent.domain.workflow import validate_request_id
@@ -84,6 +85,18 @@ def register_routes(app: FastAPI) -> None:
             body,
             status_code=201,
             headers={"Location": f"/api/v1/requests/{request_id}"},
+        )
+
+    @app.get("/api/v1/requests")
+    def list_requests(
+        request: Request,
+        limit: int = Query(default=20, ge=1, le=50),
+    ) -> RequestListResponse:
+        entries = request.app.state.holder.application.list_requests(limit=limit)
+        return RequestListResponse(
+            requests=[
+                project_list_item(entry.view, created_at=entry.created_at) for entry in entries
+            ]
         )
 
     @app.get("/api/v1/requests/{request_id}")
