@@ -1,9 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ApiClient, ClientResult } from "../api/client";
-import type { RequestResponse } from "../api/types";
+import type { RequestListItem, RequestResponse } from "../api/types";
+import { AuthoritativeValue } from "../components/authoritative-value";
 import { ErrorBanner } from "../components/error-banner";
 import { OpenRequest } from "../components/open-request";
 import { RequestForm } from "../components/request-form";
+
+const EMPTY_INDEX =
+  "No indexed requests. Checkpoints created before the durable request index may still be opened by request id even when they do not appear in Recent requests.";
 
 export function ComposePage({
   client,
@@ -18,6 +22,27 @@ export function ComposePage({
   const [unsaved, setUnsaved] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<RequestResponse | null>(null);
+  const [recent, setRecent] = useState<RequestListItem[] | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void client.listRequests().then((result) => {
+      if (cancelled) {
+        return;
+      }
+      if (result.kind === "success") {
+        setRecent(result.body.requests);
+        setListError(null);
+        return;
+      }
+      setRecent(null);
+      setListError(result.message);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
 
   async function submit() {
     if (!draft.trim()) {
@@ -52,12 +77,70 @@ export function ComposePage({
       <h2 id="compose-heading">New request</h2>
       <p>Describe the infrastructure. A durable workflow opens on its own page.</p>
       <RequestForm value={draft} busy={busy} onChange={setDraft} onSubmit={() => void submit()} />
+      <RecentRequests rows={recent} error={listError} navigate={navigate} />
       <h3>Open a saved request</h3>
       <OpenRequest navigate={navigate} />
       {localError ? <p>{localError}</p> : null}
       {banner ? <ErrorBanner message={banner} /> : null}
       {unsaved ? <p>This request was not saved.</p> : null}
       {outcome ? <NonDurableOutcome body={outcome} /> : null}
+    </section>
+  );
+}
+
+function RecentRequests({
+  rows,
+  error,
+  navigate,
+}: {
+  rows: RequestListItem[] | null;
+  error: string | null;
+  navigate: (path: string) => void;
+}) {
+  return (
+    <section className="recent-requests" aria-labelledby="recent-requests-heading">
+      <h3 id="recent-requests-heading">Recent requests</h3>
+      {error ? <ErrorBanner message={error} /> : null}
+      {rows && rows.length === 0 ? <p>{EMPTY_INDEX}</p> : null}
+      {rows && rows.length > 0 ? (
+        <ul>
+          {rows.map((row) => {
+            const path = `/requests/${encodeURIComponent(row.request_id)}`;
+            return (
+              <li className="panel" key={row.request_id}>
+                <a
+                  href={path}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    navigate(path);
+                  }}
+                >
+                  {row.request_id}
+                </a>
+                <dl>
+                  <div>
+                    <dt>Created</dt>
+                    <dd>
+                      <code className="enum">{row.created_at}</code>
+                    </dd>
+                  </div>
+                  <AuthoritativeValue label="Workflow status" value={row.workflow_status} />
+                  {row.security_status ? (
+                    <AuthoritativeValue label="Security status" value={row.security_status} />
+                  ) : null}
+                  {row.name ? (
+                    <div>
+                      <dt>Name</dt>
+                      <dd>{row.name}</dd>
+                    </div>
+                  ) : null}
+                </dl>
+                <p>{row.approval_available ? "Approval available" : "Approval not available"}</p>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
     </section>
   );
 }
