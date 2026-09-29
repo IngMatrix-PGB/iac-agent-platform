@@ -50,6 +50,7 @@ from iac_agent.observability.failopen import FailOpenObservability
 from iac_agent.observability.noop import NoOpObservability
 from iac_agent.observability.port import ObservabilityPort
 from iac_agent.persistence.checkpoints import open_sqlite_checkpointer
+from iac_agent.persistence.request_index import open_request_index
 from iac_agent.providers.aws.sqs.renderer import TerraformCompositionRenderer
 from iac_agent.security.checkov import CheckovAdapter
 
@@ -195,9 +196,13 @@ def open_intent_application(
     resolver: ArchitectureResolver | None = None,
 ) -> Iterator[IntentApplication]:
     """Wraps `open_application` with the NL orchestration layer. Does not
-    change `open_application` itself, does not open a second SQLite
-    connection, and never reads `OPENAI_API_KEY` or imports `openai` —
-    `interpreter` is always supplied by the caller."""
+    change `open_application` itself and never reads `OPENAI_API_KEY` or
+    imports `openai` — `interpreter` is always supplied by the caller.
+
+    The request index opens its own connection to the same `state.db`
+    file. It does not open a second database and it does not own the
+    LangGraph checkpoint tables.
+    """
     from iac_agent.app.service import IacApplication
     from iac_agent.intent.resolver import ArchitectureResolver as _ArchitectureResolver
     from iac_agent.intent.service import IntentResolutionService
@@ -206,14 +211,21 @@ def open_intent_application(
         config, github_token=github_token, github_transport=github_transport
     ) as application:
         observability = build_observability(load_observability_settings_from_env())
-        iac = IacApplication(application.graph, observability=observability)
-        service = IntentResolutionService(
-            interpreter=interpreter,
-            resolver=resolver if resolver is not None else _ArchitectureResolver(),
-            application=iac,
-            observability=observability,
-        )
-        yield IntentApplication(config=application.config, intent_service=service, application=iac)
+        with open_request_index(application.config.state_db_path) as index:
+            iac = IacApplication(
+                application.graph,
+                observability=observability,
+                request_index=index,
+            )
+            service = IntentResolutionService(
+                interpreter=interpreter,
+                resolver=resolver if resolver is not None else _ArchitectureResolver(),
+                application=iac,
+                observability=observability,
+            )
+            yield IntentApplication(
+                config=application.config, intent_service=service, application=iac
+            )
 
 
 def create_intent_interpreter(
