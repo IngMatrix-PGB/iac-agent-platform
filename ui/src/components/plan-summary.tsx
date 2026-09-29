@@ -4,15 +4,34 @@ export function PlanSummary({ plan }: { plan: PlanDTO | null }) {
   if (!plan) {
     return <p>No plan summary was returned.</p>;
   }
+  const destructive = plan.destructive_change_detected;
   return (
-    <section>
-      <p>Add</p>
-      <p>{plan.add}</p>
-      <p>Change</p>
-      <p>{plan.change}</p>
-      <p>Destroy</p>
-      <p>{plan.destroy}</p>
-      {plan.destructive_change_detected ? <p>Destructive change detected.</p> : null}
+    <section
+      className={destructive ? "panel panel-destructive" : "panel"}
+      aria-labelledby="plan-summary-heading"
+    >
+      <h3 id="plan-summary-heading">Terraform plan summary</h3>
+      <dl className="plan-counts">
+        <div>
+          <dt role="term" aria-label="Add">
+            Add
+          </dt>
+          <dd>{plan.add}</dd>
+        </div>
+        <div>
+          <dt role="term" aria-label="Change">
+            Change
+          </dt>
+          <dd>{plan.change}</dd>
+        </div>
+        <div>
+          <dt role="term" aria-label="Destroy">
+            Destroy
+          </dt>
+          <dd>{plan.destroy}</dd>
+        </div>
+      </dl>
+      {destructive ? <p className="destructive-sentence">Destructive change detected.</p> : null}
     </section>
   );
 }
