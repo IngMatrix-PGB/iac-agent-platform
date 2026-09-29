@@ -214,7 +214,9 @@ def test_list_hides_checkpoint_internals():
     application = _Application()
     application.views = {"req-hidden": view}
     application.rows = (("req-hidden", "2026-09-29T00:00:00.000000Z"),)
-    text = _client(application).get("/api/v1/requests").text
+    response = _client(application).get("/api/v1/requests")
+    assert response.status_code == 200
+    text = response.text
     for sentinel in _HIDDEN:
         assert sentinel not in text
 
