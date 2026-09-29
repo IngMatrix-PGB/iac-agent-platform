@@ -48,8 +48,11 @@ export function ComposePage({
   }
 
   return (
-    <section>
+    <section aria-labelledby="compose-heading">
+      <h2 id="compose-heading">New request</h2>
+      <p>Describe the infrastructure. A durable workflow opens on its own page.</p>
       <RequestForm value={draft} busy={busy} onChange={setDraft} onSubmit={() => void submit()} />
+      <h3>Open a saved request</h3>
       <OpenRequest navigate={navigate} />
       {localError ? <p>{localError}</p> : null}
       {banner ? <ErrorBanner message={banner} /> : null}
@@ -66,8 +69,11 @@ function isInterpreterFailure(status: number): boolean {
 function NonDurableOutcome({ body }: { body: RequestResponse }) {
   const resolution = body.resolution;
   return (
-    <section>
-      <h2>{body.outcome}</h2>
+    <section className="panel" aria-labelledby="unsaved-outcome-heading">
+      <h3 id="unsaved-outcome-heading">Unsaved result</h3>
+      <p>
+        <span>Outcome</span> <code>{body.outcome}</code>
+      </p>
       <p>This result is not saved. Refreshing clears it.</p>
       {resolution.field ? <p>{resolution.field}</p> : null}
       {resolution.reason ? <p>{resolution.reason}</p> : null}

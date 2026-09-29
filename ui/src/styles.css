@@ -1,8 +1,25 @@
 :root {
-  color: #1c1917;
-  background: #fafaf9;
-  font-family: ui-sans-serif, system-ui, sans-serif;
-  line-height: 1.45;
+  --color-text: #1c1917;
+  --color-muted: #44403c;
+  --color-surface: #fafaf9;
+  --color-panel: #ffffff;
+  --color-border: #d6d3d1;
+  --color-focus: #1d4ed8;
+  --color-danger-text: #7f1d1d;
+  --color-danger-border: #b91c1c;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --font-sans: ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, sfmono-regular, menlo, monospace;
+  --measure: 72rem;
+  --line: 1.45;
+  color: var(--color-text);
+  background: var(--color-surface);
+  font-family: var(--font-sans);
+  line-height: var(--line);
 }
 
 body {
@@ -11,9 +28,41 @@ body {
 
 main {
   box-sizing: border-box;
-  max-width: 72rem;
+  max-width: var(--measure);
   margin: 0 auto;
-  padding: 1.5rem;
+  padding: var(--space-5);
+}
+
+.shell-header {
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.shell-header p {
+  max-width: 40rem;
+  color: var(--color-muted);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  line-height: 1.25;
+  margin: 0 0 var(--space-3);
+}
+
+h1 {
+  font-size: 1.5rem;
+}
+
+h2 {
+  font-size: 1.25rem;
+}
+
+h3,
+h4 {
+  font-size: 1rem;
 }
 
 label,
@@ -21,25 +70,143 @@ button {
   font: inherit;
 }
 
-textarea {
+textarea,
+input {
   display: block;
   width: 100%;
+  box-sizing: border-box;
+  margin: var(--space-2) 0 var(--space-4);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  background: var(--color-panel);
+  font: inherit;
+}
+
+textarea {
   min-height: 8rem;
-  margin: 0.5rem 0 1rem;
 }
 
 button {
-  margin-right: 0.5rem;
+  margin: 0 var(--space-2) var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  background: var(--color-panel);
+  color: var(--color-text);
+}
+
+button:disabled {
+  color: var(--color-muted);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+code,
+.enum {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
 }
 
 .banner {
-  margin: 1rem 0;
-  padding: 0.75rem 1rem;
-  border: 1px solid #b91c1c;
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-danger-border);
+  color: var(--color-danger-text);
+  background: var(--color-panel);
+}
+
+.panel {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  background: var(--color-panel);
+}
+
+dl {
+  margin: 0;
+}
+
+dt {
+  font-weight: 650;
+}
+
+dd {
+  margin: 0 0 var(--space-3);
 }
 
 @media (max-width: 40rem) {
   main {
-    padding: 1rem;
+    padding: var(--space-4);
   }
+}
+
+.plan-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.plan-counts dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 1.25rem;
+}
+
+.panel-destructive {
+  border-color: var(--color-danger-border);
+}
+
+.destructive-sentence {
+  margin: var(--space-3) 0 0;
+  font-weight: 650;
+}
+
+@media (max-width: 40rem) {
+  .plan-counts {
+    grid-template-columns: 1fr;
+  }
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.decision {
+  border-width: 2px;
+}
+
+dialog {
+  box-sizing: border-box;
+  max-width: min(32rem, calc(100vw - 2rem));
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  background: var(--color-panel);
+  color: var(--color-text);
+}
+
+dialog p {
+  margin-top: 0;
 }

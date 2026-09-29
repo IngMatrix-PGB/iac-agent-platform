@@ -109,9 +109,13 @@ export function RequestPage({
     setBanner(result.message);
   }
 
+  const polling = shouldPoll(status) && !pollExhausted;
   return (
-    <section>
+    <section aria-labelledby="request-review-heading">
+      <h2 id="request-review-heading">Request review</h2>
       {banner ? <ErrorBanner message={banner} /> : null}
+      {!body && !banner ? <p role="status">Loading request.</p> : null}
+      {polling ? <p role="status">Checking this request.</p> : null}
       {body ? (
         <>
           <RequestSummary body={body} />
@@ -122,15 +126,18 @@ export function RequestPage({
         </>
       ) : null}
       {pollExhausted ? (
-        <button
-          type="button"
-          onClick={() => {
-            setPollExhausted(false);
-            void client.getRequest(requestId).then(applyRead);
-          }}
-        >
-          Refresh
-        </button>
+        <>
+          <p>Automatic checks stopped.</p>
+          <button
+            type="button"
+            onClick={() => {
+              setPollExhausted(false);
+              void client.getRequest(requestId).then(applyRead);
+            }}
+          >
+            Refresh
+          </button>
+        </>
       ) : null}
     </section>
   );

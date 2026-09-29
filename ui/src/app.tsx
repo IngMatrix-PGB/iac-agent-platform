@@ -17,13 +17,16 @@ export function App({
   const route = parseRoute(pathname ?? window.location.pathname);
   return (
     <main>
-      <h1>IaC Agent Platform</h1>
-      <HealthIndicator client={client} />
+      <header className="shell-header">
+        <h1>IaC Agent Platform</h1>
+        <p>Local operator console. Review the server response before approving a request.</p>
+        <HealthIndicator client={client} />
+      </header>
       {route.name === "compose" ? <ComposePage client={client} navigate={navigate} /> : null}
       {route.name === "request" ? (
         <RequestPage client={client} requestId={route.requestId} />
       ) : null}
-      {route.name === "unknown" ? <p>Page not found.</p> : null}
+      {route.name === "unknown" ? <h2>Page not found.</h2> : null}
     </main>
   );
 }

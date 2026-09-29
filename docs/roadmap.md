@@ -519,6 +519,14 @@ is not part of the runtime process.
 
 The UI does not add authentication. Public deployment is not started.
 
+## Batch 32 — operator UI presentation (complete)
+
+The operator UI is a review surface over the public request DTO. Labels may
+sit beside server enums. The enums stay visible. The batch does not add
+authentication, request history, or a new API. The design is
+`docs/superpowers/specs/2026-09-28-batch32-design.md`. The plan is
+`docs/superpowers/plans/2026-09-28-batch32-operator-ui-presentation.md`.
+
 ## Not yet started
 
 Authentication, RBAC, multi-user access, tenants, and public deployment
