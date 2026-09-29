@@ -50,6 +50,18 @@ function Projection({ body }: { body: RequestResponse }) {
 }
 
 describe("request projection", () => {
+  it("names the findings table and keeps only public columns", () => {
+    render(<Projection body={posted} />);
+    const table = screen.getByRole("table", { name: "Security findings" });
+    expect(table).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Policy" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Status" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Severity" })).toBeInTheDocument();
+    expect(screen.getByText("SQS_ENCRYPTION")).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Resource" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Message" })).not.toBeInTheDocument();
+  });
+
   it("labels add, change, and destroy and keeps the destructive sentence", () => {
     render(<Projection body={posted} />);
     expect(screen.getByRole("heading", { level: 3, name: "Terraform plan summary" })).toBeInTheDocument();
