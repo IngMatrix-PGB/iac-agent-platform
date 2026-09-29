@@ -50,6 +50,15 @@ function Projection({ body }: { body: RequestResponse }) {
 }
 
 describe("request projection", () => {
+  it("labels the request id and outcome and still shows the server outcome", () => {
+    render(<Projection body={posted} />);
+    expect(screen.getByRole("heading", { level: 3, name: "Request" })).toBeInTheDocument();
+    expect(screen.getByRole("term", { name: "Request id" })).toBeInTheDocument();
+    expect(screen.getByText("req-1")).toBeInTheDocument();
+    expect(screen.getByRole("term", { name: "Outcome" })).toBeInTheDocument();
+    expect(screen.getAllByText("awaiting_approval").length).toBeGreaterThan(0);
+  });
+
   it("renders the public submission fields", () => {
     render(<Projection body={posted} />);
     expect(screen.getByText("req-1")).toBeInTheDocument();
