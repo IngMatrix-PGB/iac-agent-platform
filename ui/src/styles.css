@@ -124,6 +124,18 @@ code,
   background: var(--color-panel);
 }
 
+.recent-requests ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recent-requests a,
+.recent-requests code,
+.recent-requests li {
+  overflow-wrap: anywhere;
+}
+
 dl {
   margin: 0;
 }
