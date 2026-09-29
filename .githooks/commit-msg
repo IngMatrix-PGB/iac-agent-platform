@@ -1,0 +1,5 @@
+#!/bin/sh
+# Reject attribution trailers. Does not change global Git configuration.
+# Enable with: git config core.hooksPath .githooks
+root=$(git rev-parse --show-toplevel) || exit 1
+exec python3 "$root/scripts/check_commit_attribution.py" "$1"
