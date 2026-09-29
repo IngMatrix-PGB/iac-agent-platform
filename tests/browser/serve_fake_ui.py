@@ -12,7 +12,7 @@ import uvicorn
 
 import iac_agent.api.routes as routes
 from iac_agent.api.app import create_app
-from iac_agent.app.service import WorkflowView
+from iac_agent.app.service import IndexedRequest, WorkflowView
 from iac_agent.domain.approval import ApprovalDecision
 from iac_agent.domain.plan import PlanSummary
 from iac_agent.domain.security import (
@@ -30,6 +30,8 @@ from iac_agent.intent.service import IntentSubmissionResult
 from iac_agent.providers.aws.sqs.contract import SQSResourceSpec
 
 REQUEST_ID = "req-browser"
+CATALOG_ID = "req-indexed"
+CATALOG_CREATED_AT = "2026-09-29T00:00:00.000000Z"
 _CONFLICT_PROMPT = "conflict please"
 
 
@@ -85,6 +87,21 @@ def _view(
     )
 
 
+def _catalog_view() -> WorkflowView:
+    return WorkflowView(
+        request_id=CATALOG_ID,
+        workflow_status=WorkflowStatus.AWAITING_APPROVAL,
+        current_stage=WorkflowStage.APPROVAL,
+        resource_name="orders",
+        security_status="pass",
+        plan_summary=_plan(),
+        approval_decision=None,
+        pull_request=None,
+        error=None,
+        security_gate=_gate(),
+    )
+
+
 def _awaiting() -> WorkflowView:
     return _view(WorkflowStatus.AWAITING_APPROVAL, None, None)
 
@@ -121,7 +138,13 @@ class BrowserApplication:
         if self.phase == "conflict_loaded":
             self.phase = "conflict_approval"
 
+    def list_requests(self, *, limit: int) -> tuple[IndexedRequest, ...]:
+        del limit
+        return (IndexedRequest(view=_catalog_view(), created_at=CATALOG_CREATED_AT),)
+
     def read(self, request_id: str) -> WorkflowView | None:
+        if request_id == CATALOG_ID:
+            return _catalog_view()
         if request_id != REQUEST_ID:
             return None
         if self.phase == "conflict_fresh":
