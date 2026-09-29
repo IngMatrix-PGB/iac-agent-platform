@@ -172,4 +172,43 @@ describe("request page", () => {
     expect(getRequest).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
   });
+
+  it("announces a loading status until the server body arrives", async () => {
+    let resolveGet: (value: ClientResult) => void = () => {};
+    const pending = new Promise<ClientResult>((resolve) => {
+      resolveGet = resolve;
+    });
+    const getRequest = vi.fn().mockReturnValue(pending);
+    render(<RequestPage client={clientReturning(getRequest)} requestId="req-1" />);
+    expect(screen.getByRole("heading", { level: 2, name: "Request review" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Loading request.");
+    resolveGet({ kind: "success", status: 200, body: reloaded });
+    expect(await screen.findByText("req-1")).toBeInTheDocument();
+    expect(screen.queryByText("Loading request.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Checking this request.")).not.toBeInTheDocument();
+  });
+
+  it("announces polling only for a pollable status and stops after the budget", async () => {
+    vi.useFakeTimers();
+    const pendingBody: RequestResponse = {
+      ...reloaded,
+      outcome: "pending",
+      approval_available: false,
+      workflow: { ...reloaded.workflow!, workflow_status: "pending" },
+    };
+    const getRequest = vi.fn().mockResolvedValue({ kind: "success", status: 200, body: pendingBody });
+    render(<RequestPage client={clientReturning(getRequest)} requestId="req-1" />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("Checking this request.");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000 * 13);
+    });
+    expect(getRequest).toHaveBeenCalledTimes(13);
+    expect(screen.getByText("Automatic checks stopped.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
+    expect(screen.queryByText("Checking this request.")).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
 });

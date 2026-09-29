@@ -50,6 +50,50 @@ function Projection({ body }: { body: RequestResponse }) {
 }
 
 describe("request projection", () => {
+  it("names the findings table and keeps only public columns", () => {
+    render(<Projection body={posted} />);
+    const table = screen.getByRole("table", { name: "Security findings" });
+    expect(table).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Policy" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Status" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Severity" })).toBeInTheDocument();
+    expect(screen.getByText("SQS_ENCRYPTION")).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Resource" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Message" })).not.toBeInTheDocument();
+  });
+
+  it("labels add, change, and destroy and keeps the destructive sentence", () => {
+    render(<Projection body={posted} />);
+    expect(screen.getByRole("heading", { level: 3, name: "Terraform plan summary" })).toBeInTheDocument();
+    expect(screen.getByRole("term", { name: "Add" })).toBeInTheDocument();
+    expect(screen.getByRole("term", { name: "Change" })).toBeInTheDocument();
+    expect(screen.getByRole("term", { name: "Destroy" })).toBeInTheDocument();
+    expect(screen.getByText("Destructive change detected.")).toBeInTheDocument();
+    expect(screen.queryByText("aws_sqs_queue.hidden_address")).not.toBeInTheDocument();
+  });
+
+  it("shows workflow labels beside the server enums", () => {
+    render(<Projection body={posted} />);
+    expect(screen.getByRole("heading", { level: 3, name: "Workflow" })).toBeInTheDocument();
+    expect(screen.getByRole("term", { name: "Workflow status" })).toBeInTheDocument();
+    expect(screen.getByRole("term", { name: "Stage" })).toBeInTheDocument();
+    expect(screen.getByRole("term", { name: "Security status" })).toBeInTheDocument();
+    expect(screen.getAllByText("awaiting_approval").length).toBeGreaterThan(0);
+    expect(screen.getByText("approval")).toBeInTheDocument();
+    expect(screen.getAllByText("warn").length).toBeGreaterThan(0);
+    expect(screen.getByText("Terraform apply was not executed.")).toBeInTheDocument();
+    expect(screen.getByText("Approval available")).toBeInTheDocument();
+  });
+
+  it("labels the request id and outcome and still shows the server outcome", () => {
+    render(<Projection body={posted} />);
+    expect(screen.getByRole("heading", { level: 3, name: "Request" })).toBeInTheDocument();
+    expect(screen.getByRole("term", { name: "Request id" })).toBeInTheDocument();
+    expect(screen.getByText("req-1")).toBeInTheDocument();
+    expect(screen.getByRole("term", { name: "Outcome" })).toBeInTheDocument();
+    expect(screen.getAllByText("awaiting_approval").length).toBeGreaterThan(0);
+  });
+
   it("renders the public submission fields", () => {
     render(<Projection body={posted} />);
     expect(screen.getByText("req-1")).toBeInTheDocument();
@@ -122,7 +166,7 @@ describe("request projection", () => {
     };
     render(<WorkflowStatus body={body} />);
     expect(screen.getByText("terraform")).toBeInTheDocument();
-    expect(screen.getByText("RuntimeError")).toBeInTheDocument();
+    expect(screen.getAllByText("RuntimeError").length).toBeGreaterThan(0);
     expect(screen.queryByText("HIDDEN_WORKFLOW_ERROR_MESSAGE")).not.toBeInTheDocument();
   });
 

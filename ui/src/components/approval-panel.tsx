@@ -29,9 +29,10 @@ export function ApprovalPanel({
     }
     if (typeof dialog.showModal === "function") {
       dialog.showModal();
-      return;
+    } else {
+      dialog.setAttribute("open", "");
     }
-    dialog.setAttribute("open", "");
+    dialog.querySelector<HTMLButtonElement>("[data-dialog-initial-focus]")?.focus();
   }, [open]);
 
   if (!body.approval_available) {
@@ -52,13 +53,10 @@ export function ApprovalPanel({
   }
 
   return (
-    <section aria-busy={busy}>
-      <button
-        ref={approveRef}
-        type="button"
-        disabled={busy}
-        onClick={() => setOpen(true)}
-      >
+    <section className="panel decision" aria-labelledby="approval-heading" aria-busy={busy}>
+      <h3 id="approval-heading">Approval decision</h3>
+      <p>Reject sends immediately and does not ask for confirmation.</p>
+      <button ref={approveRef} type="button" disabled={busy} onClick={() => setOpen(true)}>
         Approve
       </button>
       <button type="button" disabled={busy} onClick={() => void decide("reject")}>
@@ -67,7 +65,7 @@ export function ApprovalPanel({
       {open ? (
         <dialog ref={dialogRef} aria-labelledby="approve-confirm-title">
           <p id="approve-confirm-title">{CONFIRM_TEXT}</p>
-          <button type="button" disabled={busy} onClick={cancel}>
+          <button type="button" data-dialog-initial-focus disabled={busy} onClick={cancel}>
             Cancel
           </button>
           <button type="button" disabled={busy} onClick={() => void decide("approve")}>

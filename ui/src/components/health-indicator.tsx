@@ -33,8 +33,13 @@ export function HealthIndicator({ client }: { client: ApiClient }) {
   }, [client]);
 
   return (
-    <p>
-      <span>{health}</span> <span>{ready}</span>
-    </p>
+    <section aria-label="Process status">
+      <dl>
+        <dt role="term">API</dt>
+        <dd>{health}</dd>
+        <dt role="term">Readiness</dt>
+        <dd>{ready}</dd>
+      </dl>
+    </section>
   );
 }
