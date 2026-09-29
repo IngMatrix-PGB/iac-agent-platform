@@ -38,6 +38,14 @@ function clientWith(submit: ApiClient["submit"]): ApiClient {
 }
 
 describe("operator shell", () => {
+  it("groups the composer and the open-request control", () => {
+    render(<App client={clientWith(vi.fn())} navigate={vi.fn()} pathname="/" />);
+    expect(screen.getByRole("heading", { level: 2, name: "New request" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: "Open a saved request" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Infrastructure request" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Request id" })).toBeInTheDocument();
+  });
+
   it("uses a page heading for an unknown route", () => {
     render(<App client={clientWith(vi.fn())} navigate={vi.fn()} pathname="/missing" />);
     expect(screen.getByRole("heading", { level: 1, name: "IaC Agent Platform" })).toBeInTheDocument();

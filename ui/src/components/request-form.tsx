@@ -17,7 +17,7 @@ export function RequestForm({
   }
 
   return (
-    <form aria-busy={busy} onSubmit={submit}>
+    <form className="panel" aria-busy={busy} onSubmit={submit}>
       <label htmlFor="infrastructure-request">Infrastructure request</label>
       <textarea
         id="infrastructure-request"
