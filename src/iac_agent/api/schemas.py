@@ -69,6 +69,19 @@ class WorkflowDTO(_Frozen):
     pull_request: PullRequestDTO | None
 
 
+class RequestListItem(_Frozen):
+    request_id: str
+    created_at: str
+    workflow_status: str
+    approval_available: bool
+    security_status: str | None
+    name: str | None
+
+
+class RequestListResponse(_Frozen):
+    requests: list[RequestListItem]
+
+
 class RequestResponse(_Frozen):
     request_id: str
     outcome: str

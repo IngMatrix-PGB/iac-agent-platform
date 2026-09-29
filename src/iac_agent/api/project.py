@@ -8,6 +8,7 @@ from iac_agent.api.schemas import (
     IntentDTO,
     PlanDTO,
     PullRequestDTO,
+    RequestListItem,
     RequestResponse,
     ResolutionDTO,
     WorkflowDTO,
@@ -83,6 +84,18 @@ def project_submission(result: IntentSubmissionResult) -> RequestResponse:
             )
         case _:
             raise TypeError(f"unsupported resolution {type(result.resolution).__name__}")
+
+
+def project_list_item(view: WorkflowView, *, created_at: str) -> RequestListItem:
+    """Public catalog row. Status fields come from the checkpoint view."""
+    return RequestListItem(
+        request_id=view.request_id,
+        created_at=created_at,
+        workflow_status=view.workflow_status.value,
+        approval_available=view.workflow_status is WorkflowStatus.AWAITING_APPROVAL,
+        security_status=view.security_status,
+        name=view.resource_name,
+    )
 
 
 def project_view(view: WorkflowView) -> RequestResponse:
