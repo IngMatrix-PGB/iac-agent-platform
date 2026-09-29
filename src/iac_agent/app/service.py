@@ -22,6 +22,7 @@ kept as a zero-cost backward-compatible alias — the same pattern
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from langgraph.graph.state import CompiledStateGraph
@@ -39,7 +40,10 @@ from iac_agent.observability.port import ObservabilityPort
 from iac_agent.observability.project import project_workflow
 from iac_agent.observability.sanitize import sanitize_telemetry
 from iac_agent.persistence.checkpoints import workflow_config
+from iac_agent.persistence.request_index import RequestIndex
 from iac_agent.request import IacRequestSpec
+
+_LOGGER = logging.getLogger("iac_agent.persistence")
 
 
 @dataclass(frozen=True)
@@ -97,6 +101,7 @@ class IacApplication:
         graph: CompiledStateGraph,
         *,
         observability: ObservabilityPort | None = None,
+        request_index: RequestIndex | None = None,
     ) -> None:
         self._graph = graph
         self._observability = (
@@ -104,6 +109,7 @@ class IacApplication:
             if observability is not None
             else FailOpenObservability(NoOpObservability())
         )
+        self._request_index = request_index
 
     @classmethod
     def from_application(cls, application: Application) -> IacApplication:
@@ -115,7 +121,9 @@ class IacApplication:
         `AWAITING_APPROVAL`."""
         config = workflow_config(request_id)
         result = self._graph.invoke({"request_id": request_id, "resource_spec": spec}, config)
-        return self._emit(request_id, result, kind="submit")
+        view = self._emit(request_id, result, kind="submit")
+        self._record_index(request_id)
+        return view
 
     def resume(self, request_id: str, decision: ApprovalDecision) -> WorkflowView:
         """Resume a durably-paused workflow with a human decision. Never
@@ -154,6 +162,18 @@ class IacApplication:
             )
         self._observability.flush()
         return view
+
+    def _record_index(self, request_id: str) -> None:
+        """Best-effort catalog insert. A failure leaves a discovery gap only."""
+        if self._request_index is None:
+            return
+        try:
+            self._request_index.record(request_id)
+        except Exception as exc:
+            _LOGGER.warning(
+                "request index insert failed",
+                extra={"request_id": request_id, "error_type": type(exc).__name__},
+            )
 
 
 #: Zero-cost backward-compatible alias — mirrors `build_sqs_workflow`
