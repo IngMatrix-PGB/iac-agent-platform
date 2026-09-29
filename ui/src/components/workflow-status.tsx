@@ -1,22 +1,36 @@
 import type { RequestResponse } from "../api/types";
+import { AuthoritativeValue } from "./authoritative-value";
 
 export function WorkflowStatus({ body }: { body: RequestResponse }) {
   const workflow = body.workflow;
   const pullRequestUrl = workflow?.pull_request?.url;
   return (
-    <section>
-      {workflow ? <p>{workflow.workflow_status}</p> : null}
-      {workflow?.current_stage ? <p>{workflow.current_stage}</p> : null}
-      {workflow?.security_status ? <p>{workflow.security_status}</p> : null}
+    <section className="panel" aria-labelledby="workflow-heading">
+      <h3 id="workflow-heading">Workflow</h3>
+      {workflow ? (
+        <dl>
+          <AuthoritativeValue label="Workflow status" value={workflow.workflow_status} />
+          {workflow.current_stage ? (
+            <AuthoritativeValue label="Stage" value={workflow.current_stage} />
+          ) : null}
+          {workflow.security_status ? (
+            <AuthoritativeValue label="Security status" value={workflow.security_status} />
+          ) : null}
+        </dl>
+      ) : null}
       <p>Terraform apply was not executed.</p>
       <p>{body.approval_available ? "Approval available" : "Approval not available"}</p>
       {workflow?.error ? (
-        <>
-          <p>{workflow.error.stage}</p>
-          <p>{workflow.error.error_type}</p>
-        </>
+        <dl>
+          <AuthoritativeValue label="Error stage" value={workflow.error.stage} />
+          <AuthoritativeValue label="Error type" value={workflow.error.error_type} />
+        </dl>
       ) : null}
-      {pullRequestUrl ? <a href={pullRequestUrl}>{pullRequestUrl}</a> : null}
+      {pullRequestUrl ? (
+        <p>
+          <span>Pull request</span> <a href={pullRequestUrl}>{pullRequestUrl}</a>
+        </p>
+      ) : null}
     </section>
   );
 }

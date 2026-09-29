@@ -50,6 +50,19 @@ function Projection({ body }: { body: RequestResponse }) {
 }
 
 describe("request projection", () => {
+  it("shows workflow labels beside the server enums", () => {
+    render(<Projection body={posted} />);
+    expect(screen.getByRole("heading", { level: 3, name: "Workflow" })).toBeInTheDocument();
+    expect(screen.getByRole("term", { name: "Workflow status" })).toBeInTheDocument();
+    expect(screen.getByRole("term", { name: "Stage" })).toBeInTheDocument();
+    expect(screen.getByRole("term", { name: "Security status" })).toBeInTheDocument();
+    expect(screen.getAllByText("awaiting_approval").length).toBeGreaterThan(0);
+    expect(screen.getByText("approval")).toBeInTheDocument();
+    expect(screen.getAllByText("warn").length).toBeGreaterThan(0);
+    expect(screen.getByText("Terraform apply was not executed.")).toBeInTheDocument();
+    expect(screen.getByText("Approval available")).toBeInTheDocument();
+  });
+
   it("labels the request id and outcome and still shows the server outcome", () => {
     render(<Projection body={posted} />);
     expect(screen.getByRole("heading", { level: 3, name: "Request" })).toBeInTheDocument();
@@ -131,7 +144,7 @@ describe("request projection", () => {
     };
     render(<WorkflowStatus body={body} />);
     expect(screen.getByText("terraform")).toBeInTheDocument();
-    expect(screen.getByText("RuntimeError")).toBeInTheDocument();
+    expect(screen.getAllByText("RuntimeError").length).toBeGreaterThan(0);
     expect(screen.queryByText("HIDDEN_WORKFLOW_ERROR_MESSAGE")).not.toBeInTheDocument();
   });
 
