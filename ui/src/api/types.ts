@@ -56,6 +56,19 @@ export interface WorkflowDTO {
   pull_request?: PullRequestDTO | null;
 }
 
+export interface RequestListItem {
+  request_id: string;
+  created_at: string;
+  workflow_status: string;
+  approval_available: boolean;
+  security_status: string | null;
+  name: string | null;
+}
+
+export interface RequestListResponse {
+  requests: RequestListItem[];
+}
+
 export interface RequestResponse {
   request_id: string;
   outcome: string;

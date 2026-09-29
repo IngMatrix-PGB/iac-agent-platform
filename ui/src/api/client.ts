@@ -1,4 +1,4 @@
-import type { RequestResponse } from "./types";
+import type { RequestListItem, RequestListResponse, RequestResponse } from "./types";
 
 export type ClientSuccess = { kind: "success"; status: number; body: RequestResponse };
 export type ClientHttpError = {
@@ -11,6 +11,10 @@ export type ClientHttpError = {
 };
 export type ClientNetworkError = { kind: "network"; message: "The API could not be reached." };
 export type ClientResult = ClientSuccess | ClientHttpError | ClientNetworkError;
+export type RequestListResult =
+  | { kind: "success"; status: number; body: RequestListResponse }
+  | ClientHttpError
+  | ClientNetworkError;
 export type ProbeResult =
   | { kind: "success"; httpStatus: number; status: string }
   | ClientNetworkError
@@ -49,6 +53,10 @@ export class ApiClient {
     });
   }
 
+  listRequests(): Promise<RequestListResult> {
+    return this.list("/api/v1/requests");
+  }
+
   health(): Promise<ProbeResult> {
     return this.probe("/health");
   }
@@ -67,6 +75,21 @@ export class ApiClient {
     const parsed = await readJson(response);
     if ((response.status === 200 || response.status === 201) && isRequestResponse(parsed)) {
       return { kind: "success", status: response.status, body: parsed };
+    }
+    return httpError(response.status, parsed);
+  }
+
+  private async list(url: string): Promise<RequestListResult> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, { method: "GET" });
+    } catch {
+      return NETWORK;
+    }
+    const parsed = await readJson(response);
+    const body = requestListResponse(parsed);
+    if (response.status === 200 && body) {
+      return { kind: "success", status: response.status, body };
     }
     return httpError(response.status, parsed);
   }
@@ -119,6 +142,43 @@ function httpError(status: number, parsed: unknown): ClientHttpError {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function requestListResponse(value: unknown): RequestListResponse | undefined {
+  if (!isRecord(value) || !Array.isArray(value.requests)) {
+    return undefined;
+  }
+  const requests: RequestListItem[] = [];
+  for (const item of value.requests) {
+    const row = requestListItem(item);
+    if (!row) {
+      return undefined;
+    }
+    requests.push(row);
+  }
+  return { requests };
+}
+
+function requestListItem(value: unknown): RequestListItem | undefined {
+  if (
+    !isRecord(value) ||
+    typeof value.request_id !== "string" ||
+    typeof value.created_at !== "string" ||
+    typeof value.workflow_status !== "string" ||
+    typeof value.approval_available !== "boolean" ||
+    (typeof value.security_status !== "string" && value.security_status !== null) ||
+    (typeof value.name !== "string" && value.name !== null)
+  ) {
+    return undefined;
+  }
+  return {
+    request_id: value.request_id,
+    created_at: value.created_at,
+    workflow_status: value.workflow_status,
+    approval_available: value.approval_available,
+    security_status: value.security_status,
+    name: value.name,
+  };
 }
 
 function isRequestResponse(value: unknown): value is RequestResponse {
