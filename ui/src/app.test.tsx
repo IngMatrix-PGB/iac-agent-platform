@@ -45,6 +45,14 @@ describe("operator shell", () => {
     expect(screen.getByText("Local operator console. Review the server response before approving a request.")).toBeInTheDocument();
   });
 
+  it("labels health and readiness without changing the sentences", async () => {
+    render(<App client={clientWith(vi.fn())} navigate={vi.fn()} pathname="/" />);
+    expect(await screen.findByRole("region", { name: "Process status" })).toBeInTheDocument();
+    expect(screen.getAllByRole("term").map((term) => term.textContent)).toEqual(["API", "Readiness"]);
+    expect(screen.getByText("API process responded.")).toBeInTheDocument();
+    expect(screen.getByText("Application process is ready to accept requests.")).toBeInTheDocument();
+  });
+
   it("shows process health and an empty composer", async () => {
     const submit = vi.fn();
     render(<App client={clientWith(submit)} navigate={vi.fn()} pathname="/" />);
