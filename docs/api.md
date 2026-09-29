@@ -72,6 +72,8 @@ Approve asks for confirmation before the approval POST. Reject sends immediately
 
 The UI renders the public request DTO only. It does not receive credentials, Terraform source, raw plan JSON, checkpoint contents, finding messages, finding resources, or `WorkflowError.message`.
 
+Batch 32 presents that same public request DTO. It does not add a route, a field, or a workflow state. Server status values stay visible. A destructive plan is still the server boolean, and the page still says "Destructive change detected."
+
 The operator UI does not add authentication. The operator UI does not make this API safe for public Internet exposure. GET /health and GET /ready do not prove AWS, OpenAI, GitHub, Langfuse, or Terraform Registry connectivity.
 
 ## What this batch does not do
