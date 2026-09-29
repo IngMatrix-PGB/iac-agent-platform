@@ -527,6 +527,17 @@ authentication, request history, or a new API. The design is
 `docs/superpowers/specs/2026-09-28-batch32-design.md`. The plan is
 `docs/superpowers/plans/2026-09-28-batch32-operator-ui-presentation.md`.
 
+## Batch 33 — durable request index (complete)
+
+Local durable request discovery is backed by `request_index` in the
+existing `state.db`. The table stores the request id and creation time.
+The LangGraph checkpoint remains the workflow authority. Recent requests
+uses `GET /api/v1/requests`. The index is not backfilled, not an event
+log, and not an authentication boundary. Public exposure is not started.
+The design is
+`docs/superpowers/specs/2026-09-29-batch33-design.md`. The plan is
+`docs/superpowers/plans/2026-09-29-batch33-durable-request-index.md`.
+
 ## Not yet started
 
 Authentication, RBAC, multi-user access, tenants, and public deployment

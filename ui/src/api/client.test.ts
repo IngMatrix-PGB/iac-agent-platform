@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ApiClient } from "./client";
-import type { RequestResponse } from "./types";
+import type { RequestListItem, RequestResponse } from "./types";
 
 const created: RequestResponse = {
   request_id: "req-1",
@@ -150,6 +150,102 @@ describe("ApiClient", () => {
     });
     expect(fetchImpl).toHaveBeenNthCalledWith(1, "/health", { method: "GET" });
     expect(fetchImpl).toHaveBeenNthCalledWith(2, "/ready", { method: "GET" });
+  });
+
+  it("lists durable requests without a limit", async () => {
+    const row: RequestListItem = {
+      request_id: "req-listed",
+      created_at: "2026-09-29T00:00:02.000000Z",
+      workflow_status: "awaiting_approval",
+      approval_available: true,
+      security_status: "pass",
+      name: "orders",
+    };
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, { requests: [row] }));
+    const result = await new ApiClient(fetchImpl).listRequests();
+    expect(fetchImpl).toHaveBeenCalledWith("/api/v1/requests", { method: "GET" });
+    expect(result).toEqual({ kind: "success", status: 200, body: { requests: [row] } });
+  });
+
+  it("accepts an empty list and nullable catalog fields", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { requests: [] }))
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          requests: [
+            {
+              request_id: "req-open",
+              created_at: "2026-09-29T00:00:01.000000Z",
+              workflow_status: "blocked",
+              approval_available: false,
+              security_status: null,
+              name: null,
+            },
+          ],
+        }),
+      );
+    const client = new ApiClient(fetchImpl);
+    await expect(client.listRequests()).resolves.toEqual({
+      kind: "success",
+      status: 200,
+      body: { requests: [] },
+    });
+    await expect(client.listRequests()).resolves.toEqual({
+      kind: "success",
+      status: 200,
+      body: {
+        requests: [
+          {
+            request_id: "req-open",
+            created_at: "2026-09-29T00:00:01.000000Z",
+            workflow_status: "blocked",
+            approval_available: false,
+            security_status: null,
+            name: null,
+          },
+        ],
+      },
+    });
+  });
+
+  it("keeps list failures on the existing error mapping", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(503, {
+          error: "intent_provider_unavailable",
+          message: "Intent provider unavailable.",
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, created))
+      .mockRejectedValueOnce(new Error("connect ECONNREFUSED secret-host"));
+    const client = new ApiClient(fetchImpl);
+    await expect(client.listRequests()).resolves.toEqual({
+      kind: "http",
+      status: 503,
+      error: "intent_provider_unavailable",
+      message: "Intent provider unavailable.",
+    });
+    await expect(client.listRequests()).resolves.toEqual({
+      kind: "http",
+      status: 200,
+      error: "unexpected_response",
+      message: "The API returned an unexpected response.",
+    });
+    await expect(client.listRequests()).resolves.toEqual({
+      kind: "network",
+      message: "The API could not be reached.",
+    });
+  });
+
+  it("does not call fetch outside the API client", () => {
+    const sources = import.meta.glob(
+      ["../components/**/*.{ts,tsx}", "../pages/**/*.{ts,tsx}", "../app.tsx"],
+      { eager: true, query: "?raw", import: "default" },
+    );
+    const callers = Object.entries(sources).filter(([, source]) => /\bfetch\s*\(/.test(String(source)));
+    expect(callers).toEqual([]);
   });
 
   it("invokes fetch with the global receiver", async () => {

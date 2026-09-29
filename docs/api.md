@@ -72,6 +72,10 @@ Approve asks for confirmation before the approval POST. Reject sends immediately
 
 The UI renders the public request DTO only. It does not receive credentials, Terraform source, raw plan JSON, checkpoint contents, finding messages, finding resources, or `WorkflowError.message`.
 
+`GET /api/v1/requests` lists the newest checkpointed requests. The index stores the request id and the server creation time. Workflow status, approval availability, security status, and name are read from the checkpoint when the list is built. The list does not include checkpoints created before the index existed; those requests remain available at `GET /api/v1/requests/{request_id}`. A failed index write does not change the create response. The list is not authentication and does not make the API safe for public Internet exposure. Enumeration discloses more to anyone who can reach the port.
+
+The default page is 20 requests. `limit` may be an integer from 1 through 50. There is no cursor and no offset. A stale index row whose checkpoint is gone is omitted, and the page is not filled from older rows. `request_index` in the existing `state.db` stores only `request_id` and `created_at`. Recent requests is discovery. The checkpoint remains the workflow authority. The local runtime stays unauthenticated and loopback-only. Batch 33 does not authorize public exposure.
+
 Batch 32 presents that same public request DTO. It does not add a route, a field, or a workflow state. Server status values stay visible. A destructive plan is still the server boolean, and the page still says "Destructive change detected."
 
 The operator UI does not add authentication. The operator UI does not make this API safe for public Internet exposure. GET /health and GET /ready do not prove AWS, OpenAI, GitHub, Langfuse, or Terraform Registry connectivity.

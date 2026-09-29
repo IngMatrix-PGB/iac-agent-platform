@@ -24,6 +24,7 @@ from iac_agent.intent.port import parse_intent_payload
 from iac_agent.intent.resolver import ArchitectureResolver
 from iac_agent.intent.service import IntentResolutionService
 from iac_agent.persistence.checkpoints import open_sqlite_checkpointer, workflow_config
+from iac_agent.persistence.request_index import open_request_index
 from iac_agent.providers.aws.dynamodb.contract import DynamoDBResourceSpec
 from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec
 from iac_agent.providers.aws.renderer import AWSResourceRenderer
@@ -139,7 +140,7 @@ class RecordingObservability:
         return None
 
 
-def _holder(tmp_path, saver, *, interpreter, source_control, observability):
+def _holder(tmp_path, saver, *, interpreter, source_control, observability, request_index):
     graph = build_iac_workflow(
         renderer=AWSResourceRenderer(),
         terraform_runner=FakeTerraformRunner(),
@@ -156,7 +157,11 @@ def _holder(tmp_path, saver, *, interpreter, source_control, observability):
         github_commit_author_name="Example Bot",
         github_commit_author_email="example-bot@example.invalid",
     )
-    application = IacApplication(graph, observability=observability)
+    application = IacApplication(
+        graph,
+        observability=observability,
+        request_index=request_index,
+    )
     service = IntentResolutionService(
         interpreter=interpreter,
         resolver=ArchitectureResolver(),
@@ -173,6 +178,18 @@ def _checkpoint_threads(db_path) -> set[str]:
     finally:
         connection.close()
     return {row[0] for row in rows}
+
+
+def _request_index_rows(db_path) -> tuple[list[str], list[tuple[str, str]]]:
+    connection = sqlite3.connect(db_path)
+    try:
+        columns = [row[1] for row in connection.execute("pragma table_info(request_index)")]
+        rows = connection.execute(
+            "select request_id, created_at from request_index"
+        ).fetchall()
+    finally:
+        connection.close()
+    return columns, [(str(row[0]), str(row[1])) for row in rows]
 
 
 def _assert_public(body: str, workspace: str) -> None:
@@ -194,35 +211,49 @@ def test_fresh_process_reads_and_approves_the_same_sqlite_checkpoint(tmp_path):
     interpreter_a = FakeIntentInterpreter(payload=_WORKER_PAYLOAD)
 
     with open_sqlite_checkpointer(db_path) as saver_a:
-        holder_a = _holder(
-            tmp_path,
-            saver_a,
-            interpreter=interpreter_a,
-            source_control=source_a,
-            observability=observability_a,
-        )
-        graph_a = holder_a.application._graph
-        graph_a_id = id(graph_a)
-        saver_a_id = id(saver_a)
-        connection_a = saver_a.conn
-        with TestClient(create_app(holder_a)) as client_a:
-            created = client_a.post(
-                "/api/v1/requests",
-                json={
-                    "natural_language_request": _PROMPT,
-                    "request_id": _REQUEST_ID,
-                },
+        with open_request_index(db_path) as index_a:
+            holder_a = _holder(
+                tmp_path,
+                saver_a,
+                interpreter=interpreter_a,
+                source_control=source_a,
+                observability=observability_a,
+                request_index=index_a,
             )
-        assert created.status_code == 201
-        assert created.json()["outcome"] == "awaiting_approval"
-        assert interpreter_a.calls == 1
-        assert source_a.calls == []
-        assert observability_a.workflow
-        assert {event.request_id for event in observability_a.workflow} == {_REQUEST_ID}
-        assert saver_a.get_tuple(workflow_config(_REQUEST_ID)) is not None
+            index_a_id = id(index_a)
+            graph_a = holder_a.application._graph
+            graph_a_id = id(graph_a)
+            saver_a_id = id(saver_a)
+            connection_a = saver_a.conn
+            with TestClient(create_app(holder_a)) as client_a:
+                created = client_a.post(
+                    "/api/v1/requests",
+                    json={
+                        "natural_language_request": _PROMPT,
+                        "request_id": _REQUEST_ID,
+                    },
+                )
+                listed_a = client_a.get("/api/v1/requests")
+            assert created.status_code == 201
+            assert created.json()["outcome"] == "awaiting_approval"
+            assert listed_a.status_code == 200
+            listed_a_row = listed_a.json()["requests"][0]
+            assert listed_a_row["request_id"] == _REQUEST_ID
+            assert listed_a_row["workflow_status"] == "awaiting_approval"
+            created_at = listed_a_row["created_at"]
+            assert isinstance(created_at, str) and created_at
+            assert "module.queue.aws_sqs_queue.this" not in listed_a.text
+            assert interpreter_a.calls == 1
+            assert source_a.calls == []
+            assert observability_a.workflow
+            assert {event.request_id for event in observability_a.workflow} == {_REQUEST_ID}
+            assert saver_a.get_tuple(workflow_config(_REQUEST_ID)) is not None
 
     assert db_path.is_file()
     assert _REQUEST_ID in _checkpoint_threads(db_path)
+    index_columns, index_rows = _request_index_rows(db_path)
+    assert index_columns == ["request_id", "created_at"]
+    assert index_rows == [(_REQUEST_ID, created_at)]
     try:
         connection_a.execute("select 1")
     except sqlite3.ProgrammingError:
@@ -236,38 +267,50 @@ def test_fresh_process_reads_and_approves_the_same_sqlite_checkpoint(tmp_path):
     observability_b = RecordingObservability()
     with open_sqlite_checkpointer(db_path) as saver_b:
         assert id(saver_b) != saver_a_id
-        holder_b = _holder(
-            tmp_path,
-            saver_b,
-            interpreter=RaisingInterpreter(),
-            source_control=source_b,
-            observability=observability_b,
-        )
-        assert id(holder_b.application._graph) != graph_a_id
-        assert holder_b.application._graph is not None
-        with TestClient(create_app(holder_b)) as client_b:
-            unknown = client_b.get("/api/v1/requests/req-missing")
-            assert unknown.status_code == 404
-            assert unknown.json() == {
-                "error": "request_not_found",
-                "message": "Request not found.",
-            }
-            assert "pending" not in unknown.text
-            assert "awaiting_approval" not in unknown.text
-            workflows_before_get = len(observability_b.workflow)
-            loaded = client_b.get(f"/api/v1/requests/{_REQUEST_ID}")
-            assert len(observability_b.workflow) == workflows_before_get
-            approved = client_b.post(
-                f"/api/v1/requests/{_REQUEST_ID}/approval",
-                json={"decision": "approve"},
+        with open_request_index(db_path) as index_b:
+            assert id(index_b) != index_a_id
+            holder_b = _holder(
+                tmp_path,
+                saver_b,
+                interpreter=RaisingInterpreter(),
+                source_control=source_b,
+                observability=observability_b,
+                request_index=index_b,
             )
-            spec = holder_b.application._graph.get_state(workflow_config(_REQUEST_ID)).values[
-                "resource_spec"
-            ]
+            assert id(holder_b.application._graph) != graph_a_id
+            assert holder_b.application._graph is not None
+            with TestClient(create_app(holder_b)) as client_b:
+                unknown = client_b.get("/api/v1/requests/req-missing")
+                assert unknown.status_code == 404
+                assert unknown.json() == {
+                    "error": "request_not_found",
+                    "message": "Request not found.",
+                }
+                assert "pending" not in unknown.text
+                assert "awaiting_approval" not in unknown.text
+                workflows_before_get = len(observability_b.workflow)
+                listed_b = client_b.get("/api/v1/requests")
+                loaded = client_b.get(f"/api/v1/requests/{_REQUEST_ID}")
+                assert len(observability_b.workflow) == workflows_before_get
+                approved = client_b.post(
+                    f"/api/v1/requests/{_REQUEST_ID}/approval",
+                    json={"decision": "approve"},
+                )
+                spec = holder_b.application._graph.get_state(workflow_config(_REQUEST_ID)).values[
+                    "resource_spec"
+                ]
+
+    assert listed_b.status_code == 200
+    listed_b_row = listed_b.json()["requests"][0]
+    assert listed_b_row["request_id"] == _REQUEST_ID
+    assert listed_b_row["created_at"] == created_at
+    assert listed_b_row["workflow_status"] == "awaiting_approval"
+    assert "module.queue.aws_sqs_queue.this" not in listed_b.text
 
     assert loaded.status_code == 200
     loaded_body = loaded.json()
     assert loaded_body["outcome"] == "awaiting_approval"
+    assert loaded_body["workflow"]["workflow_status"] == listed_b_row["workflow_status"]
     assert loaded_body["intent"] is None
     assert loaded_body["resolution"]["matched_pattern"] is None
     assert loaded_body["resolution"]["architecture"] is None

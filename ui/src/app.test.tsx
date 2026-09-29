@@ -34,6 +34,7 @@ function clientWith(submit: ApiClient["submit"]): ApiClient {
     submit,
     getRequest: vi.fn(),
     decide: vi.fn(),
+    listRequests: vi.fn().mockResolvedValue({ kind: "success", status: 200, body: { requests: [] } }),
   } as unknown as ApiClient;
 }
 
