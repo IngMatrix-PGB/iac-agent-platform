@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -125,8 +122,12 @@ describe("recent requests", () => {
     expect(navigate).toHaveBeenCalledWith("/requests/req-9");
     expect(submit).not.toHaveBeenCalled();
     expect(setItem).not.toHaveBeenCalled();
-    const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "compose-page.tsx"), "utf8");
-    expect(source).not.toMatch(/localStorage|sessionStorage|indexedDB/);
+    const sources = import.meta.glob("./compose-page.tsx", {
+      eager: true,
+      query: "?raw",
+      import: "default",
+    });
+    expect(JSON.stringify(sources)).not.toMatch(/localStorage|sessionStorage|indexedDB/);
     setItem.mockRestore();
   });
 
