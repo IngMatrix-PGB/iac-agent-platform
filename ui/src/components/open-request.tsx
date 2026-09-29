@@ -13,7 +13,7 @@ export function OpenRequest({ navigate }: { navigate: (path: string) => void }) 
   }
 
   return (
-    <form onSubmit={submit}>
+    <form className="panel" onSubmit={submit}>
       <label htmlFor="open-request-id">Request id</label>
       <input
         id="open-request-id"
