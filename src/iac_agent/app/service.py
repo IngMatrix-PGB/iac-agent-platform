@@ -47,6 +47,14 @@ _LOGGER = logging.getLogger("iac_agent.persistence")
 
 
 @dataclass(frozen=True)
+class IndexedRequest:
+    """One catalog row joined to the checkpoint view that still exists."""
+
+    view: WorkflowView
+    created_at: str
+
+
+@dataclass(frozen=True)
 class WorkflowView:
     """A bounded, application-facing view of one workflow run.
 
@@ -144,6 +152,19 @@ class IacApplication:
         if snapshot.created_at is None:
             return None
         return _to_view(request_id, snapshot.values)
+
+    def list_requests(self, *, limit: int) -> tuple[IndexedRequest, ...]:
+        """Join the newest index rows to checkpoint reads. Missing checkpoints are omitted."""
+        if self._request_index is None:
+            return ()
+        rows = self._request_index.newest(limit)
+        found: list[IndexedRequest] = []
+        for request_id, created_at in rows:
+            view = self.read(request_id)
+            if view is None:
+                continue
+            found.append(IndexedRequest(view=view, created_at=created_at))
+        return tuple(found)
 
     def get_state(self, request_id: str) -> WorkflowView:
         """Read the current durable state. Never executes a node, never
