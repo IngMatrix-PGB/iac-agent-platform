@@ -38,6 +38,13 @@ function clientWith(submit: ApiClient["submit"]): ApiClient {
 }
 
 describe("operator shell", () => {
+  it("uses a page heading for an unknown route", () => {
+    render(<App client={clientWith(vi.fn())} navigate={vi.fn()} pathname="/missing" />);
+    expect(screen.getByRole("heading", { level: 1, name: "IaC Agent Platform" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Page not found." })).toBeInTheDocument();
+    expect(screen.getByText("Local operator console. Review the server response before approving a request.")).toBeInTheDocument();
+  });
+
   it("shows process health and an empty composer", async () => {
     const submit = vi.fn();
     render(<App client={clientWith(submit)} navigate={vi.fn()} pathname="/" />);
