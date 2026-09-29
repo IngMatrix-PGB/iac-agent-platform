@@ -50,6 +50,16 @@ function Projection({ body }: { body: RequestResponse }) {
 }
 
 describe("request projection", () => {
+  it("labels add, change, and destroy and keeps the destructive sentence", () => {
+    render(<Projection body={posted} />);
+    expect(screen.getByRole("heading", { level: 3, name: "Terraform plan summary" })).toBeInTheDocument();
+    expect(screen.getByRole("term", { name: "Add" })).toBeInTheDocument();
+    expect(screen.getByRole("term", { name: "Change" })).toBeInTheDocument();
+    expect(screen.getByRole("term", { name: "Destroy" })).toBeInTheDocument();
+    expect(screen.getByText("Destructive change detected.")).toBeInTheDocument();
+    expect(screen.queryByText("aws_sqs_queue.hidden_address")).not.toBeInTheDocument();
+  });
+
   it("shows workflow labels beside the server enums", () => {
     render(<Projection body={posted} />);
     expect(screen.getByRole("heading", { level: 3, name: "Workflow" })).toBeInTheDocument();

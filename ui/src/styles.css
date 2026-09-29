@@ -141,3 +141,30 @@ dd {
     padding: var(--space-4);
   }
 }
+
+.plan-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.plan-counts dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 1.25rem;
+}
+
+.panel-destructive {
+  border-color: var(--color-danger-border);
+}
+
+.destructive-sentence {
+  margin: var(--space-3) 0 0;
+  font-weight: 650;
+}
+
+@media (max-width: 40rem) {
+  .plan-counts {
+    grid-template-columns: 1fr;
+  }
+}
