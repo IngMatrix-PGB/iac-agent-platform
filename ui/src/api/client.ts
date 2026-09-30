@@ -28,9 +28,11 @@ const UNEXPECTED = "The API returned an unexpected response.";
 
 export class ApiClient {
   private readonly fetchImpl: typeof fetch;
+  private readonly operatorSecret: string;
 
-  constructor(fetchImpl: typeof fetch = globalThis.fetch) {
+  constructor(fetchImpl: typeof fetch = globalThis.fetch, options?: { operatorSecret?: string }) {
     this.fetchImpl = fetchImpl.bind(globalThis);
+    this.operatorSecret = options?.operatorSecret ?? "";
   }
 
   submit(naturalLanguageRequest: string): Promise<ClientResult> {
@@ -68,7 +70,7 @@ export class ApiClient {
   private async request(url: string, init: RequestInit): Promise<ClientResult> {
     let response: Response;
     try {
-      response = await this.fetchImpl(url, init);
+      response = await this.fetchImpl(url, this.withOperatorSecret(init));
     } catch {
       return NETWORK;
     }
@@ -82,7 +84,7 @@ export class ApiClient {
   private async list(url: string): Promise<RequestListResult> {
     let response: Response;
     try {
-      response = await this.fetchImpl(url, { method: "GET" });
+      response = await this.fetchImpl(url, this.withOperatorSecret({ method: "GET" }));
     } catch {
       return NETWORK;
     }
@@ -106,6 +108,15 @@ export class ApiClient {
       return { kind: "success", httpStatus: response.status, status: parsed.status };
     }
     return { kind: "http", status: response.status, message: UNEXPECTED };
+  }
+
+  private withOperatorSecret(init: RequestInit): RequestInit {
+    if (!this.operatorSecret) {
+      return init;
+    }
+    const headers = new Headers(init.headers);
+    headers.set("Authorization", `Bearer ${this.operatorSecret}`);
+    return { ...init, headers };
   }
 }
 
