@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ApiClient, ClientResult } from "../api/client";
+import { isUnauthenticated, type ApiClient, type ClientResult } from "../api/client";
 import { POLL_INTERVAL_MS, POLL_MAX_ATTEMPTS, shouldPoll } from "../api/polling";
 import type { RequestResponse } from "../api/types";
 import { ApprovalPanel } from "../components/approval-panel";
@@ -12,9 +12,11 @@ import { WorkflowStatus } from "../components/workflow-status";
 export function RequestPage({
   client,
   requestId,
+  onUnauthenticated,
 }: {
   client: ApiClient;
   requestId: string;
+  onUnauthenticated?: () => void;
 }) {
   const [body, setBody] = useState<RequestResponse | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
@@ -58,6 +60,12 @@ export function RequestPage({
         if (stopped) {
           return;
         }
+        if (isUnauthenticated(result)) {
+          stopped = true;
+          window.clearInterval(timer);
+          onUnauthenticated?.();
+          return;
+        }
         if (result.kind === "network") {
           stopped = true;
           window.clearInterval(timer);
@@ -78,9 +86,13 @@ export function RequestPage({
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [client, requestId, status]);
+  }, [client, onUnauthenticated, requestId, status]);
 
   function applyRead(result: ClientResult) {
+    if (isUnauthenticated(result)) {
+      onUnauthenticated?.();
+      return;
+    }
     if (result.kind === "success") {
       setBody(result.body);
       setBanner(null);
@@ -96,6 +108,10 @@ export function RequestPage({
   }
 
   function onDecision(result: ClientResult) {
+    if (isUnauthenticated(result)) {
+      onUnauthenticated?.();
+      return;
+    }
     if (result.kind === "success") {
       setBody(result.body);
       setBanner(null);

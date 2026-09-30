@@ -15,6 +15,10 @@ export type RequestListResult =
   | { kind: "success"; status: number; body: RequestListResponse }
   | ClientHttpError
   | ClientNetworkError;
+export function isUnauthenticated(result: { kind: string; status?: number }): boolean {
+  return result.kind === "http" && result.status === 401;
+}
+
 export type ProbeResult =
   | { kind: "success"; httpStatus: number; status: string }
   | ClientNetworkError

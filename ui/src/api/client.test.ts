@@ -250,11 +250,12 @@ describe("ApiClient", () => {
 
   it("sends the operator bearer on operator calls and not on probes", async () => {
     const secret = "operator-secret-should-not-leak";
-    const fetchImpl = vi.fn((url: string, init?: RequestInit) => {
-      if (url === "/health" || url === "/ready") {
+    const fetchImpl = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/health" || path === "/ready") {
         return Promise.resolve(jsonResponse(200, { status: "ok" }));
       }
-      if (url === "/api/v1/requests" && init?.method === "GET") {
+      if (path === "/api/v1/requests" && init?.method === "GET") {
         return Promise.resolve(jsonResponse(200, { requests: [] }));
       }
       return Promise.resolve(jsonResponse(201, created));

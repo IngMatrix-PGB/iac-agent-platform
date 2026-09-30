@@ -38,9 +38,16 @@ function clientWith(submit: ApiClient["submit"]): ApiClient {
   } as unknown as ApiClient;
 }
 
+async function continueAsOperator(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByLabelText("Operator secret"), "test-operator-secret");
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+}
+
 describe("operator shell", () => {
-  it("groups the composer and the open-request control", () => {
+  it("groups the composer and the open-request control", async () => {
+    const user = userEvent.setup();
     render(<App client={clientWith(vi.fn())} navigate={vi.fn()} pathname="/" />);
+    await continueAsOperator(user);
     expect(screen.getByRole("heading", { level: 2, name: "New request" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 3, name: "Open a saved request" })).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Infrastructure request" })).toBeInTheDocument();
@@ -63,9 +70,11 @@ describe("operator shell", () => {
   });
 
   it("shows process health and an empty composer", async () => {
+    const user = userEvent.setup();
     const submit = vi.fn();
     render(<App client={clientWith(submit)} navigate={vi.fn()} pathname="/" />);
     expect(screen.getByRole("heading", { name: "IaC Agent Platform" })).toBeInTheDocument();
+    await continueAsOperator(user);
     expect(await screen.findByText("API process responded.")).toBeInTheDocument();
     expect(screen.getByText("Application process is ready to accept requests.")).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Infrastructure request" })).toBeInTheDocument();
@@ -75,6 +84,7 @@ describe("operator shell", () => {
     const user = userEvent.setup();
     const submit = vi.fn();
     render(<App client={clientWith(submit)} navigate={vi.fn()} pathname="/" />);
+    await continueAsOperator(user);
     await user.click(screen.getByRole("button", { name: "Submit request" }));
     expect(submit).not.toHaveBeenCalled();
     expect(screen.getByText("Describe the infrastructure before submitting.")).toBeInTheDocument();
@@ -89,6 +99,7 @@ describe("operator shell", () => {
     const submit = vi.fn().mockReturnValue(pending);
     const navigate = vi.fn();
     render(<App client={clientWith(submit)} navigate={navigate} pathname="/" />);
+    await continueAsOperator(user);
     await user.type(screen.getByRole("textbox", { name: "Infrastructure request" }), "build a queue");
     await user.click(screen.getByRole("button", { name: "Submit request" }));
     expect(screen.getByRole("button", { name: "Submit request" })).toBeDisabled();
@@ -113,6 +124,7 @@ describe("operator shell", () => {
     const submit = vi.fn().mockResolvedValue({ kind: "success", status: 200, body });
     const navigate = vi.fn();
     render(<App client={clientWith(submit)} navigate={navigate} pathname="/" />);
+    await continueAsOperator(user);
     await user.type(screen.getByRole("textbox", { name: "Infrastructure request" }), "hello");
     await user.click(screen.getByRole("button", { name: "Submit request" }));
     expect(await screen.findByText("workload_type")).toBeInTheDocument();
@@ -140,6 +152,7 @@ describe("operator shell", () => {
     const submit = vi.fn().mockResolvedValue({ kind: "success", status: 200, body });
     const navigate = vi.fn();
     render(<App client={clientWith(submit)} navigate={navigate} pathname="/" />);
+    await continueAsOperator(user);
     await user.type(screen.getByRole("textbox", { name: "Infrastructure request" }), "build a database");
     await user.click(screen.getByRole("button", { name: "Submit request" }));
     expect(await screen.findByText("no matching architecture")).toBeInTheDocument();
@@ -156,6 +169,7 @@ describe("operator shell", () => {
       message: "Invalid request.",
     });
     render(<App client={clientWith(submit)} navigate={vi.fn()} pathname="/" />);
+    await continueAsOperator(user);
     await user.type(screen.getByRole("textbox", { name: "Infrastructure request" }), "build a queue");
     await user.click(screen.getByRole("button", { name: "Submit request" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/^Invalid request\.$/);
@@ -169,6 +183,7 @@ describe("operator shell", () => {
       message: "The API could not be reached.",
     });
     render(<App client={clientWith(submit)} navigate={vi.fn()} pathname="/" />);
+    await continueAsOperator(user);
     await user.type(screen.getByRole("textbox", { name: "Infrastructure request" }), "build a queue");
     await user.click(screen.getByRole("button", { name: "Submit request" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The API could not be reached.");
@@ -184,6 +199,7 @@ describe("operator shell", () => {
     });
     const navigate = vi.fn();
     render(<App client={clientWith(submit)} navigate={navigate} pathname="/" />);
+    await continueAsOperator(user);
     await user.type(screen.getByRole("textbox", { name: "Infrastructure request" }), "build a queue");
     await user.click(screen.getByRole("button", { name: "Submit request" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -193,11 +209,119 @@ describe("operator shell", () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
+  it("keeps the operator secret in memory and gates protected pages", async () => {
+    const user = userEvent.setup();
+    const secret = "operator-secret-should-not-leak";
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    const getItem = vi.spyOn(Storage.prototype, "getItem");
+    const idbOpen = vi.fn();
+    const idbDelete = vi.fn();
+    vi.stubGlobal("indexedDB", { open: idbOpen, deleteDatabase: idbDelete });
+    const listRequests = vi.fn().mockResolvedValue({
+      kind: "success",
+      status: 200,
+      body: {
+        requests: [
+          {
+            request_id: "req-listed",
+            created_at: "2026-09-29T00:00:02.000000Z",
+            workflow_status: "awaiting_approval",
+            approval_available: true,
+            security_status: "pass",
+            name: "orders",
+          },
+        ],
+      },
+    });
+    const getRequest = vi.fn().mockResolvedValue({ kind: "success", status: 200, body: awaiting("req-saved") });
+    const operator = clientWith(vi.fn());
+    operator.listRequests = listRequests;
+    operator.getRequest = getRequest;
+    const createClient = vi.fn(() => operator);
+    const probe = clientWith(vi.fn());
+    probe.getRequest = vi.fn().mockResolvedValue({ kind: "success", status: 200, body: awaiting("req-saved") });
+    probe.listRequests = vi.fn().mockResolvedValue({ kind: "success", status: 200, body: { requests: [] } });
+
+    const view = render(
+      <App
+        client={probe}
+        createClient={createClient}
+        navigate={vi.fn()}
+        pathname="/requests/req-saved"
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "IaC Agent Platform" })).toBeInTheDocument();
+    expect(await screen.findByText("API process responded.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Recent requests" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Request review" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Loading request.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Request not found.")).not.toBeInTheDocument();
+    expect(listRequests).not.toHaveBeenCalled();
+    expect(getRequest).not.toHaveBeenCalled();
+    const field = screen.getByLabelText("Operator secret");
+    expect(field).toHaveAttribute("type", "password");
+    await user.type(field, secret);
+    expect(screen.queryByText(secret)).not.toBeInTheDocument();
+    expect(createClient).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(createClient).toHaveBeenCalledWith(secret);
+    expect(getRequest).toHaveBeenCalledWith("req-saved");
+    expect(screen.queryByText(secret)).not.toBeInTheDocument();
+    expect(document.body.textContent ?? "").not.toMatch(/\b(profile|role|tenant)\b/i);
+    view.unmount();
+
+    listRequests.mockClear();
+    getRequest.mockClear();
+    createClient.mockClear();
+    const recent = render(
+      <App client={probe} createClient={createClient} navigate={vi.fn()} pathname="/" />,
+    );
+    expect(screen.getByLabelText("Operator secret")).toHaveValue("");
+    expect(listRequests).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: "Recent requests" })).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Operator secret"), secret);
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(listRequests).toHaveBeenCalledOnce();
+    expect(await screen.findByRole("link", { name: "req-listed" })).toHaveAttribute(
+      "href",
+      "/requests/req-listed",
+    );
+    expect(screen.getByText("awaiting_approval")).toBeInTheDocument();
+    expect(screen.getByText("pass")).toBeInTheDocument();
+    expect(screen.getByText("Approval available")).toBeInTheDocument();
+    expect(screen.getByText("orders")).toBeInTheDocument();
+    expect(screen.getByText("2026-09-29T00:00:02.000000Z")).toBeInTheDocument();
+    expect(screen.queryByText(secret)).not.toBeInTheDocument();
+
+    listRequests.mockResolvedValue({
+      kind: "http",
+      status: 401,
+      error: "unauthenticated",
+      message: "Authentication is required.",
+    });
+    recent.unmount();
+    render(<App client={probe} createClient={createClient} navigate={vi.fn()} pathname="/" />);
+    await user.type(screen.getByLabelText("Operator secret"), secret);
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByLabelText("Operator secret")).toHaveValue("");
+    expect(screen.queryByText(secret)).not.toBeInTheDocument();
+    expect(screen.queryByText("Request not found.")).not.toBeInTheDocument();
+    expect(setItem).not.toHaveBeenCalled();
+    expect(getItem).not.toHaveBeenCalled();
+    expect(idbOpen).not.toHaveBeenCalled();
+    expect(idbDelete).not.toHaveBeenCalled();
+    setItem.mockRestore();
+    getItem.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
   it("opens a known request id without submitting", async () => {
     const user = userEvent.setup();
     const submit = vi.fn();
     const navigate = vi.fn();
     render(<App client={clientWith(submit)} navigate={navigate} pathname="/" />);
+    await continueAsOperator(user);
     await user.type(screen.getByRole("textbox", { name: "Request id" }), "req-9");
     await user.click(screen.getByRole("button", { name: "Open request" }));
     expect(navigate).toHaveBeenCalledWith("/requests/req-9");
