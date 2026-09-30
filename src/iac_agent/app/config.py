@@ -44,6 +44,7 @@ _ENV_GITHUB_OWNER = "GITHUB_OWNER"
 _ENV_GITHUB_REPOSITORY = "GITHUB_REPOSITORY"
 _ENV_GITHUB_BASE_BRANCH = "GITHUB_BASE_BRANCH"
 _ENV_GITHUB_TOKEN = "GITHUB_TOKEN"
+_ENV_OPERATOR_SECRET = "IAC_AGENT_OPERATOR_SECRET"
 _ENV_GITHUB_COMMIT_AUTHOR_NAME = "GITHUB_COMMIT_AUTHOR_NAME"
 _ENV_GITHUB_COMMIT_AUTHOR_EMAIL = "GITHUB_COMMIT_AUTHOR_EMAIL"
 
@@ -187,6 +188,21 @@ def load_github_token_from_env(env: Mapping[str, str] | None = None) -> SecretSt
             f"{_ENV_GITHUB_TOKEN} must be set explicitly — there is no default token"
         )
     return SecretStr(token)
+
+
+def load_operator_secret_from_env(env: Mapping[str, str] | None = None) -> SecretStr:
+    """Load the operator secret from `IAC_AGENT_OPERATOR_SECRET`.
+
+    There is no default. A missing, empty, or whitespace-only value fails
+    closed. The value is never included in the error text.
+    """
+    env = env if env is not None else os.environ
+    secret = env.get(_ENV_OPERATOR_SECRET)
+    if secret is None or not secret.strip():
+        raise MissingConfigurationError(
+            f"{_ENV_OPERATOR_SECRET} must be set explicitly — there is no default operator secret"
+        )
+    return SecretStr(secret)
 
 
 class IntentInterpreterProvider(StrEnum):

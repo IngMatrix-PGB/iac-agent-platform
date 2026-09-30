@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from iac_agent.api.app import create_app
 from iac_agent.app.service import WorkflowView
@@ -101,11 +102,16 @@ def _resolved(request_id: str = "req-001") -> IntentSubmissionResult:
     )
 
 
+_OPERATOR_SECRET = "test-operator-secret"
+
+
 def _client(holder: Holder, **state):
-    app = create_app(holder=holder)
+    app = create_app(holder=holder, operator_secret=SecretStr(_OPERATOR_SECRET))
     for key, value in state.items():
         setattr(app.state, key, value)
-    return TestClient(app)
+    client = TestClient(app)
+    client.headers["Authorization"] = f"Bearer {_OPERATOR_SECRET}"
+    return client
 
 
 def test_missing_natural_language_request_is_400():

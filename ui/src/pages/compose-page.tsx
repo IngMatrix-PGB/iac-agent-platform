@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ApiClient, ClientResult } from "../api/client";
+import { isUnauthenticated, type ApiClient, type ClientResult } from "../api/client";
 import type { RequestListItem, RequestResponse } from "../api/types";
 import { AuthoritativeValue } from "../components/authoritative-value";
 import { ErrorBanner } from "../components/error-banner";
@@ -12,9 +12,11 @@ const EMPTY_INDEX =
 export function ComposePage({
   client,
   navigate,
+  onUnauthenticated,
 }: {
   client: ApiClient;
   navigate: (path: string) => void;
+  onUnauthenticated?: () => void;
 }) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -31,6 +33,10 @@ export function ComposePage({
       if (cancelled) {
         return;
       }
+      if (isUnauthenticated(result)) {
+        onUnauthenticated?.();
+        return;
+      }
       if (result.kind === "success") {
         setRecent(result.body.requests);
         setListError(null);
@@ -42,7 +48,7 @@ export function ComposePage({
     return () => {
       cancelled = true;
     };
-  }, [client]);
+  }, [client, onUnauthenticated]);
 
   async function submit() {
     if (!draft.trim()) {
@@ -60,6 +66,10 @@ export function ComposePage({
   }
 
   function applyResult(result: ClientResult) {
+    if (isUnauthenticated(result)) {
+      onUnauthenticated?.();
+      return;
+    }
     if (result.kind === "network" || result.kind === "http") {
       setBanner(result.message);
       setUnsaved(result.kind === "http" && isInterpreterFailure(result.status));

@@ -248,6 +248,64 @@ describe("ApiClient", () => {
     expect(callers).toEqual([]);
   });
 
+  it("sends the operator bearer on operator calls and not on probes", async () => {
+    const secret = "operator-secret-should-not-leak";
+    const fetchImpl = vi.fn((url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/health" || path === "/ready") {
+        return Promise.resolve(jsonResponse(200, { status: "ok" }));
+      }
+      if (path === "/api/v1/requests" && init?.method === "GET") {
+        return Promise.resolve(jsonResponse(200, { requests: [] }));
+      }
+      return Promise.resolve(jsonResponse(201, created));
+    });
+    const client = new ApiClient(fetchImpl, { operatorSecret: secret });
+    await client.submit("build a queue");
+    await client.listRequests();
+    await client.getRequest("req-1");
+    await client.decide("req-1", "approve");
+    await client.health();
+    await client.ready();
+
+    const calls = fetchImpl.mock.calls;
+    for (const [url, init] of calls.slice(0, 4)) {
+      expect(String(url)).not.toContain(secret);
+      expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${secret}`);
+      expect(String(init?.body ?? "")).not.toContain(secret);
+    }
+    expect(calls[0]?.[0]).toBe("/api/v1/requests");
+    expect(JSON.parse(String(calls[0]?.[1]?.body))).toEqual({
+      natural_language_request: "build a queue",
+    });
+    expect(calls[1]?.[0]).toBe("/api/v1/requests");
+    expect(calls[1]?.[1]?.method).toBe("GET");
+    expect(calls[1]?.[1]?.body).toBeUndefined();
+    expect(calls[2]?.[0]).toBe("/api/v1/requests/req-1");
+    expect(calls[3]?.[0]).toBe("/api/v1/requests/req-1/approval");
+    expect(JSON.parse(String(calls[3]?.[1]?.body))).toEqual({ decision: "approve" });
+    expect(new Headers(calls[4]?.[1]?.headers).get("Authorization")).toBeNull();
+    expect(new Headers(calls[5]?.[1]?.headers).get("Authorization")).toBeNull();
+    expect(calls[4]?.[0]).toBe("/health");
+    expect(calls[5]?.[0]).toBe("/ready");
+  });
+
+  it("maps unauthenticated responses without copying the credential", async () => {
+    const secret = "operator-secret-should-not-leak";
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse(401, { error: "unauthenticated", message: "Authentication is required." }),
+    );
+    const client = new ApiClient(fetchImpl, { operatorSecret: secret });
+    const result = await client.listRequests();
+    expect(result).toEqual({
+      kind: "http",
+      status: 401,
+      error: "unauthenticated",
+      message: "Authentication is required.",
+    });
+    expect(JSON.stringify(result)).not.toContain(secret);
+  });
+
   it("invokes fetch with the global receiver", async () => {
     const fetchImpl = vi.fn(function (this: unknown) {
       if (this !== globalThis) {

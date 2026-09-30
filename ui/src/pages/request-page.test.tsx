@@ -2,7 +2,9 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ApiClient, ClientResult } from "../api/client";
+import { ApiClient as LiveApiClient } from "../api/client";
 import type { RequestResponse } from "../api/types";
+import { App } from "../app";
 import { RequestPage } from "./request-page";
 
 const reloaded: RequestResponse = {
@@ -155,6 +157,111 @@ describe("request page", () => {
     });
     expect(getRequest).toHaveBeenCalledTimes(13);
     expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("clears the in-memory secret when approval is unauthenticated", async () => {
+    const user = userEvent.setup();
+    const secret = "operator-secret-should-not-leak";
+    const decide = vi.fn().mockResolvedValue({
+      kind: "http",
+      status: 401,
+      error: "unauthenticated",
+      message: "Authentication is required.",
+    } satisfies ClientResult);
+    const getRequest = vi.fn().mockResolvedValue({ kind: "success", status: 200, body: reloaded });
+    const client = clientReturning(getRequest, decide);
+    client.health = vi.fn().mockResolvedValue({ kind: "success", httpStatus: 200, status: "ok" });
+    client.ready = vi.fn().mockResolvedValue({ kind: "success", httpStatus: 200, status: "ready" });
+    client.listRequests = vi.fn();
+    render(<App client={client} navigate={vi.fn()} pathname="/requests/req-1" />);
+    expect(getRequest).not.toHaveBeenCalled();
+    await user.type(screen.getByLabelText("Operator secret"), secret);
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(await screen.findByRole("button", { name: "Approve" }));
+    await user.click(screen.getByRole("button", { name: "Confirm approval" }));
+    expect(decide).toHaveBeenCalledTimes(1);
+    expect(decide).toHaveBeenCalledWith("req-1", "approve");
+    expect(await screen.findByLabelText("Operator secret")).toHaveValue("");
+    expect(screen.queryByText(secret)).not.toBeInTheDocument();
+    expect(screen.queryByText("Request not found.")).not.toBeInTheDocument();
+    expect(screen.queryByText("rejected")).not.toBeInTheDocument();
+    expect(screen.queryByText("pr_created")).not.toBeInTheDocument();
+  });
+
+  it("sends the same bearer on the mount read and later polls", async () => {
+    vi.useFakeTimers();
+    const secret = "operator-secret-should-not-leak";
+    const pending: RequestResponse = {
+      ...reloaded,
+      outcome: "pending",
+      approval_available: false,
+      workflow: { ...reloaded.workflow!, workflow_status: "pending" },
+    };
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(pending), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const client = new LiveApiClient(fetchImpl, { operatorSecret: secret });
+    render(<RequestPage client={client} requestId="req-1" />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    for (const [url, init] of fetchImpl.mock.calls) {
+      expect(String(url)).toBe("/api/v1/requests/req-1");
+      expect(String(url)).not.toContain(secret);
+      expect(new Headers(init?.headers).get("Authorization")).toBe(`Bearer ${secret}`);
+      expect(String(init?.body ?? "")).not.toContain(secret);
+    }
+    vi.useRealTimers();
+  });
+
+  it("stops polling when a poll is unauthenticated", async () => {
+    vi.useFakeTimers();
+    const pending: RequestResponse = {
+      ...reloaded,
+      outcome: "pending",
+      approval_available: false,
+      workflow: { ...reloaded.workflow!, workflow_status: "pending" },
+    };
+    const getRequest = vi
+      .fn()
+      .mockResolvedValueOnce({ kind: "success", status: 200, body: pending })
+      .mockResolvedValue({
+        kind: "http",
+        status: 401,
+        error: "unauthenticated",
+        message: "Authentication is required.",
+      });
+    const onUnauthenticated = vi.fn();
+    render(
+      <RequestPage
+        client={clientReturning(getRequest)}
+        requestId="req-1"
+        onUnauthenticated={onUnauthenticated}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(getRequest).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(getRequest).toHaveBeenCalledTimes(2);
+    expect(onUnauthenticated).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000 * 3);
+    });
+    expect(getRequest).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("rejected")).not.toBeInTheDocument();
+    expect(screen.queryByText("Request not found.")).not.toBeInTheDocument();
     vi.useRealTimers();
   });
 

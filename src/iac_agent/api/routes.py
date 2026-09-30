@@ -6,6 +6,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse
 
 from iac_agent.api.approval import decide_approval
+from iac_agent.api.operator_auth import authenticate_operator
 from iac_agent.api.project import project_list_item, project_submission, project_view
 from iac_agent.api.schemas import RequestListResponse
 from iac_agent.cli.ids import generate_request_id
@@ -52,6 +53,9 @@ _INTERPRETER_ERRORS: dict[type[BaseException], tuple[str, str, int]] = {
 def register_routes(app: FastAPI) -> None:
     @app.post("/api/v1/requests")
     async def create_request(request: Request):
+        denied = authenticate_operator(request)
+        if denied is not None:
+            return denied
         payload, failure = await _read_json_object(request)
         if failure is not None:
             return failure
@@ -87,11 +91,14 @@ def register_routes(app: FastAPI) -> None:
             headers={"Location": f"/api/v1/requests/{request_id}"},
         )
 
-    @app.get("/api/v1/requests")
+    @app.get("/api/v1/requests", response_model=RequestListResponse)
     def list_requests(
         request: Request,
         limit: int = Query(default=20, ge=1, le=50),
-    ) -> RequestListResponse:
+    ) -> RequestListResponse | JSONResponse:
+        denied = authenticate_operator(request)
+        if denied is not None:
+            return denied
         entries = request.app.state.holder.application.list_requests(limit=limit)
         return RequestListResponse(
             requests=[
@@ -101,6 +108,9 @@ def register_routes(app: FastAPI) -> None:
 
     @app.get("/api/v1/requests/{request_id}")
     def get_request(request_id: str, request: Request):
+        denied = authenticate_operator(request)
+        if denied is not None:
+            return denied
         try:
             validate_request_id(request_id)
         except ValueError:
@@ -112,6 +122,9 @@ def register_routes(app: FastAPI) -> None:
 
     @app.post("/api/v1/requests/{request_id}/approval")
     async def submit_approval(request_id: str, request: Request):
+        denied = authenticate_operator(request)
+        if denied is not None:
+            return denied
         try:
             validate_request_id(request_id)
         except ValueError:

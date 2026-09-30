@@ -15,6 +15,7 @@ from iac_agent.app.config import (
     MissingConfigurationError,
     load_application_config_from_env,
     load_github_token_from_env,
+    load_operator_secret_from_env,
 )
 
 _FULL_ENV = {
@@ -137,6 +138,31 @@ def test_application_config_has_no_token_field():
     field_names = {f for f in ApplicationConfig.__dataclass_fields__}
     assert "github_token" not in field_names
     assert "token" not in field_names
+    assert "operator_secret" not in field_names
+
+
+def test_missing_operator_secret_is_rejected():
+    with pytest.raises(MissingConfigurationError) as exc:
+        load_operator_secret_from_env({})
+    assert "IAC_AGENT_OPERATOR_SECRET" in str(exc.value)
+
+
+@pytest.mark.parametrize("raw", ["", "   ", "\t\n"])
+def test_blank_operator_secret_is_rejected(raw: str):
+    with pytest.raises(MissingConfigurationError) as exc:
+        load_operator_secret_from_env({"IAC_AGENT_OPERATOR_SECRET": raw})
+    assert str(exc.value) == (
+        "IAC_AGENT_OPERATOR_SECRET must be set explicitly — there is no default operator secret"
+    )
+
+
+def test_operator_secret_loads_without_appearing_in_repr():
+    secret = load_operator_secret_from_env(
+        {"IAC_AGENT_OPERATOR_SECRET": "operator-secret-should-not-leak"}
+    )
+    assert secret.get_secret_value() == "operator-secret-should-not-leak"
+    assert "operator-secret-should-not-leak" not in repr(secret)
+    assert "operator-secret-should-not-leak" not in str(secret)
 
 
 def test_application_config_has_no_terraform_module_path_field():

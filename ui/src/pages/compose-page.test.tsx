@@ -41,6 +41,11 @@ function clientWith(listRequests: ApiClient["listRequests"], submit = vi.fn()): 
   } as unknown as ApiClient;
 }
 
+async function continueAsOperator(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByLabelText("Operator secret"), "test-operator-secret");
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+}
+
 describe("recent requests", () => {
   it("renders one indexed row and links to the encoded request route", async () => {
     const user = userEvent.setup();
@@ -75,6 +80,7 @@ describe("recent requests", () => {
     });
     const navigate = vi.fn();
     render(<App client={clientWith(listRequests)} navigate={navigate} pathname="/" />);
+    await continueAsOperator(user);
 
     expect(screen.getByRole("heading", { name: "New request" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Recent requests" })).toBeInTheDocument();
@@ -113,6 +119,7 @@ describe("recent requests", () => {
     const navigate = vi.fn();
     const setItem = vi.spyOn(Storage.prototype, "setItem");
     render(<App client={clientWith(listRequests, submit)} navigate={navigate} pathname="/" />);
+    await continueAsOperator(user);
     expect(await screen.findByText(EMPTY_COPY)).toBeInTheDocument();
     expect(listRequests).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("heading", { name: "New request" })).toBeInTheDocument();
@@ -132,11 +139,13 @@ describe("recent requests", () => {
   });
 
   it("keeps the composer usable when the list cannot load", async () => {
+    const user = userEvent.setup();
     const listRequests = vi.fn().mockResolvedValue({
       kind: "network",
       message: "The API could not be reached.",
     });
     render(<App client={clientWith(listRequests)} navigate={vi.fn()} pathname="/" />);
+    await continueAsOperator(user);
     expect(await screen.findByRole("alert")).toHaveTextContent("The API could not be reached.");
     expect(screen.getByRole("heading", { name: "New request" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Open a saved request" })).toBeInTheDocument();
@@ -144,6 +153,29 @@ describe("recent requests", () => {
     expect(screen.getByRole("textbox", { name: "Request id" })).toBeInTheDocument();
     expect(screen.queryByText(EMPTY_COPY)).not.toBeInTheDocument();
     expect(document.body.textContent).not.toContain("secret-host");
+  });
+
+  it("returns to the credential field when the list is unauthenticated", async () => {
+    const user = userEvent.setup();
+    const secret = "operator-secret-should-not-leak";
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    const listRequests = vi.fn().mockResolvedValue({
+      kind: "http",
+      status: 401,
+      error: "unauthenticated",
+      message: "Authentication is required.",
+    });
+    render(<App client={clientWith(listRequests)} navigate={vi.fn()} pathname="/" />);
+    await user.type(screen.getByLabelText("Operator secret"), secret);
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(listRequests).toHaveBeenCalledWith();
+    expect(await screen.findByLabelText("Operator secret")).toHaveValue("");
+    expect(screen.queryByText(secret)).not.toBeInTheDocument();
+    expect(screen.queryByText("Request not found.")).not.toBeInTheDocument();
+    expect(screen.queryByText(EMPTY_COPY)).not.toBeInTheDocument();
+    expect(screen.queryByText("awaiting_approval")).not.toBeInTheDocument();
+    expect(setItem).not.toHaveBeenCalled();
+    setItem.mockRestore();
   });
 
   it("does not refresh the list after submit", async () => {
@@ -160,6 +192,7 @@ describe("recent requests", () => {
       message: "Invalid request.",
     });
     render(<App client={clientWith(listRequests, submit)} navigate={vi.fn()} pathname="/" />);
+    await continueAsOperator(user);
     await screen.findByText(EMPTY_COPY);
     await user.type(screen.getByRole("textbox", { name: "Infrastructure request" }), "build a queue");
     await user.click(screen.getByRole("button", { name: "Submit request" }));
