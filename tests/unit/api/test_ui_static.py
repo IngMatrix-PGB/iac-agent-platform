@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from iac_agent.api.app import create_app
 from iac_agent.api.ui_static import load_ui_dist
@@ -43,11 +44,19 @@ def test_packaged_ui_serves_html_and_leaves_api_routes_json(tmp_path):
     dist = _dist(tmp_path)
     outside = tmp_path / "secret.txt"
     outside.write_text("OUTSIDE_DIST", encoding="utf-8")
-    app = create_app(_Holder(), ui_dist=dist)
+    app = create_app(
+        _Holder(),
+        ui_dist=dist,
+        operator_secret=SecretStr("test-operator-secret"),
+    )
     with TestClient(app) as client:
         root = client.get("/")
         deep = client.get("/requests/req-example")
-        missing = client.get("/api/v1/requests/req-missing")
+        anonymous = client.get("/api/v1/requests/req-missing")
+        missing = client.get(
+            "/api/v1/requests/req-missing",
+            headers={"Authorization": "Bearer test-operator-secret"},
+        )
         unknown = client.get("/api/v1/nonexistent")
         health = client.get("/health")
         ready = client.get("/ready")
@@ -61,6 +70,12 @@ def test_packaged_ui_serves_html_and_leaves_api_routes_json(tmp_path):
     assert deep.status_code == 200
     assert "text/html" in deep.headers["content-type"]
     assert "IaC Agent Platform" in deep.text
+    assert anonymous.status_code == 401
+    assert anonymous.json() == {
+        "error": "unauthenticated",
+        "message": "Authentication is required.",
+    }
+    assert "request_id" not in anonymous.json()
     assert missing.status_code == 404
     assert missing.json()["error"] == "request_not_found"
     assert "text/html" not in missing.headers["content-type"]

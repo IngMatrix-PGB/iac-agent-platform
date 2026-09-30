@@ -10,6 +10,7 @@ from __future__ import annotations
 import sqlite3
 
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from iac_agent.api.app import create_app
 from iac_agent.app.composition import IntentApplication
@@ -225,7 +226,10 @@ def test_fresh_process_reads_and_approves_the_same_sqlite_checkpoint(tmp_path):
             graph_a_id = id(graph_a)
             saver_a_id = id(saver_a)
             connection_a = saver_a.conn
-            with TestClient(create_app(holder_a)) as client_a:
+            with TestClient(
+                create_app(holder_a, operator_secret=SecretStr("test-operator-secret"))
+            ) as client_a:
+                client_a.headers["Authorization"] = "Bearer test-operator-secret"
                 created = client_a.post(
                     "/api/v1/requests",
                     json={
@@ -279,7 +283,10 @@ def test_fresh_process_reads_and_approves_the_same_sqlite_checkpoint(tmp_path):
             )
             assert id(holder_b.application._graph) != graph_a_id
             assert holder_b.application._graph is not None
-            with TestClient(create_app(holder_b)) as client_b:
+            with TestClient(
+                create_app(holder_b, operator_secret=SecretStr("test-operator-secret"))
+            ) as client_b:
+                client_b.headers["Authorization"] = "Bearer test-operator-secret"
                 unknown = client_b.get("/api/v1/requests/req-missing")
                 assert unknown.status_code == 404
                 assert unknown.json() == {

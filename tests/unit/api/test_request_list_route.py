@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from iac_agent.api.app import create_app
 from iac_agent.app.service import IndexedRequest, WorkflowView
@@ -118,11 +119,18 @@ class _Intent:
         )
 
 
+_OPERATOR_SECRET = "test-operator-secret"
+
+
 def _client(application: _Application, intent: _Intent | None = None) -> TestClient:
     holder = type("Holder", (), {})()
     holder.application = application
     holder.intent_service = intent if intent is not None else _Intent()
-    return TestClient(create_app(holder=holder))
+    client = TestClient(
+        create_app(holder=holder, operator_secret=SecretStr(_OPERATOR_SECRET))
+    )
+    client.headers["Authorization"] = f"Bearer {_OPERATOR_SECRET}"
+    return client
 
 
 def test_collection_returns_newest_rows_and_valid_limits():

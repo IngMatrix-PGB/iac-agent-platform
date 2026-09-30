@@ -27,8 +27,10 @@ async def _lifespan(app: FastAPI):
         load_github_token_from_env,
         load_intent_interpreter_config_from_env,
         load_openai_api_key_from_env,
+        load_operator_secret_from_env,
     )
 
+    app.state.operator_secret = load_operator_secret_from_env()
     config = load_application_config_from_env()
     token = load_github_token_from_env()
     interpreter = create_intent_interpreter(
