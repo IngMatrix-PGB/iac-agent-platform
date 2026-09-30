@@ -9,6 +9,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from pydantic import SecretStr
 
 from iac_agent.api.ui_static import load_ui_dist, mount_operator_ui
 
@@ -39,9 +40,15 @@ async def _lifespan(app: FastAPI):
         yield
 
 
-def create_app(holder=None, *, ui_dist: Path | None = None) -> FastAPI:
+def create_app(
+    holder=None,
+    *,
+    ui_dist: Path | None = None,
+    operator_secret: SecretStr | None = None,
+) -> FastAPI:
     app = FastAPI(title="iac-agent", lifespan=_lifespan)
     app.state.holder = holder
+    app.state.operator_secret = operator_secret
 
     @app.get("/health")
     def health() -> dict[str, str]:
