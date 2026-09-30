@@ -538,11 +538,28 @@ The design is
 `docs/superpowers/specs/2026-09-29-batch33-design.md`. The plan is
 `docs/superpowers/plans/2026-09-29-batch33-durable-request-index.md`.
 
+## Batch 34 — operator authentication (complete)
+
+Operator routes require one runtime secret, `IAC_AGENT_OPERATOR_SECRET`,
+sent as `Authorization: Bearer`. The browser keeps it in memory. A reload
+clears it. `GET /health`, `GET /ready`, and the SPA shell stay anonymous.
+The checkpoint and `request_index` do not store the secret or an approver.
+This replaces "anyone who can reach the port" with "anyone who can reach
+the port and possesses the configured secret." It is a single-operator
+local bootstrap boundary, not RBAC and not a durable user identity.
+Compose still publishes `127.0.0.1:8000:8000`. Public deployment is not
+approved. The design is
+`docs/superpowers/specs/2026-09-29-batch34-design.md`. The plan is
+`docs/superpowers/plans/2026-09-29-batch34-operator-authentication.md`.
+
 ## Not yet started
 
-Authentication, RBAC, multi-user access, tenants, and public deployment
-are not started. The local API and UI remain unauthenticated and are
-not a public production boundary.
+RBAC, multi-user access, tenants, durable operator identity, approver
+auditability, remote or public deployment, TLS, ingress, reverse proxy,
+and lifespan or startup decoupling are not started. GitHub and OpenAI
+configuration are still required before the process serves. That startup
+requirement is separate from operator authentication. The local runtime
+is not a public production boundary.
 
 EventBridge, SNS, a second Lambda in one composition, chaining
 compositions together, Cognito/JWT/Lambda authorizers, WAF, custom
