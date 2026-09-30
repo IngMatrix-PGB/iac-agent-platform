@@ -155,6 +155,29 @@ describe("recent requests", () => {
     expect(document.body.textContent).not.toContain("secret-host");
   });
 
+  it("returns to the credential field when the list is unauthenticated", async () => {
+    const user = userEvent.setup();
+    const secret = "operator-secret-should-not-leak";
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    const listRequests = vi.fn().mockResolvedValue({
+      kind: "http",
+      status: 401,
+      error: "unauthenticated",
+      message: "Authentication is required.",
+    });
+    render(<App client={clientWith(listRequests)} navigate={vi.fn()} pathname="/" />);
+    await user.type(screen.getByLabelText("Operator secret"), secret);
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(listRequests).toHaveBeenCalledWith();
+    expect(await screen.findByLabelText("Operator secret")).toHaveValue("");
+    expect(screen.queryByText(secret)).not.toBeInTheDocument();
+    expect(screen.queryByText("Request not found.")).not.toBeInTheDocument();
+    expect(screen.queryByText(EMPTY_COPY)).not.toBeInTheDocument();
+    expect(screen.queryByText("awaiting_approval")).not.toBeInTheDocument();
+    expect(setItem).not.toHaveBeenCalled();
+    setItem.mockRestore();
+  });
+
   it("does not refresh the list after submit", async () => {
     const user = userEvent.setup();
     const listRequests = vi.fn().mockResolvedValue({
