@@ -250,7 +250,9 @@ def test_checkpointer_closes_when_startup_fails_after_open(monkeypatch, tmp_path
         opened.append(connection)
         return connection
 
-    monkeypatch.setattr("iac_agent.persistence.checkpoints.sqlite3.connect", tracking_connect)
+    import iac_agent.persistence.checkpoints as checkpoint_store
+
+    monkeypatch.setattr(checkpoint_store.sqlite3, "connect", tracking_connect)
     _isolated_env(monkeypatch, tmp_path, IAC_AGENT_OBSERVABILITY="langfuse")
     app = create_app()
     with pytest.raises(MissingConfigurationError):
