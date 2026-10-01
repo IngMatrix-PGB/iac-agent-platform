@@ -13,12 +13,17 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from iac_agent.api.app import create_app
-from iac_agent.app.capabilities import CapabilityPresence, RuntimeCapabilities
+from iac_agent.app.capabilities import (
+    SOURCE_CONTROL_ABSENT_MESSAGE,
+    CapabilityPresence,
+    RuntimeCapabilities,
+)
 from iac_agent.app.composition import IntentApplication
 from iac_agent.app.config import ApplicationConfig
 from iac_agent.app.service import IacApplication
 from iac_agent.compositions.serverless_worker.contract import ServerlessWorkerSpec
 from iac_agent.domain.source_control import PullRequestResult
+from iac_agent.domain.workflow import WorkflowStatus
 from iac_agent.execution.terraform_runner import CommandResult
 from iac_agent.graph.workflow import build_iac_workflow
 from iac_agent.intent.models import ArchitectureIntent
@@ -348,3 +353,170 @@ def test_fresh_process_reads_and_approves_the_same_sqlite_checkpoint(tmp_path):
     assert observability_b.workflow
     assert {event.request_id for event in observability_b.workflow} == {_REQUEST_ID}
     assert all(not hasattr(event, "trace_id") for event in observability_b.workflow)
+
+
+_CAPABILITY_NAMES = (
+    "GITHUB_OWNER",
+    "GITHUB_REPOSITORY",
+    "GITHUB_COMMIT_AUTHOR_NAME",
+    "GITHUB_COMMIT_AUTHOR_EMAIL",
+    "GITHUB_TOKEN",
+    "GITHUB_BASE_BRANCH",
+    "IAC_AGENT_LLM_PROVIDER",
+    "IAC_AGENT_LLM_MODEL",
+    "OPENAI_API_KEY",
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+)
+
+
+def _isolated_env(monkeypatch, tmp_path) -> None:
+    for name in _CAPABILITY_NAMES:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("IAC_AGENT_OPERATOR_SECRET", "test-operator-secret")
+    monkeypatch.setenv("IAC_AGENT_OBSERVABILITY", "off")
+    monkeypatch.setenv("GITHUB_BASE_BRANCH", "main")
+    monkeypatch.setenv("IAC_AGENT_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("IAC_AGENT_STATE_DB", str(tmp_path / "state.db"))
+
+
+def test_second_process_serves_durable_state_without_github_or_openai(tmp_path, monkeypatch):
+    db_path = tmp_path / "state.db"
+    source_a = FakeSourceControl()
+    interpreter_a = FakeIntentInterpreter(payload=_WORKER_PAYLOAD)
+    with open_sqlite_checkpointer(db_path) as saver_a:
+        with open_request_index(db_path) as index_a:
+            holder_a = _holder(
+                tmp_path,
+                saver_a,
+                interpreter=interpreter_a,
+                source_control=source_a,
+                observability=RecordingObservability(),
+                request_index=index_a,
+            )
+            connection_a = saver_a.conn
+            with TestClient(
+                create_app(holder_a, operator_secret=SecretStr("test-operator-secret"))
+            ) as client_a:
+                client_a.headers["Authorization"] = "Bearer test-operator-secret"
+                created = []
+                for request_id in ("req-reject", "req-approve"):
+                    response = client_a.post(
+                        "/api/v1/requests",
+                        json={
+                            "natural_language_request": _PROMPT,
+                            "request_id": request_id,
+                        },
+                    )
+                    created.append(response)
+    assert [response.status_code for response in created] == [201, 201]
+    assert [response.json()["outcome"] for response in created] == [
+        "awaiting_approval",
+        "awaiting_approval",
+    ]
+    assert source_a.calls == []
+    try:
+        connection_a.execute("select 1")
+    except sqlite3.ProgrammingError:
+        closed_a = True
+    else:
+        closed_a = False
+    assert closed_a
+
+    _isolated_env(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "iac_agent.app.composition.GitHubSourceControl",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("GitHubSourceControl")),
+    )
+    monkeypatch.setattr(
+        "iac_agent.intent.adapters.openai.OpenAIIntentInterpreter",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("OpenAIIntentInterpreter")),
+    )
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("urlopen")),
+    )
+    published: list[dict] = []
+
+    from iac_agent.git.unavailable import UnavailableSourceControl
+
+    real_publish = UnavailableSourceControl.publish_change
+
+    def _record_publish(self, **kwargs):
+        published.append(kwargs)
+        return real_publish(self, **kwargs)
+
+    monkeypatch.setattr(UnavailableSourceControl, "publish_change", _record_publish)
+    app_b = create_app()
+    auth = {"Authorization": "Bearer test-operator-secret"}
+    with TestClient(app_b) as client_b:
+        holder_b = app_b.state.holder
+        connection_b = holder_b.application._graph.checkpointer.conn
+        health = client_b.get("/health")
+        ready = client_b.get("/ready")
+        listed = client_b.get("/api/v1/requests", headers=auth)
+        detail = client_b.get("/api/v1/requests/req-reject", headers=auth)
+        rejected = client_b.post(
+            "/api/v1/requests/req-reject/approval",
+            json={"decision": "reject"},
+            headers=auth,
+        )
+        denied = client_b.post(
+            "/api/v1/requests/req-approve/approval",
+            json={"decision": "approve"},
+            headers=auth,
+        )
+        still_waiting = client_b.get("/api/v1/requests/req-approve", headers=auth)
+    assert holder_b.intent_service is None
+    assert holder_b.capabilities.intent_interpretation is CapabilityPresence.ABSENT
+    assert holder_b.capabilities.source_control_publishing is CapabilityPresence.ABSENT
+    assert health.status_code == 200
+    assert health.json() == {"status": "ok"}
+    assert ready.status_code == 200
+    assert ready.json() == {"status": "ready"}
+    rows = {row["request_id"]: row["workflow_status"] for row in listed.json()["requests"]}
+    assert rows["req-reject"] == "awaiting_approval"
+    assert rows["req-approve"] == "awaiting_approval"
+    assert detail.status_code == 200
+    assert detail.json()["outcome"] == "awaiting_approval"
+    assert rejected.status_code == 200
+    assert rejected.json()["outcome"] == "rejected"
+    assert denied.status_code == 503
+    assert denied.json() == {
+        "error": "capability_unavailable",
+        "message": SOURCE_CONTROL_ABSENT_MESSAGE,
+    }
+    assert "request_id" not in denied.json()
+    waiting = still_waiting.json()
+    assert still_waiting.status_code == 200
+    assert waiting["outcome"] == "awaiting_approval"
+    assert waiting["workflow"]["approval_decision"] is None
+    assert waiting["workflow"]["pull_request"] is None
+    assert waiting["workflow"]["error"] is None
+    rendered = listed.text + denied.text
+    assert "test-operator-secret" not in rendered
+    assert "test-github-token" not in rendered
+    assert "test-openai-key" not in rendered
+    assert published == []
+    columns, index_rows = _request_index_rows(db_path)
+    assert columns == ["request_id", "created_at"]
+    assert {row[0] for row in index_rows} == {"req-reject", "req-approve"}
+    try:
+        connection_b.execute("select 1")
+    except sqlite3.ProgrammingError:
+        closed_b = True
+    else:
+        closed_b = False
+    assert closed_b
+    with open_sqlite_checkpointer(db_path) as saver:
+        rejected_values = saver.get_tuple(workflow_config("req-reject")).checkpoint[
+            "channel_values"
+        ]
+        waiting_values = saver.get_tuple(workflow_config("req-approve")).checkpoint[
+            "channel_values"
+        ]
+    assert rejected_values["workflow_status"] is WorkflowStatus.REJECTED
+    assert waiting_values["workflow_status"] is WorkflowStatus.AWAITING_APPROVAL
+    assert waiting_values.get("approval_decision") is None
+    assert waiting_values.get("pull_request") is None
+    assert waiting_values.get("error") is None
