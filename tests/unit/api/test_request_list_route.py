@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from iac_agent.api.app import create_app
+from iac_agent.app.capabilities import CapabilityPresence, RuntimeCapabilities
 from iac_agent.app.service import IndexedRequest, WorkflowView
 from iac_agent.domain.approval import ApprovalDecision
 from iac_agent.domain.security import (
@@ -126,6 +127,10 @@ def _client(application: _Application, intent: _Intent | None = None) -> TestCli
     holder = type("Holder", (), {})()
     holder.application = application
     holder.intent_service = intent if intent is not None else _Intent()
+    holder.capabilities = RuntimeCapabilities(
+        intent_interpretation=CapabilityPresence.CONFIGURED,
+        source_control_publishing=CapabilityPresence.CONFIGURED,
+    )
     client = TestClient(
         create_app(holder=holder, operator_secret=SecretStr(_OPERATOR_SECRET))
     )
