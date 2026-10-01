@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import io
 
+from iac_agent.app.capabilities import CapabilityPresence, RuntimeCapabilities
 from iac_agent.app.composition import IntentApplication
 from iac_agent.app.config import ApplicationConfig
 from iac_agent.app.service import IacApplication
@@ -193,7 +194,15 @@ def _build_holder(
     service = IntentResolutionService(
         interpreter=interpreter, resolver=ArchitectureResolver(), application=iac
     )
-    return IntentApplication(config=config, intent_service=service, application=iac)
+    return IntentApplication(
+        config=config,
+        intent_service=service,
+        application=iac,
+        capabilities=RuntimeCapabilities(
+            intent_interpretation=CapabilityPresence.CONFIGURED,
+            source_control_publishing=CapabilityPresence.CONFIGURED,
+        ),
+    )
 
 
 def test_non_tty_awaiting_approval_prints_resume_hint_and_does_not_prompt(tmp_path):

@@ -102,11 +102,12 @@ def _build_fake_graph(tmp_path):
     )
 
 
-def test_intent_application_fields_are_exactly_config_service_application():
+def test_intent_application_fields_are_exactly_config_service_application_capabilities():
     assert {f.name for f in fields(IntentApplication)} == {
         "config",
         "intent_service",
         "application",
+        "capabilities",
     }
     assert not callable(getattr(IntentApplication, "propose", None))
     assert not callable(getattr(IntentApplication, "resume", None))

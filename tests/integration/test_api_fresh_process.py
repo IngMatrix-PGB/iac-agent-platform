@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from iac_agent.api.app import create_app
+from iac_agent.app.capabilities import CapabilityPresence, RuntimeCapabilities
 from iac_agent.app.composition import IntentApplication
 from iac_agent.app.config import ApplicationConfig
 from iac_agent.app.service import IacApplication
@@ -169,7 +170,15 @@ def _holder(tmp_path, saver, *, interpreter, source_control, observability, requ
         application=application,
         observability=observability,
     )
-    return IntentApplication(config=config, intent_service=service, application=application)
+    return IntentApplication(
+        config=config,
+        intent_service=service,
+        application=application,
+        capabilities=RuntimeCapabilities(
+            intent_interpretation=CapabilityPresence.CONFIGURED,
+            source_control_publishing=CapabilityPresence.CONFIGURED,
+        ),
+    )
 
 
 def _checkpoint_threads(db_path) -> set[str]:
