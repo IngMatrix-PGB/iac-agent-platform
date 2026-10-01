@@ -14,6 +14,7 @@ from pydantic import SecretStr
 
 import iac_agent.api.routes as routes
 from iac_agent.api.app import create_app
+from iac_agent.app.capabilities import CapabilityPresence, RuntimeCapabilities
 from iac_agent.app.service import IndexedRequest, WorkflowView
 from iac_agent.domain.approval import ApprovalDecision
 from iac_agent.domain.plan import PlanSummary
@@ -292,6 +293,10 @@ def build_app():
     holder = type("Holder", (), {})()
     holder.application = application
     holder.intent_service = BrowserIntent(application)
+    holder.capabilities = RuntimeCapabilities(
+        intent_interpretation=CapabilityPresence.CONFIGURED,
+        source_control_publishing=CapabilityPresence.CONFIGURED,
+    )
     app = create_app(holder, operator_secret=SecretStr(OPERATOR_SECRET))
     app.add_middleware(_PromptMode, application=application)
     return app

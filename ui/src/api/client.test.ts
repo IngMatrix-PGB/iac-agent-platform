@@ -88,6 +88,7 @@ describe("ApiClient", () => {
     [500, "internal_error", "Internal error."],
     [502, "intent_provider_refusal", "Intent provider declined to produce structured output."],
     [503, "intent_provider_unavailable", "Intent provider unavailable."],
+    [503, "capability_unavailable", "Intent interpretation is not configured. Set IAC_AGENT_LLM_PROVIDER, IAC_AGENT_LLM_MODEL, and OPENAI_API_KEY."],
     [504, "intent_provider_timeout", "Intent provider timed out."],
   ] as const)("maps %s %s", async (status, error, message) => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(status, { error, message }));

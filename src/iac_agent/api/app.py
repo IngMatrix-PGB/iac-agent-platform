@@ -21,23 +21,11 @@ async def _lifespan(app: FastAPI):
     if app.state.holder is not None:
         yield
         return
-    from iac_agent.app.composition import create_intent_interpreter, open_intent_application
-    from iac_agent.app.config import (
-        load_application_config_from_env,
-        load_github_token_from_env,
-        load_intent_interpreter_config_from_env,
-        load_openai_api_key_from_env,
-        load_operator_secret_from_env,
-    )
+    from iac_agent.app.composition import open_operator_runtime
+    from iac_agent.app.config import load_operator_secret_from_env
 
     app.state.operator_secret = load_operator_secret_from_env()
-    config = load_application_config_from_env()
-    token = load_github_token_from_env()
-    interpreter = create_intent_interpreter(
-        load_intent_interpreter_config_from_env(),
-        api_key=load_openai_api_key_from_env(),
-    )
-    with open_intent_application(config, github_token=token, interpreter=interpreter) as holder:
+    with open_operator_runtime() as holder:
         app.state.holder = holder
         yield
 

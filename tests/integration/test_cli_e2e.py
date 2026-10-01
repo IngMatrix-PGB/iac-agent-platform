@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 
+from iac_agent.app.capabilities import CapabilityPresence, RuntimeCapabilities
 from iac_agent.app.composition import IntentApplication
 from iac_agent.app.config import ApplicationConfig
 from iac_agent.app.service import IacApplication
@@ -174,7 +175,15 @@ def _build_holder(
     service = IntentResolutionService(
         interpreter=interpreter, resolver=ArchitectureResolver(), application=iac
     )
-    return IntentApplication(config=_config(tmp_path), intent_service=service, application=iac)
+    return IntentApplication(
+        config=_config(tmp_path),
+        intent_service=service,
+        application=iac,
+        capabilities=RuntimeCapabilities(
+            intent_interpretation=CapabilityPresence.CONFIGURED,
+            source_control_publishing=CapabilityPresence.CONFIGURED,
+        ),
+    )
 
 
 def test_worker_payload_non_tty_reaches_awaiting_approval(tmp_path):

@@ -36,6 +36,19 @@ def test_api_doc_describes_the_operator_ui():
         "GET /health and GET /ready do not prove AWS, OpenAI, GitHub, "
         "Langfuse, or Terraform Registry connectivity."
     ) in text
+    assert "capability_unavailable" in text
+    assert "Intent interpretation is not configured." in text
+    assert "Source-control publishing is not configured." in text
+    assert (
+        "/ready means the state plane is open, not that GitHub or OpenAI "
+        "is configured or reachable."
+    ) in text
+    assert "List and detail do not require GitHub or OpenAI." in text
+    assert "Reject does not require GitHub." in text
+    assert "Approve requires the GitHub publication group." in text
+    assert "Submit of a new request requires the interpreter group." in text
+    assert "A partial group fails startup." in text
+    assert "GITHUB_BASE_BRANCH=main alone does not configure publication." in text
     assert "Co-Authored-By" not in text
     assert "Made with Cursor" not in text
 
@@ -44,11 +57,22 @@ def test_roadmap_marks_batch_31_complete_without_auth():
     text = Path("docs/roadmap.md").read_text()
     assert "Batch 31 — operator UI (complete)" in text
     assert "Batch 34 — operator authentication (complete)" in text
+    assert "Batch 35 — capability-scoped runtime (complete)" in text
+    assert "lifespan or startup decoupling are not started" not in text
+    assert (
+        "GitHub and OpenAI configuration are still required before the process serves."
+        not in text
+    )
+    assert "docs/superpowers/specs/2026-09-30-batch35-design.md" in text
+    assert "docs/superpowers/plans/2026-10-01-batch35-capability-scoped-runtime.md" in text
     lowered = text.lower()
     assert "authentication" in lowered
     assert "public deployment" in lowered
     assert "not started" in lowered
     assert "rbac" in lowered
+    assert "public deployment" in lowered
+    assert "tls" in lowered
+    assert "remote or public deployment" in lowered
     assert "Co-Authored-By" not in text
     assert "Made with Cursor" not in text
 
@@ -57,4 +81,11 @@ def test_env_example_names_the_operator_secret_without_a_value():
     lines = Path(".env.example").read_text().splitlines()
     matches = [line for line in lines if line.startswith("IAC_AGENT_OPERATOR_SECRET=")]
     assert matches == ["IAC_AGENT_OPERATOR_SECRET="]
-    assert "VITE_" not in "\n".join(lines)
+    text = "\n".join(lines)
+    assert "VITE_" not in text
+    assert "Empty or whitespace-only values leave that capability absent." in text
+    assert (
+        "GITHUB_BASE_BRANCH=main is the default and does not by itself configure publication."
+        in text
+    )
+    assert "A mixture of set and omitted variables in either group fails startup." in text

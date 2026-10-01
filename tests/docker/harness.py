@@ -12,6 +12,7 @@ from pathlib import Path
 import uvicorn
 
 from iac_agent.api.app import create_app
+from iac_agent.app.capabilities import CapabilityPresence, RuntimeCapabilities
 from iac_agent.app.composition import IntentApplication
 from iac_agent.app.config import ApplicationConfig
 from iac_agent.app.service import IacApplication
@@ -95,7 +96,13 @@ def main() -> None:
             observability=observability,
         )
         holder = IntentApplication(
-            config=config, intent_service=service, application=application
+            config=config,
+            intent_service=service,
+            application=application,
+            capabilities=RuntimeCapabilities(
+                intent_interpretation=CapabilityPresence.CONFIGURED,
+                source_control_publishing=CapabilityPresence.CONFIGURED,
+            ),
         )
         uvicorn.run(create_app(holder), host="0.0.0.0", port=8000)
 

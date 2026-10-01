@@ -27,11 +27,17 @@ import os
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import SecretStr
 
+from iac_agent.app.capabilities import (
+    CapabilityPresence,
+    RuntimeCapabilities,
+    classify_runtime_capabilities,
+)
 from iac_agent.app.config import (
     ApplicationConfig,
     IntentInterpreterConfig,
@@ -44,6 +50,7 @@ from iac_agent.app.config import (
 from iac_agent.domain.source_control import GitCommitIdentity
 from iac_agent.execution.terraform_runner import TerraformRunner
 from iac_agent.git.github import GitHubRepository, GitHubSourceControl, HttpTransport
+from iac_agent.git.unavailable import UnavailableSourceControl
 from iac_agent.graph.workflow import build_sqs_workflow
 from iac_agent.intent.port import IntentInterpreterPort
 from iac_agent.observability.failopen import FailOpenObservability
@@ -182,8 +189,9 @@ class IntentApplication:
     """
 
     config: ApplicationConfig
-    intent_service: IntentResolutionService
+    intent_service: IntentResolutionService | None
     application: IacApplication
+    capabilities: RuntimeCapabilities
 
 
 @contextmanager
@@ -224,7 +232,107 @@ def open_intent_application(
                 observability=observability,
             )
             yield IntentApplication(
-                config=application.config, intent_service=service, application=iac
+                config=application.config,
+                intent_service=service,
+                application=iac,
+                capabilities=RuntimeCapabilities(
+                    intent_interpretation=CapabilityPresence.CONFIGURED,
+                    source_control_publishing=CapabilityPresence.CONFIGURED,
+                ),
+            )
+
+
+def _state_paths(env: Mapping[str, str]) -> tuple[Path, Path]:
+    from iac_agent.app.config import DEFAULT_STATE_DB_FILENAME, DEFAULT_WORKSPACE_ROOT
+
+    workspace_root = Path(env.get("IAC_AGENT_WORKSPACE_ROOT", str(DEFAULT_WORKSPACE_ROOT)))
+    state_db_env = env.get("IAC_AGENT_STATE_DB")
+    state_db_path = (
+        Path(state_db_env) if state_db_env else workspace_root / DEFAULT_STATE_DB_FILENAME
+    )
+    return workspace_root, state_db_path
+
+
+@contextmanager
+def open_operator_runtime(
+    env: Mapping[str, str] | None = None,
+) -> Iterator[IntentApplication]:
+    """Open the state plane and whichever optional capabilities are configured.
+
+    Partial configuration raises before SQLite opens. A fully omitted GitHub
+    or interpreter group does not. ``capabilities`` is the availability
+    record; the concrete source-control object is not.
+    """
+    from iac_agent.app.config import (
+        load_application_config_from_env,
+        load_github_token_from_env,
+        load_intent_interpreter_config_from_env,
+        load_openai_api_key_from_env,
+    )
+    from iac_agent.app.service import IacApplication
+    from iac_agent.intent.resolver import ArchitectureResolver
+    from iac_agent.intent.service import IntentResolutionService
+
+    source = os.environ if env is None else env
+    capabilities = classify_runtime_capabilities(source)
+    workspace_root, state_db_path = _state_paths(source)
+    if capabilities.source_control_publishing is CapabilityPresence.CONFIGURED:
+        config = load_application_config_from_env(source)
+        token = load_github_token_from_env(source)
+        source_control = GitHubSourceControl(
+            repository=GitHubRepository(owner=config.github_owner, name=config.github_repository),
+            token=token.get_secret_value(),
+            commit_identity=GitCommitIdentity(
+                name=config.github_commit_author_name,
+                email=config.github_commit_author_email,
+            ),
+        )
+    else:
+        config = ApplicationConfig(
+            workspace_root=workspace_root,
+            state_db_path=state_db_path,
+            github_owner="",
+            github_repository="",
+            github_commit_author_name="",
+            github_commit_author_email="",
+            github_base_branch="main",
+        )
+        source_control = UnavailableSourceControl()
+    interpreter = None
+    if capabilities.intent_interpretation is CapabilityPresence.CONFIGURED:
+        interpreter = create_intent_interpreter(
+            load_intent_interpreter_config_from_env(source),
+            api_key=load_openai_api_key_from_env(source),
+        )
+    config.state_db_path.parent.mkdir(parents=True, exist_ok=True)
+    with open_sqlite_checkpointer(config.state_db_path) as saver:
+        graph = build_sqs_workflow(
+            renderer=TerraformCompositionRenderer(),
+            terraform_runner=TerraformRunner(),
+            checkov_adapter=CheckovAdapter(),
+            source_control_port=source_control,
+            workspace_root=config.workspace_root,
+            base_branch=config.github_base_branch,
+            checkpointer=saver,
+        )
+        observability = build_observability(
+            load_observability_settings_from_env(source), env=source
+        )
+        with open_request_index(config.state_db_path) as index:
+            iac = IacApplication(graph, observability=observability, request_index=index)
+            service = None
+            if interpreter is not None:
+                service = IntentResolutionService(
+                    interpreter=interpreter,
+                    resolver=ArchitectureResolver(),
+                    application=iac,
+                    observability=observability,
+                )
+            yield IntentApplication(
+                config=config,
+                intent_service=service,
+                application=iac,
+                capabilities=capabilities,
             )
 
 

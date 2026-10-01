@@ -552,14 +552,26 @@ approved. The design is
 `docs/superpowers/specs/2026-09-29-batch34-design.md`. The plan is
 `docs/superpowers/plans/2026-09-29-batch34-operator-authentication.md`.
 
+## Batch 35 — capability-scoped runtime (complete)
+
+The operator runtime opens the state plane without requiring GitHub or
+OpenAI configuration. The checkpoint stays the workflow authority and
+`request_index` stays discovery. A new submit needs intent
+interpretation. An approve that would resume needs source-control
+publishing. List, detail, and reject do not. `/health` means the
+process is alive. `/ready` means the state plane is open. This is not
+remote deployment, public deployment readiness, durable operator
+identity, RBAC, audit history, post-publish recovery, or multi-user
+support. The design is
+`docs/superpowers/specs/2026-09-30-batch35-design.md`. The plan is
+`docs/superpowers/plans/2026-10-01-batch35-capability-scoped-runtime.md`.
+
 ## Not yet started
 
 RBAC, multi-user access, tenants, durable operator identity, approver
-auditability, remote or public deployment, TLS, ingress, reverse proxy,
-and lifespan or startup decoupling are not started. GitHub and OpenAI
-configuration are still required before the process serves. That startup
-requirement is separate from operator authentication. The local runtime
-is not a public production boundary.
+auditability, remote or public deployment, TLS, ingress, and reverse
+proxy are not started. The local runtime is not a public production
+boundary.
 
 EventBridge, SNS, a second Lambda in one composition, chaining
 compositions together, Cognito/JWT/Lambda authorizers, WAF, custom
