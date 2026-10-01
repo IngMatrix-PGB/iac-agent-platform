@@ -9,6 +9,11 @@ from iac_agent.api.approval import decide_approval
 from iac_agent.api.operator_auth import authenticate_operator
 from iac_agent.api.project import project_list_item, project_submission, project_view
 from iac_agent.api.schemas import RequestListResponse
+from iac_agent.app.capabilities import (
+    INTENT_ABSENT_MESSAGE,
+    CapabilityPresence,
+    RuntimeCapabilities,
+)
 from iac_agent.cli.ids import generate_request_id
 from iac_agent.domain.approval import InvalidApprovalDecisionError, parse_approval_decision
 from iac_agent.domain.workflow import validate_request_id
@@ -70,6 +75,12 @@ def register_routes(app: FastAPI) -> None:
         holder = request.app.state.holder
         if holder.application.read(request_id) is not None:
             return _error("request_exists", "Request already exists.", 409)
+        capabilities = getattr(holder, "capabilities", None)
+        if (
+            not isinstance(capabilities, RuntimeCapabilities)
+            or capabilities.intent_interpretation is CapabilityPresence.ABSENT
+        ):
+            return _error("capability_unavailable", INTENT_ABSENT_MESSAGE, 503)
         try:
             result = holder.intent_service.submit(
                 request_id=request_id, natural_language_request=text

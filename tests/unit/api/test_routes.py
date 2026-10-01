@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from iac_agent.api.app import create_app
+from iac_agent.app.capabilities import CapabilityPresence, RuntimeCapabilities
 from iac_agent.app.service import WorkflowView
 from iac_agent.domain.workflow import WorkflowStage, WorkflowStatus
 from iac_agent.intent.models import ArchitectureIntent, Capability, InteractionPattern, WorkloadType
@@ -69,6 +70,10 @@ class Holder:
     def __init__(self, result=None, error=None) -> None:
         self.application = FakeApplication()
         self.intent_service = FakeIntent(result=result, error=error)
+        self.capabilities = RuntimeCapabilities(
+            intent_interpretation=CapabilityPresence.CONFIGURED,
+            source_control_publishing=CapabilityPresence.CONFIGURED,
+        )
 
 
 def _resolved_view() -> WorkflowView:

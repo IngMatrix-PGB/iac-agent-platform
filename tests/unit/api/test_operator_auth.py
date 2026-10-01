@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from iac_agent.api.app import create_app
+from iac_agent.app.capabilities import CapabilityPresence, RuntimeCapabilities
 from iac_agent.app.service import WorkflowView
 from iac_agent.domain.workflow import WorkflowStage, WorkflowStatus
 from iac_agent.intent.models import ArchitectureIntent, Capability, InteractionPattern, WorkloadType
@@ -61,6 +62,10 @@ class _Holder:
     def __init__(self) -> None:
         self.application = _Application()
         self.intent_service = _Intent()
+        self.capabilities = RuntimeCapabilities(
+            intent_interpretation=CapabilityPresence.CONFIGURED,
+            source_control_publishing=CapabilityPresence.CONFIGURED,
+        )
 
 
 def _client(holder: _Holder) -> TestClient:
