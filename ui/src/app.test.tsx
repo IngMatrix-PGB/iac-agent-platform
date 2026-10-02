@@ -375,15 +375,15 @@ describe("operator shell", () => {
     await user.type(screen.getByLabelText("Operator secret"), secret);
     await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(listRequests).toHaveBeenCalledOnce();
-    expect(await screen.findByRole("link", { name: "req-listed" })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: "orders" })).toHaveAttribute(
       "href",
       "/requests/req-listed",
     );
-    expect(screen.getByText("Awaiting approval")).toBeInTheDocument();
-    expect(screen.getByText("Pass")).toBeInTheDocument();
-    expect(screen.getByText("Approval available")).toBeInTheDocument();
-    expect(screen.getByText("orders")).toBeInTheDocument();
-    expect(screen.getByText("2026-09-29T00:00:02.000000Z")).toBeInTheDocument();
+    expect(screen.getByText("req-listed").className).toContain("meta");
+    expect(screen.getAllByText("Awaiting approval")).toHaveLength(1);
+    expect(screen.getAllByText("Pass")).toHaveLength(1);
+    expect(screen.queryByText("Approval available")).not.toBeInTheDocument();
+    expect(screen.queryByText("2026-09-29T00:00:02.000000Z")).not.toBeInTheDocument();
     expect(screen.queryByText(secret)).not.toBeInTheDocument();
 
     listRequests.mockResolvedValue({

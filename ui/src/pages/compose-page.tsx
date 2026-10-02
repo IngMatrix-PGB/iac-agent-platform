@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { isUnauthenticated, type ApiClient, type ClientResult } from "../api/client";
 import type { RequestListItem, RequestResponse } from "../api/types";
-import { AuthoritativeValue } from "../components/authoritative-value";
 import { ErrorBanner } from "../components/error-banner";
 import { OpenRequest } from "../components/open-request";
 import { RequestForm } from "../components/request-form";
+import { chipClass, statusLabel } from "../components/status-label";
 
-const EMPTY_INDEX =
-  "No indexed requests. Checkpoints created before the durable request index may still be opened by request id even when they do not appear in Recent requests.";
+const EMPTY_COPY =
+  "No indexed requests. A checkpoint created before the durable index can still be opened by request id.";
 
 export function ComposePage({
   client,
@@ -83,7 +83,7 @@ export function ComposePage({
   }
 
   return (
-    <section aria-labelledby="compose-heading">
+    <section id="compose" tabIndex={-1} aria-labelledby="compose-heading">
       <h2 id="compose-heading">New request</h2>
       <p>Describe the infrastructure. A durable workflow opens on its own page.</p>
       <RequestForm value={draft} busy={busy} onChange={setDraft} onSubmit={() => void submit()} />
@@ -108,44 +108,38 @@ function RecentRequests({
   navigate: (path: string) => void;
 }) {
   return (
-    <section className="recent-requests" aria-labelledby="recent-requests-heading">
+    <section id="requests" tabIndex={-1} className="recent-requests" aria-labelledby="recent-requests-heading">
       <h3 id="recent-requests-heading">Recent requests</h3>
       {error ? <ErrorBanner message={error} /> : null}
-      {rows && rows.length === 0 ? <p>{EMPTY_INDEX}</p> : null}
+      {rows && rows.length === 0 ? <p>{EMPTY_COPY}</p> : null}
       {rows && rows.length > 0 ? (
         <ul>
           {rows.map((row) => {
             const path = `/requests/${encodeURIComponent(row.request_id)}`;
             return (
-              <li className="panel" key={row.request_id}>
-                <a
-                  href={path}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    navigate(path);
-                  }}
-                >
-                  {row.request_id}
-                </a>
-                <dl>
-                  <div>
-                    <dt>Created</dt>
-                    <dd>
-                      <code className="enum">{row.created_at}</code>
-                    </dd>
-                  </div>
-                  <AuthoritativeValue label="Workflow status" value={row.workflow_status} />
+              <li className="panel catalog-row" key={row.request_id} title={row.created_at}>
+                <div>
+                  <a
+                    href={path}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      navigate(path);
+                    }}
+                  >
+                    {row.name ?? row.request_id}
+                  </a>
+                  {row.name ? <p className="meta">{row.request_id}</p> : null}
+                </div>
+                <div>
+                  <span className={chipClass(row.workflow_status)} title={row.workflow_status}>
+                    {statusLabel(row.workflow_status)}
+                  </span>
                   {row.security_status ? (
-                    <AuthoritativeValue label="Security status" value={row.security_status} />
+                    <span className={chipClass(row.security_status)} title={row.security_status}>
+                      {statusLabel(row.security_status)}
+                    </span>
                   ) : null}
-                  {row.name ? (
-                    <div>
-                      <dt>Name</dt>
-                      <dd>{row.name}</dd>
-                    </div>
-                  ) : null}
-                </dl>
-                <p>{row.approval_available ? "Approval available" : "Approval not available"}</p>
+                </div>
               </li>
             );
           })}

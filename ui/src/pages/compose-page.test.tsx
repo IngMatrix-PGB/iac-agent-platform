@@ -6,7 +6,7 @@ import type { RequestListItem } from "../api/types";
 import { App } from "../app";
 
 const EMPTY_COPY =
-  "No indexed requests. Checkpoints created before the durable request index may still be opened by request id even when they do not appear in Recent requests.";
+  "No indexed requests. A checkpoint created before the durable index can still be opened by request id.";
 
 const LISTED: RequestListItem = {
   request_id: "req-listed",
@@ -84,24 +84,37 @@ describe("recent requests", () => {
 
     expect(screen.getByRole("heading", { name: "New request" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Recent requests" })).toBeInTheDocument();
-    expect(await screen.findByRole("link", { name: "req-listed" })).toBeInTheDocument();
+    expect(document.getElementById("compose")).toHaveAttribute("tabindex", "-1");
+    expect(document.getElementById("requests")).toHaveAttribute("tabindex", "-1");
+    const named = await screen.findByRole("link", { name: "orders" });
+    expect(named).toHaveAttribute("href", "/requests/req-listed");
     expect(listRequests).toHaveBeenCalledTimes(1);
     expect(listRequests).toHaveBeenCalledWith();
-    expect(screen.getByText("Awaiting approval")).toBeInTheDocument();
-    expect(screen.getByText("Pass")).toBeInTheDocument();
-    expect(screen.getByText("orders")).toBeInTheDocument();
-    expect(screen.getByText("2026-09-29T00:00:02.000000Z")).toBeInTheDocument();
+    expect(screen.getByText("req-listed").className).toContain("meta");
+    expect(screen.getAllByText("Awaiting approval")).toHaveLength(1);
+    expect(screen.getAllByText("Pass")).toHaveLength(1);
+    expect(screen.queryByText("awaiting_approval")).not.toBeInTheDocument();
+    expect(screen.queryByText("pass")).not.toBeInTheDocument();
+    expect(screen.queryByText("Approval available")).not.toBeInTheDocument();
+    expect(screen.queryByText("Approval not available")).not.toBeInTheDocument();
+    expect(screen.queryByText("2026-09-29T00:00:02.000000Z")).not.toBeInTheDocument();
+    expect(named.closest("li")).toHaveAttribute("title", "2026-09-29T00:00:02.000000Z");
+    expect(named.closest("li")).toHaveClass("catalog-row");
+    expect(screen.getByRole("link", { name: "req/a b" })).toBeInTheDocument();
     expect(screen.getByText("Pull request created")).toBeInTheDocument();
+    expect(screen.queryByText("Security status")).not.toBeInTheDocument();
+    expect(screen.queryByText("Workflow status")).not.toBeInTheDocument();
     expect(screen.queryByText("null")).not.toBeInTheDocument();
     expect(screen.queryByText("unknown")).not.toBeInTheDocument();
     const openRow = screen.getByRole("link", { name: "req/a b" }).closest("li");
-    expect(openRow?.textContent).not.toMatch(/Security status|Name/);
+    expect(openRow?.querySelector(".meta")).toBeNull();
+    expect(openRow?.textContent).not.toMatch(/Security status|Name|Approval not available/);
     for (const sentinel of HIDDEN) {
       expect(document.body.textContent).not.toContain(sentinel);
     }
     expect(fetchImpl).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("link", { name: "req-listed" }));
+    await user.click(screen.getByRole("link", { name: "orders" }));
     expect(navigate).toHaveBeenCalledWith("/requests/req-listed");
     await user.click(screen.getByRole("link", { name: "req/a b" }));
     expect(navigate).toHaveBeenCalledWith("/requests/req%2Fa%20b");
@@ -124,6 +137,8 @@ describe("recent requests", () => {
     expect(listRequests).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("heading", { name: "New request" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Open a saved request" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submit request" })).toHaveClass("button-primary");
+    expect(screen.getByRole("button", { name: "Open request" })).toHaveClass("button-secondary");
     await user.type(screen.getByRole("textbox", { name: "Request id" }), "req-9");
     await user.click(screen.getByRole("button", { name: "Open request" }));
     expect(navigate).toHaveBeenCalledWith("/requests/req-9");

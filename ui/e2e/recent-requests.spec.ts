@@ -20,12 +20,12 @@ test("a recent request opens the authoritative review", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "New request" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Open a saved request" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Recent requests" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "req-indexed" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "orders" })).toBeVisible();
+  await expect(page.getByText("req-indexed")).toBeVisible();
   await expect(page.getByText("Awaiting approval").first()).toBeVisible();
   await expect(page.getByText("Pass").first()).toBeVisible();
-  await expect(page.getByText("orders")).toBeVisible();
-  await expect(page.getByText("2026-09-29T00:00:00.000000Z")).toBeVisible();
-  await expect(page.getByText("Approval available")).toBeVisible();
+  await expect(page.getByText("2026-09-29T00:00:00.000000Z")).toHaveCount(0);
+  await expect(page.getByText("Approval available")).toHaveCount(0);
   await expect(page.getByText(OPERATOR_SECRET)).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Terraform plan summary" })).toHaveCount(0);
   await expect(page.getByRole("table", { name: "Security findings" })).toHaveCount(0);
@@ -50,7 +50,7 @@ test("a recent request opens the authoritative review", async ({ page }) => {
     (request) =>
       request.method() === "GET" && request.url().endsWith("/api/v1/requests/req-indexed"),
   );
-  await page.getByRole("link", { name: "req-indexed" }).click();
+  await page.getByRole("link", { name: "orders" }).click();
   const detailRequest = await detail;
   expect(detailRequest.headers().authorization).toBe(`Bearer ${OPERATOR_SECRET}`);
   expect(detailRequest.url()).not.toContain(OPERATOR_SECRET);

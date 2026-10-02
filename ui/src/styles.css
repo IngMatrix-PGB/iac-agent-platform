@@ -405,6 +405,14 @@ dialog p {
   justify-content: space-between;
 }
 
+.catalog-row a {
+  font-weight: 650;
+}
+
+.catalog-row .meta {
+  overflow-wrap: anywhere;
+}
+
 .finding-stack {
   display: none;
   margin: 0;
