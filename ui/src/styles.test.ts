@@ -1,7 +1,12 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+
+// The app tsconfig does not include @types/node. Vitest still runs these builtins.
+// @ts-expect-error node builtin is intentionally untyped in the UI project
+import { readFileSync } from "node:fs";
+// @ts-expect-error node builtin is intentionally untyped in the UI project
+import { dirname, join } from "node:path";
+// @ts-expect-error node builtin is intentionally untyped in the UI project
+import { fileURLToPath } from "node:url";
 
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "styles.css"), "utf8");
 
