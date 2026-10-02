@@ -24,6 +24,10 @@ This is the deterministic suite, including the golden evals. It does not need cr
 
 In `ui/`: `npm ci`, `npm test`, and `npm run build`. The job is not a required check.
 
+## Classify
+
+`Classify` always runs. It writes a step summary and records which validation shards a diff would select. It does not skip any job. Tool Validation still runs the full real-tool suite (`pytest -m real_tool`).
+
 ## What CI never does
 
 No job runs `terraform apply` or `terraform destroy`, deploys to AWS, or publishes a pull request. The workflow permission is `contents: read`. It does not request `id-token: write`. The `real_llm` marker is excluded. The one real-model eval also skips when `IAC_AGENT_LLM_PROVIDER` is unset. See `docs/intent.md` and `docs/aws-plan-boundary.md`.
