@@ -87,11 +87,11 @@ describe("recent requests", () => {
     expect(await screen.findByRole("link", { name: "req-listed" })).toBeInTheDocument();
     expect(listRequests).toHaveBeenCalledTimes(1);
     expect(listRequests).toHaveBeenCalledWith();
-    expect(screen.getByText("awaiting_approval")).toBeInTheDocument();
-    expect(screen.getByText("pass")).toBeInTheDocument();
+    expect(screen.getByText("Awaiting approval")).toBeInTheDocument();
+    expect(screen.getByText("Pass")).toBeInTheDocument();
     expect(screen.getByText("orders")).toBeInTheDocument();
     expect(screen.getByText("2026-09-29T00:00:02.000000Z")).toBeInTheDocument();
-    expect(screen.getByText("pr_created")).toBeInTheDocument();
+    expect(screen.getByText("Pull request created")).toBeInTheDocument();
     expect(screen.queryByText("null")).not.toBeInTheDocument();
     expect(screen.queryByText("unknown")).not.toBeInTheDocument();
     const openRow = screen.getByRole("link", { name: "req/a b" }).closest("li");

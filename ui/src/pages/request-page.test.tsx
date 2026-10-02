@@ -44,9 +44,9 @@ describe("request page", () => {
     const getRequest = vi.fn().mockResolvedValue({ kind: "success", status: 200, body: reloaded });
     render(<RequestPage client={clientReturning(getRequest)} requestId="req-1" />);
     expect(await screen.findByText("Unavailable after reload.")).toBeInTheDocument();
-    expect(screen.getAllByText("awaiting_approval").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Awaiting approval").length).toBeGreaterThan(0);
     expect(screen.getByText("order-events")).toBeInTheDocument();
-    expect(screen.getByText("SQS_ENCRYPTION")).toBeInTheDocument();
+    expect(screen.getAllByText("SQS_ENCRYPTION").length).toBeGreaterThan(0);
     expect(screen.getByText("Approval available")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reject request" })).toBeInTheDocument();
@@ -98,7 +98,7 @@ describe("request page", () => {
       "href",
       "https://example.invalid/pull/7",
     );
-    expect(screen.getAllByText("pr_created").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Pull request created").length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
   });
 
@@ -126,7 +126,7 @@ describe("request page", () => {
     await user.click(await screen.findByRole("button", { name: "Approve" }));
     await user.click(screen.getByRole("button", { name: "Confirm approval" }));
     expect(await screen.findByText("This request cannot accept that decision.")).toBeInTheDocument();
-    expect(screen.getAllByText("rejected").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Rejected").length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
   });
 

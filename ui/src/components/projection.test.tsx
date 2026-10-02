@@ -57,7 +57,7 @@ describe("request projection", () => {
     expect(screen.getByRole("columnheader", { name: "Policy" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Status" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Severity" })).toBeInTheDocument();
-    expect(screen.getByText("SQS_ENCRYPTION")).toBeInTheDocument();
+    expect(screen.getAllByText("SQS_ENCRYPTION").length).toBeGreaterThan(0);
     expect(screen.queryByRole("columnheader", { name: "Resource" })).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Message" })).not.toBeInTheDocument();
   });
@@ -78,9 +78,11 @@ describe("request projection", () => {
     expect(screen.getByRole("term", { name: "Workflow status" })).toBeInTheDocument();
     expect(screen.getByRole("term", { name: "Stage" })).toBeInTheDocument();
     expect(screen.getByRole("term", { name: "Security status" })).toBeInTheDocument();
-    expect(screen.getAllByText("awaiting_approval").length).toBeGreaterThan(0);
-    expect(screen.getByText("approval")).toBeInTheDocument();
-    expect(screen.getAllByText("warn").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Awaiting approval").length).toBeGreaterThan(0);
+    expect(screen.queryByText("awaiting_approval")).not.toBeInTheDocument();
+    expect(screen.getByText("Approval", { exact: true })).toBeInTheDocument();
+    expect(screen.getAllByText("Warn").length).toBeGreaterThan(0);
+    expect(screen.queryByText("warn")).not.toBeInTheDocument();
     expect(screen.getByText("Terraform apply was not executed.")).toBeInTheDocument();
     expect(screen.getByText("Approval available")).toBeInTheDocument();
   });
@@ -91,23 +93,27 @@ describe("request projection", () => {
     expect(screen.getByRole("term", { name: "Request id" })).toBeInTheDocument();
     expect(screen.getByText("req-1")).toBeInTheDocument();
     expect(screen.getByRole("term", { name: "Outcome" })).toBeInTheDocument();
-    expect(screen.getAllByText("awaiting_approval").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Awaiting approval").length).toBeGreaterThan(0);
+    expect(screen.queryByText("awaiting_approval")).not.toBeInTheDocument();
   });
 
   it("renders the public submission fields", () => {
     render(<Projection body={posted} />);
     expect(screen.getByText("req-1")).toBeInTheDocument();
-    expect(screen.getAllByText("awaiting_approval").length).toBeGreaterThan(0);
-    expect(screen.getByText("approval")).toBeInTheDocument();
-    expect(screen.getAllByText("warn").length).toBeGreaterThan(0);
-    expect(screen.getByText("serverless_worker")).toBeInTheDocument();
+    expect(screen.getAllByText("Awaiting approval").length).toBeGreaterThan(0);
+    expect(screen.queryByText("awaiting_approval")).not.toBeInTheDocument();
+    expect(screen.getByText("Approval", { exact: true })).toBeInTheDocument();
+    expect(screen.getAllByText("Warn").length).toBeGreaterThan(0);
+    expect(screen.queryByText("warn")).not.toBeInTheDocument();
+    expect(screen.getByText("Serverless worker")).toHaveAttribute("title", "serverless_worker");
+    expect(screen.queryByText("serverless_worker")).not.toBeInTheDocument();
     expect(screen.getAllByText("order-events").length).toBeGreaterThan(0);
     expect(screen.getByText("queue")).toBeInTheDocument();
     expect(screen.getByText("2")).toBeInTheDocument();
     expect(screen.getByText("1")).toBeInTheDocument();
     expect(screen.getByText("0")).toBeInTheDocument();
     expect(screen.getByText("Destructive change detected.")).toBeInTheDocument();
-    expect(screen.getByText("SQS_ENCRYPTION")).toBeInTheDocument();
+    expect(screen.getAllByText("SQS_ENCRYPTION").length).toBeGreaterThan(0);
     expect(screen.getByText("Terraform apply was not executed.")).toBeInTheDocument();
     expect(screen.getByText("Approval available")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
@@ -139,7 +145,7 @@ describe("request projection", () => {
       },
     ] as unknown as FindingDTO[];
     render(<Findings findings={dirty} />);
-    expect(screen.getByText("SQS_ENCRYPTION")).toBeInTheDocument();
+    expect(screen.getAllByText("SQS_ENCRYPTION").length).toBeGreaterThan(0);
     expect(screen.queryByText("arn:aws:sqs:us-east-1:123456789012:hidden")).not.toBeInTheDocument();
     expect(screen.queryByText("HIDDEN_FINDING_MESSAGE")).not.toBeInTheDocument();
     expect(screen.queryByText("123456789012")).not.toBeInTheDocument();
@@ -165,7 +171,7 @@ describe("request projection", () => {
       },
     };
     render(<WorkflowStatus body={body} />);
-    expect(screen.getByText("terraform")).toBeInTheDocument();
+    expect(screen.getByText("Terraform", { exact: true })).toBeInTheDocument();
     expect(screen.getAllByText("RuntimeError").length).toBeGreaterThan(0);
     expect(screen.queryByText("HIDDEN_WORKFLOW_ERROR_MESSAGE")).not.toBeInTheDocument();
   });

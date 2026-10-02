@@ -1,7 +1,6 @@
-export function enumCaption(value: string): string {
-  const spaced = value.replaceAll("_", " ");
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
-}
+import { chipClass, statusLabel } from "./status-label";
+
+export { enumCaption, statusLabel } from "./status-label";
 
 export function AuthoritativeValue({ label, value }: { label: string; value: string }) {
   return (
@@ -10,7 +9,9 @@ export function AuthoritativeValue({ label, value }: { label: string; value: str
         {label}
       </dt>
       <dd>
-        <span>{enumCaption(value)}</span> <code className="enum">{value}</code>
+        <span className={chipClass(value)} title={value}>
+          {statusLabel(value)}
+        </span>
       </dd>
     </div>
   );

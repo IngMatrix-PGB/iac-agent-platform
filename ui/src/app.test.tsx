@@ -287,8 +287,8 @@ describe("operator shell", () => {
       "href",
       "/requests/req-listed",
     );
-    expect(screen.getByText("awaiting_approval")).toBeInTheDocument();
-    expect(screen.getByText("pass")).toBeInTheDocument();
+    expect(screen.getByText("Awaiting approval")).toBeInTheDocument();
+    expect(screen.getByText("Pass")).toBeInTheDocument();
     expect(screen.getByText("Approval available")).toBeInTheDocument();
     expect(screen.getByText("orders")).toBeInTheDocument();
     expect(screen.getByText("2026-09-29T00:00:02.000000Z")).toBeInTheDocument();
