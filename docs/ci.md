@@ -1,70 +1,40 @@
-# Continuous integration (Batch 22)
+# Continuous integration
 
-One GitHub Actions workflow, `.github/workflows/ci.yml` (display name
-`CI`), runs on every pull request and every push to `main`. It has
-three independent jobs — none depends on another (`needs:` is never
-set), so a slow job never blocks the fast ones.
+`.github/workflows/ci.yml` runs on every pull request to `main` and every push to `main`. The jobs do not depend on each other.
 
 ## Quality
 
-Runs `ruff check .` and `terraform fmt -check -recursive -diff
-terraform/ tests/terraform/`. Fast, credential-free, no network beyond
-installing Python/Terraform themselves. **Intended future required
-check** — not yet enforced by branch protection.
+Ruff, `terraform fmt -check` for `terraform/` and `tests/terraform/`, and the attribution check in `scripts/check_commit_attribution.py`. The attribution check rejects `Co-Authored-By`, `Generated-By`, and a Cursor or Claude footer in commit messages and, on pull requests, in the pull request body.
+
+`Quality` is a required status check on `main`.
 
 ## Tests
 
-Runs `pytest -m "not real_tool and not real_llm"` — the project's full
-deterministic, offline test suite. This already transitively includes
-every golden-eval scenario (SQS, S3, DynamoDB, Lambda, API Gateway, both
-compositions, and the architecture-intent resolver) — there is no
-separate eval job. Fast (a few seconds of actual test execution),
-credential-free, no network. **Intended future required check** — not
-yet enforced by branch protection.
+```bash
+pytest -m "not real_tool and not real_llm and not docker"
+```
+
+This is the deterministic suite, including the golden evals. It does not need credentials. `Tests` is a required status check on `main`.
 
 ## Tool Validation
 
-Runs `pytest -m real_tool` — the same logic re-verified against the
-*real* Terraform (`1.16.1`) and Checkov (`3.3.13`) binaries, pinned
-exactly (never `latest`, since Checkov's own ruleset changes between
-versions and this project's empirically-derived finding counts are tied
-to `3.3.13`). This job needs outbound network access to the public
-Terraform Registry (to download the `hashicorp/aws` provider) but no
-credentials — every Terraform-plan-touching test supplies its own
-placeholder `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` values internally
-and never contacts a real AWS API (see
-`docs/terraform-credential-free-plan.md`). Currently takes roughly
-25–30 minutes, the large majority of it spent on provider download and
-real `terraform`/`checkov` subprocess calls. **Never intended to become
-a required check** — it runs and reports on every trigger, and a
-regression here fails visibly (no `continue-on-error`), but it does not
-block a PR from merging.
+`pytest -m real_tool` runs the same behavior against Terraform 1.16.1 and Checkov 3.3.13. It needs the public Terraform Registry and uses placeholder AWS credentials. It does not call a real AWS API. See `docs/terraform-credential-free-plan.md`. The job reports on every run and is not a required check.
+
+## Frontend
+
+In `ui/`: `npm ci`, `npm test`, and `npm run build`. The job is not a required check.
 
 ## What CI never does
 
-No step anywhere runs `terraform apply` or `terraform destroy`, deploys
-anything, mutates a real GitHub repository, or requires an AWS account.
-The `real_llm` pytest marker is excluded from every job in this
-workflow and remains inert everywhere: no job sets
-`IAC_AGENT_LLM_PROVIDER`, and the one `real_llm`-marked test skips
-unconditionally regardless (see
-`docs/superpowers/specs/2026-09-15-structured-architecture-intent-design.md`
-§15.2). The workflow requests only `contents: read` — no write, no
-`pull-requests: write`, no `id-token: write`, no secrets of any kind.
+No job runs `terraform apply` or `terraform destroy`, deploys to AWS, or publishes a pull request. The workflow permission is `contents: read`. It does not request `id-token: write`. The `real_llm` marker is excluded. The one real-model eval also skips when `IAC_AGENT_LLM_PROVIDER` is unset. See `docs/intent.md` and `docs/aws-plan-boundary.md`.
 
 ## Reproducing CI locally
 
 ```bash
 ruff check .
 terraform fmt -check -recursive -diff terraform/ tests/terraform/
-pytest -m "not real_tool and not real_llm"
-pytest -m real_tool   # needs terraform 1.16.1 and checkov 3.3.13 on PATH
+pytest -m "not real_tool and not real_llm and not docker"
+pytest -m real_tool
 ```
 
-## Branch protection
-
-Not enabled yet. A future, separately human-approved change may make
-`Quality` and `Tests` required status checks on `main` once this
-workflow has proven itself on real pull requests; `Tool Validation` is
-not intended to become required under the current design (see
-`docs/superpowers/specs/2026-09-16-ci-quality-gates-design.md`).
+Frontend: `npm ci && npm test && npm run build` from `ui/`.

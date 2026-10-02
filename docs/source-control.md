@@ -151,32 +151,6 @@ anywhere in this codebase (`TerraformRunner` still has no such method),
 and no AWS mutation of any kind. Opening a pull request does not
 deploy anything.
 
-## Batch 14 uses mocked GitHub only
+## Tests do not publish
 
-Every test in this batch injects a fake `HttpTransport` or a
-test-only `SourceControlPort` fake — there is no live remote branch or
-pull request created against any real GitHub repository, including the
-project's own. A later, explicitly authorized live-smoke batch will
-perform exactly one real PR.
-
-## Batch 15: one controlled live GitHub PR validated
-
-A single, explicitly authorized live end-to-end run (request ID
-`phase1-sqs-live-smoke`, branch `iac-agent/phase1-sqs-live-smoke`) went
-through the real `GitHubSourceControl` adapter against the project's
-own repository, via `Phase1Application.submit(...)` →
-`Phase1Application.resume(..., ApprovalDecision.APPROVE)`. It produced
-exactly one branch, one commit, and one pull request, containing only
-`generated/phase1-sqs-live-smoke/main.tf` and
-`generated/phase1-sqs-live-smoke/versions.tf` — no runtime artifacts of
-any kind. The pull request was deliberately left open for manual
-inspection; it was never merged, and no automated test in this
-repository ever recreates it (every automated test still uses a fake
-HTTP transport). No AWS mutation occurred at any point — the plan
-remained fully credential-free, exactly as documented above.
-
-This also required a one-time repository bootstrap: the target
-repository had no commit history at all (no `main`), so the already-
-validated local implementation commit was pushed once, directly, as
-the initial `refs/heads/main` — a deliberate, explicitly authorized
-exception to every other rule on this page, not a repeatable pattern.
+Automated tests inject a fake HTTP transport or a fake `SourceControlPort`. They do not create a branch or a pull request. A real `publish_change` still uses the path, branch, and allowlist rules above, against whichever repository the GitHub group names.

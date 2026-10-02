@@ -11,11 +11,10 @@ modules, composition-specific policies, a dispatch-registration entry
 in each of the ~11 sites the design/plan enumerated, and no redesign of
 any core layer.
 
-Discovery (see `docs/superpowers/specs/2026-09-27-api-lambda-dynamodb-composition-design.md`)
-found the resolver's own capability vocabulary already had an unmapped,
-coherent combination for this: `WorkloadType.API` + `SYNCHRONOUS` +
-`{Capability.HTTP_ENDPOINT, Capability.PERSISTENCE}` — no new
-`ArchitectureIntent` field, no new LLM-visible vocabulary at all.
+The resolver already had a coherent combination for this:
+`WorkloadType.API` + `SYNCHRONOUS` +
+`{Capability.HTTP_ENDPOINT, Capability.PERSISTENCE}`. No new
+`ArchitectureIntent` field was required. See `docs/intent.md`.
 
 ## Architecture
 
@@ -113,29 +112,14 @@ repeated here; see `docs/compositions/api-lambda.md`.
 | `DDB_DELETION_PROTECTION_RECOMMENDED` | PASS/WARN, reused verbatim | the table sub-spec's own deletion-protection setting |
 | `TF_NO_DESTRUCTIVE_CHANGES` | shared with every other resource/composition type | the rendered `PlanSummary` |
 
-## Checkov: empirical discovery, deferred to Gate B (Task 16)
-
-**Status as of Gate A: not yet derived.** Per this project's own
-established discipline (never assume a union of constituent skip
-lists — verify empirically first), the real skip list for this
-three-resource combination is deliberately not invented or approximated
-during Gate A. It will be produced by:
-
-1. Rendering a real, secure-default composition.
-2. Running the existing strict, zero-skip real-tool Checkov path
-   against it.
-3. Evaluating each reported finding individually against this specific
-   combination.
-4. Freezing only the empirically justified skips, with a regression
-   test proving the frozen list matches exactly.
+## Checkov
 
 `composition_checkov_profile_for(CompositionType.API_GATEWAY_LAMBDA_DYNAMODB)`
-currently raises `KeyError` — a dedicated, disclosed
-`xfail(strict=True)` test in
-`tests/unit/test_composition_registration_consistency.py` proves this
-is the expected, temporary state, not an oversight, and will fail
-loudly (XPASS) if a profile is added without the real discovery step
-above actually running.
+returns a frozen profile. The skipped checks are `CKV_AWS_76`,
+`CKV_AWS_116`, `CKV_AWS_117`, `CKV_AWS_119`, `CKV_AWS_158`,
+`CKV_AWS_173`, `CKV_AWS_272`, and `CKV_AWS_309`. A missing composition
+profile raises `ValueError`. The registration test expects this
+profile to exist.
 
 ## HITL, presentation, and durability
 
@@ -154,8 +138,8 @@ above actually running.
   easy-to-miss, critical dispatch boundary: an omitted entry does not
   raise at submit time, it silently degrades the spec into a raw
   `dict` on the next checkpoint load. Proven both in isolation (a
-  direct `JsonPlusSerializer` round-trip) and, at Gate B, end-to-end
-  through a real fresh-process reconstruction/resume cycle.
+  direct `JsonPlusSerializer` round-trip) and end-to-end through a
+  fresh-process reconstruction and resume.
 
 ## Dispatch sites touched
 
@@ -166,7 +150,7 @@ above actually running.
 `IacRenderer`) · `intent/resolver.py` (two new `match` arms) ·
 `persistence/checkpoints.py` (allowlist entry) ·
 `policies/composition.py` (policy IDs, dispatch arm) ·
-`security/composition_checkov_profiles.py` (Gate B) ·
+`security/composition_checkov_profiles.py` ·
 `graph/workflow.py` (PR body, commit message, three grouped dispatch
 arms widened, `build_iac_workflow` renderer parameter) ·
 `cli/present.py` (`_architecture_label`, `_component_lines`).

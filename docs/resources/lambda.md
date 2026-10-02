@@ -10,8 +10,7 @@ execution role, an inline CloudWatch Logs permission policy, and a log
 group — represented as **one** top-level resource spec, not as a
 generic IAM policy generator and not as two independently orchestrated
 resource types. There is deliberately no `ResourceType.IAM` anywhere in
-this platform. See `docs/roadmap.md` for the exact registration
-touchpoints this batch used.
+this platform.
 
 ## Lambda + IAM as one resource, not two
 
@@ -325,10 +324,7 @@ mutation of any kind ever occurs, and a GitHub pull request remains the
 terminal artifact for a Lambda request exactly as it is for
 SQS/S3/DynamoDB.
 
-## Known application-layer debt (unchanged scope this batch)
+## Application layer
 
-`iac_agent.app.service.Phase1Application` and the composition layer
-remain SQS-only (tracked since Batch 16 — see `docs/roadmap.md`).
-Lambda, like S3 and DynamoDB, does not go through that layer in this
-batch; every Lambda test in this batch calls `build_iac_workflow`
-directly.
+`IacApplication.submit` accepts an `IacRequestSpec`, including Lambda.
+See `docs/application.md`.

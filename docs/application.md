@@ -1,12 +1,12 @@
-# Application Composition
+# Application composition
 
 ## Why a composition root
 
-Through Batch 14, every test constructed the renderer, `TerraformRunner`,
-`CheckovAdapter`, `GitHubSourceControl`, and the SQLite checkpointer
-directly, then wired them into `build_sqs_workflow` itself. Batch 15
-adds the one place a real caller (a future FastAPI handler, a CLI, a
-script) does that instead: `iac_agent.app`.
+`iac_agent.app` is where a real caller wires the renderer,
+`TerraformRunner`, `CheckovAdapter`, source control, and the SQLite
+checkpointer. Callers are the HTTP API (`docs/api.md`), the CLI, and
+tests. Domain modules and graph nodes do not construct those adapters
+and do not read `os.environ`.
 
 ```
 iac_agent.app.config        — typed, non-secret configuration + env loaders
@@ -30,9 +30,10 @@ holding only non-secret settings — always safe to log or repr:
 ApplicationConfig(
     workspace_root: Path,
     state_db_path: Path,
-    terraform_module_path: Path,
     github_owner: str,
     github_repository: str,
+    github_commit_author_name: str,
+    github_commit_author_email: str,
     github_base_branch: str = "main",
 )
 ```
@@ -49,15 +50,15 @@ ApplicationConfig(
 | `GITHUB_COMMIT_AUTHOR_EMAIL` | **yes** | none |
 | `GITHUB_BASE_BRANCH` | no | `main` |
 
-`GITHUB_OWNER`, `GITHUB_REPOSITORY`, and the commit-author variables
-have no default and raise `MissingConfigurationError` if absent — this
-project never silently defaults to a real user, repository, or commit
-identity. `GITHUB_COMMIT_AUTHOR_NAME`/`GITHUB_COMMIT_AUTHOR_EMAIL` are
-public metadata (any commit's author is visible in the published
-history) — unlike the token, they are ordinary `ApplicationConfig`
-fields, and `GitHubSourceControl` sends them explicitly on every
-generated commit rather than letting GitHub default a commit's
-author/committer to whichever identity owns the token.
+`load_application_config_from_env` raises `MissingConfigurationError`
+when `GITHUB_OWNER`, `GITHUB_REPOSITORY`, or either commit-author
+variable is absent. There is no silent default owner, repository, or
+commit identity. The commit-author fields are public metadata. Unlike
+the token, they live on `ApplicationConfig`, and `GitHubSourceControl`
+sends them on every generated commit.
+
+The operator runtime may omit the whole GitHub group. A partial group
+fails startup. An omitted group does not publish. See `docs/api.md`.
 
 ## The GitHub token stays outside `ApplicationConfig`
 
@@ -73,20 +74,11 @@ constructs `GitHubSourceControl`. The token is never written into
 
 ## `state.db` naming convention
 
-Batch 15 adopts `state.db` as the canonical example/application
-filename for the SQLite checkpoint database, replacing the earlier,
-unnecessarily verbose test/example filename used through Batch 14. This
-is a naming convention only:
-`iac_agent.persistence.checkpoints.open_sqlite_checkpointer` still
-requires an explicit `Path` and hardcodes no filename itself — a caller
-always states exactly where the database lives. When the application
-layer's own default applies, it resolves under the configured
-`workspace_root` (`<workspace_root>/state.db`), never scattered
-unpredictably into whatever directory happened to invoke Python.
-
-No database schema migration was implemented or is needed — this is a
-filename cleanup only, and there are no deployed users of an older
-filename to migrate.
+The application default filename is `state.db`.
+`open_sqlite_checkpointer` still requires an explicit path and does not
+hardcode that name. The default location is
+`<workspace_root>/state.db`. The same file holds `request_index`. See
+`docs/persistence.md`.
 
 ## Composition lifecycle
 
@@ -112,15 +104,20 @@ not exist) — every `Application`/`Phase1Application` is constructed
 independently, so two instances (even against different databases in
 the same process) never share state.
 
-## `Phase1Application`: submit / resume / get_state
+## `IacApplication`: submit / resume / read
 
 ```python
-app = Phase1Application.from_application(application)
+app = IacApplication.from_application(application)
 
 app.submit(request_id="req-001", spec=my_spec)  # -> WorkflowView
 app.resume("req-001", ApprovalDecision.APPROVE)  # -> WorkflowView
 app.get_state("req-001")  # -> WorkflowView, read-only
 ```
+
+`spec` is an `IacRequestSpec`: any supported resource or composition,
+not SQS alone. `Phase1Application` is the same class. The graph is
+`build_iac_workflow`. Trusted module directories cover every supported
+resource and composition.
 
 - `submit` invokes the compiled graph for a new request, using
   `workflow_config(request_id)` — for a secure valid request, the
@@ -131,7 +128,7 @@ app.get_state("req-001")  # -> WorkflowView, read-only
 - `get_state` only reads the current checkpoint (`graph.get_state`). It
   never executes a node, never resumes an interrupt, and never
   triggers a GitHub mutation — the same guarantee already proven at the
-  graph level in Batches 12-14.
+  graph level.
 
 ## `WorkflowView`: a bounded result, never a raw state dump
 
@@ -155,13 +152,15 @@ It deliberately excludes the workspace path, the GitHub token, raw
 Terraform plan JSON, raw Checkov data, exception objects, and any
 SQLite handle — `plan_summary` and `error` are the same already-safe,
 already-normalized domain objects (`PlanSummary`, `WorkflowError`)
-proven safe in earlier batches, not new raw data.
+already used by the workflow, not a raw plan or a raw scanner dump.
 
-## CLI (Batch 24), still no FastAPI
+## CLI and HTTP
 
-`Phase1Application`/`IacApplication` is the boundary a future FastAPI
-adapter would call — this project still adds no HTTP endpoints.
-Batch 24 adds a thin stdlib-`argparse` CLI instead:
+The HTTP API is a FastAPI adapter over `IntentResolutionService` and
+`IacApplication`. Its routes, operator secret, and capability rules are
+`docs/api.md`.
+
+The CLI is a thin stdlib-`argparse` client of the same boundary:
 
 ```
 iac-agent propose "<natural language request>" [--request-id ID]
@@ -181,36 +180,8 @@ Required environment variables (names only; see
 scope and privacy boundary. `scripts/live_github_smoke.py` remains a
 separate, one-off script — the CLI does not extend it.
 
-## Still no Terraform apply
+## No Terraform apply
 
-Nothing in this layer changes that: `TerraformRunner` still has no
-`apply` method, and a GitHub pull request remains Phase 1's terminal
-artifact.
-
-## Phase 2 note: this layer is still SQS-only (known naming debt)
-
-Batch 16 (Phase 2) generalized the graph layer
-(`iac_agent.graph.workflow.build_iac_workflow`, the `AWSResourceSpec`
-union) to support S3 alongside SQS, but deliberately did **not**
-generalize this composition layer in the same batch:
-`iac_agent.app.composition` still constructs `build_sqs_workflow` and a
-single SQS trusted-module path directly, and `Phase1Application.submit`
-still type-hints its `spec` parameter as `SQSResourceSpec`, not the
-`AWSResourceSpec` union. `Phase1Application`'s name is consequently
-potentially stale, but renaming it (to, say, `IacApplication`) without
-also widening `ApplicationConfig`'s single `terraform_module_path` to a
-per-resource-type mapping would be a rename in name only. This gap is
-tracked as explicit naming debt in `docs/roadmap.md` rather than
-rushed — revisit once a third resource type or the first real caller
-(FastAPI adapter, CLI) makes it unavoidable.
-
-## Live validation record
-
-`scripts/live_github_smoke.py` was run once, through
-`Phase1Application` end to end (`submit` → `resume(APPROVE)`), against
-the project's real repository. It reached `PR_CREATED` with a real,
-still-open pull request. See `docs/source-control.md` for the full
-record (request ID, branch convention, artifact-exclusion result). No
-AWS resource was ever created — the plan stayed credential-free — and
-`state.db` for that run was independently checked afterward to contain
-no token and no raw Terraform/Checkov JSON.
+`TerraformRunner` has no `apply` method and no `destroy` method. A
+GitHub pull request is the terminal artifact. See
+`docs/source-control.md`.
