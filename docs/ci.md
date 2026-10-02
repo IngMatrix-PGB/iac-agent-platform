@@ -1,6 +1,6 @@
 # Continuous integration
 
-`.github/workflows/ci.yml` runs on every pull request to `main` and every push to `main`. The jobs do not depend on each other.
+`.github/workflows/ci.yml` runs on every pull request to `main` and every push to `main`. The jobs do not depend on each other. Every job runs on `ubuntu-24.04`.
 
 ## Quality
 
