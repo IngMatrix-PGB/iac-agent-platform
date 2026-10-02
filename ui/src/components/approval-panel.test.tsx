@@ -43,6 +43,8 @@ describe("approval panel", () => {
     expect(
       screen.getByText("Reject sends immediately and does not ask for confirmation."),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toHaveClass("button-primary");
+    expect(screen.getByRole("button", { name: "Reject request" })).toHaveClass("button-secondary");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Approve" }));
     const dialog = screen.getByRole("dialog", {
@@ -50,6 +52,8 @@ describe("approval panel", () => {
     });
     expect(dialog).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Confirm approval" })).toHaveClass("button-primary");
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveClass("button-secondary");
     expect(decide).not.toHaveBeenCalled();
   });
 

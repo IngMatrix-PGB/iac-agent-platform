@@ -3,7 +3,7 @@ import { isUnauthenticated, type ApiClient, type ClientResult } from "../api/cli
 import { POLL_INTERVAL_MS, POLL_MAX_ATTEMPTS, shouldPoll } from "../api/polling";
 import type { RequestResponse } from "../api/types";
 import { ApprovalPanel } from "../components/approval-panel";
-import { ErrorBanner } from "../components/error-banner";
+import { ErrorBanner, noticeTone, type NoticeTone } from "../components/error-banner";
 import { Findings } from "../components/findings";
 import { PlanSummary } from "../components/plan-summary";
 import { RequestSummary } from "../components/request-summary";
@@ -13,13 +13,15 @@ export function RequestPage({
   client,
   requestId,
   onUnauthenticated,
+  onBack,
 }: {
   client: ApiClient;
   requestId: string;
   onUnauthenticated?: () => void;
+  onBack?: () => void;
 }) {
   const [body, setBody] = useState<RequestResponse | null>(null);
-  const [banner, setBanner] = useState<string | null>(null);
+  const [banner, setBanner] = useState<{ message: string; tone: NoticeTone } | null>(null);
   const [pollExhausted, setPollExhausted] = useState(false);
   const [seenId, setSeenId] = useState(requestId);
 
@@ -69,7 +71,7 @@ export function RequestPage({
         if (result.kind === "network") {
           stopped = true;
           window.clearInterval(timer);
-          setBanner(result.message);
+          setBanner({ message: result.message, tone: "error" });
           return;
         }
         if (result.kind === "success") {
@@ -88,7 +90,14 @@ export function RequestPage({
     };
   }, [client, onUnauthenticated, requestId, status]);
 
-  function applyRead(result: ClientResult) {
+  function noticeFor(result: Exclude<ClientResult, { kind: "success" }>): { message: string; tone: NoticeTone } {
+    if (result.kind === "network") {
+      return { message: result.message, tone: "error" };
+    }
+    return { message: result.message, tone: noticeTone(result.error) };
+  }
+
+function applyRead(result: ClientResult) {
     if (isUnauthenticated(result)) {
       onUnauthenticated?.();
       return;
@@ -100,11 +109,11 @@ export function RequestPage({
     }
     if (result.kind === "http" && result.request) {
       setBody(result.request);
-      setBanner(result.message);
+      setBanner(noticeFor(result));
       return;
     }
     setBody(null);
-    setBanner(result.message);
+    setBanner(noticeFor(result));
   }
 
   function onDecision(result: ClientResult) {
@@ -119,17 +128,27 @@ export function RequestPage({
     }
     if (result.kind === "http" && result.request) {
       setBody(result.request);
-      setBanner(result.message);
+      setBanner(noticeFor(result));
       return;
     }
-    setBanner(result.message);
+    setBanner(noticeFor(result));
   }
 
   const polling = shouldPoll(status) && !pollExhausted;
   return (
     <section aria-labelledby="request-review-heading">
-      <h2 id="request-review-heading">Request review</h2>
-      {banner ? <ErrorBanner message={banner} /> : null}
+      <p>
+        <a
+          href="/#requests"
+          onClick={(event) => {
+            event.preventDefault();
+            onBack?.();
+          }}
+        >
+          Requests
+        </a>
+      </p>
+      {banner ? <ErrorBanner message={banner.message} tone={banner.tone} /> : null}
       {!body && !banner ? <p role="status">Loading request.</p> : null}
       {polling ? <p role="status">Checking this request.</p> : null}
       {body ? (
@@ -137,7 +156,10 @@ export function RequestPage({
           <RequestSummary body={body} />
           <WorkflowStatus body={body} />
           <PlanSummary plan={body.workflow?.plan ?? null} />
-          <Findings findings={body.workflow?.findings ?? []} />
+          <Findings
+            findings={body.workflow?.findings ?? []}
+            workflowStatus={body.workflow?.workflow_status}
+          />
           <ApprovalPanel body={body} client={client} onResult={onDecision} />
         </>
       ) : null}

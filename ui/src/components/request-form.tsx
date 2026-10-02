@@ -24,7 +24,7 @@ export function RequestForm({
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
-      <button type="submit" disabled={busy}>
+      <button className="button-primary" type="submit" disabled={busy}>
         Submit request
       </button>
     </form>

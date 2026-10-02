@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { isUnauthenticated, type ApiClient, type ClientResult } from "../api/client";
 import type { RequestListItem, RequestResponse } from "../api/types";
-import { AuthoritativeValue } from "../components/authoritative-value";
-import { ErrorBanner } from "../components/error-banner";
+import { ErrorBanner, noticeTone, type NoticeTone } from "../components/error-banner";
 import { OpenRequest } from "../components/open-request";
 import { RequestForm } from "../components/request-form";
+import { chipClass, statusLabel } from "../components/status-label";
 
-const EMPTY_INDEX =
-  "No indexed requests. Checkpoints created before the durable request index may still be opened by request id even when they do not appear in Recent requests.";
+const EMPTY_COPY =
+  "No indexed requests. A checkpoint created before the durable index can still be opened by request id.";
 
 export function ComposePage({
   client,
@@ -20,12 +20,12 @@ export function ComposePage({
 }) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
-  const [banner, setBanner] = useState<string | null>(null);
+  const [banner, setBanner] = useState<{ message: string; tone: NoticeTone } | null>(null);
   const [unsaved, setUnsaved] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<RequestResponse | null>(null);
   const [recent, setRecent] = useState<RequestListItem[] | null>(null);
-  const [listError, setListError] = useState<string | null>(null);
+  const [listError, setListError] = useState<{ message: string; tone: NoticeTone } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,7 +43,11 @@ export function ComposePage({
         return;
       }
       setRecent(null);
-      setListError(result.message);
+      setListError(
+        result.kind === "network"
+          ? { message: result.message, tone: "error" }
+          : { message: result.message, tone: noticeTone(result.error) },
+      );
     });
     return () => {
       cancelled = true;
@@ -71,7 +75,10 @@ export function ComposePage({
       return;
     }
     if (result.kind === "network" || result.kind === "http") {
-      setBanner(result.message);
+      setBanner({
+        message: result.message,
+        tone: result.kind === "http" ? noticeTone(result.error) : "error",
+      });
       setUnsaved(result.kind === "http" && isInterpreterFailure(result.status));
       return;
     }
@@ -83,7 +90,7 @@ export function ComposePage({
   }
 
   return (
-    <section aria-labelledby="compose-heading">
+    <section id="compose" tabIndex={-1} aria-labelledby="compose-heading">
       <h2 id="compose-heading">New request</h2>
       <p>Describe the infrastructure. A durable workflow opens on its own page.</p>
       <RequestForm value={draft} busy={busy} onChange={setDraft} onSubmit={() => void submit()} />
@@ -91,7 +98,7 @@ export function ComposePage({
       <h3>Open a saved request</h3>
       <OpenRequest navigate={navigate} />
       {localError ? <p>{localError}</p> : null}
-      {banner ? <ErrorBanner message={banner} /> : null}
+      {banner ? <ErrorBanner message={banner.message} tone={banner.tone} /> : null}
       {unsaved ? <p>This request was not saved.</p> : null}
       {outcome ? <NonDurableOutcome body={outcome} /> : null}
     </section>
@@ -104,48 +111,42 @@ function RecentRequests({
   navigate,
 }: {
   rows: RequestListItem[] | null;
-  error: string | null;
+  error: { message: string; tone: NoticeTone } | null;
   navigate: (path: string) => void;
 }) {
   return (
-    <section className="recent-requests" aria-labelledby="recent-requests-heading">
+    <section id="requests" tabIndex={-1} className="recent-requests" aria-labelledby="recent-requests-heading">
       <h3 id="recent-requests-heading">Recent requests</h3>
-      {error ? <ErrorBanner message={error} /> : null}
-      {rows && rows.length === 0 ? <p>{EMPTY_INDEX}</p> : null}
+      {error ? <ErrorBanner message={error.message} tone={error.tone} /> : null}
+      {rows && rows.length === 0 ? <p>{EMPTY_COPY}</p> : null}
       {rows && rows.length > 0 ? (
         <ul>
           {rows.map((row) => {
             const path = `/requests/${encodeURIComponent(row.request_id)}`;
             return (
-              <li className="panel" key={row.request_id}>
-                <a
-                  href={path}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    navigate(path);
-                  }}
-                >
-                  {row.request_id}
-                </a>
-                <dl>
-                  <div>
-                    <dt>Created</dt>
-                    <dd>
-                      <code className="enum">{row.created_at}</code>
-                    </dd>
-                  </div>
-                  <AuthoritativeValue label="Workflow status" value={row.workflow_status} />
+              <li className="panel catalog-row" key={row.request_id} title={row.created_at}>
+                <div>
+                  <a
+                    href={path}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      navigate(path);
+                    }}
+                  >
+                    {row.name ?? row.request_id}
+                  </a>
+                  {row.name ? <p className="meta">{row.request_id}</p> : null}
+                </div>
+                <div>
+                  <span className={chipClass(row.workflow_status)} title={row.workflow_status}>
+                    {statusLabel(row.workflow_status)}
+                  </span>
                   {row.security_status ? (
-                    <AuthoritativeValue label="Security status" value={row.security_status} />
+                    <span className={chipClass(row.security_status)} title={row.security_status}>
+                      {statusLabel(row.security_status)}
+                    </span>
                   ) : null}
-                  {row.name ? (
-                    <div>
-                      <dt>Name</dt>
-                      <dd>{row.name}</dd>
-                    </div>
-                  ) : null}
-                </dl>
-                <p>{row.approval_available ? "Approval available" : "Approval not available"}</p>
+                </div>
               </li>
             );
           })}

@@ -54,29 +54,126 @@ describe("operator shell", () => {
     expect(screen.getByRole("textbox", { name: "Request id" })).toBeInTheDocument();
   });
 
-  it("uses a page heading for an unknown route", () => {
-    render(<App client={clientWith(vi.fn())} navigate={vi.fn()} pathname="/missing" />);
-    expect(screen.getByRole("heading", { level: 1, name: "IaC Agent Platform" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 2, name: "Page not found." })).toBeInTheDocument();
-    expect(screen.getByText("Local operator console. Review the server response before approving a request.")).toBeInTheDocument();
+  it("names the product and offers Compose and Requests", async () => {
+    const user = userEvent.setup();
+    render(<App client={clientWith(vi.fn())} navigate={vi.fn()} pathname="/" />);
+    expect(screen.getByRole("heading", { level: 1, name: "IaC Agent" })).toBeInTheDocument();
+    expect(screen.getByText("Infrastructure control plane")).toBeInTheDocument();
+    expect(screen.queryByText("Local operator console. Review the server response before approving a request.")).not.toBeInTheDocument();
+    const nav = screen.getByRole("navigation", { name: "Primary" });
+    expect(nav).toBeInTheDocument();
+    await continueAsOperator(user);
+    const compose = screen.getByRole("link", { name: "Compose" });
+    const requests = screen.getByRole("link", { name: "Requests" });
+    expect(compose).toHaveAttribute("href", "/#compose");
+    expect(requests).toHaveAttribute("href", "/#requests");
+    expect(compose).toHaveAttribute("aria-current", "page");
+    expect(requests).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("heading", { level: 2, name: "New request" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 3, name: "Recent requests" })).toBeInTheDocument();
   });
 
-  it("labels health and readiness without changing the sentences", async () => {
+  it("returns to the compose route from a review", async () => {
+    const user = userEvent.setup();
+    const navigate = vi.fn();
+    const client = clientWith(vi.fn());
+    client.getRequest = vi.fn().mockResolvedValue({ kind: "success", status: 200, body: awaiting() });
+    render(<App client={client} navigate={navigate} pathname="/requests/req-1" />);
+    await continueAsOperator(user);
+    expect(screen.getByRole("link", { name: "Compose" })).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("navigation", { name: "Primary" }).querySelector('[aria-current="page"]')).toBeNull();
+    expect(await screen.findByRole("heading", { level: 2, name: "order-events" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Request review" })).not.toBeInTheDocument();
+    const pageLink = screen
+      .getAllByRole("link", { name: "Requests" })
+      .find((link) => link.closest("nav") === null);
+    expect(pageLink).toHaveAttribute("href", "/#requests");
+    await user.click(pageLink!);
+    expect(navigate).toHaveBeenCalledWith("/");
+  });
+
+  it("describes runtime readiness without naming providers", async () => {
+    render(<App client={clientWith(vi.fn())} navigate={vi.fn()} pathname="/" />);
+    expect(await screen.findByText("Runtime ready")).toBeInTheDocument();
+    expect(screen.queryByText(/GitHub|OpenAI|capability/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("API process responded.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Application process is ready to accept requests.")).not.toBeInTheDocument();
+  });
+
+  it("does not treat a closed state plane as provider readiness", async () => {
+    const client = clientWith(vi.fn());
+    client.ready = vi.fn().mockResolvedValue({ kind: "success", httpStatus: 200, status: "not_ready" });
+    render(<App client={client} navigate={vi.fn()} pathname="/" />);
+    expect(await screen.findByText("Runtime not ready")).toBeInTheDocument();
+    expect(screen.queryByText("Runtime ready")).not.toBeInTheDocument();
+    expect(screen.queryByText(/GitHub|OpenAI|capability/i)).not.toBeInTheDocument();
+  });
+
+  it("does not treat a dead process as a closed state plane", async () => {
+    const client = clientWith(vi.fn());
+    client.health = vi.fn().mockResolvedValue({
+      kind: "network",
+      message: "The API could not be reached.",
+    });
+    render(<App client={client} navigate={vi.fn()} pathname="/" />);
+    expect(await screen.findByText("Runtime unreachable")).toBeInTheDocument();
+    expect(screen.queryByText("Runtime ready")).not.toBeInTheDocument();
+    expect(screen.queryByText("Runtime not ready")).not.toBeInTheDocument();
+    expect(screen.queryByText(/GitHub|OpenAI|capability/i)).not.toBeInTheDocument();
+  });
+
+  it("says the secret stays in tab memory and does not write storage", async () => {
+    const user = userEvent.setup();
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    render(<App client={clientWith(vi.fn())} navigate={vi.fn()} pathname="/" />);
+    expect(screen.getByLabelText("Operator secret")).toBeInTheDocument();
+    expect(
+      screen.getByText("This secret stays in this tab's memory. Reloading the page clears it."),
+    ).toBeInTheDocument();
+    await continueAsOperator(user);
+    expect(screen.getByRole("heading", { name: "New request" })).toBeInTheDocument();
+    expect(setItem).not.toHaveBeenCalled();
+    expect(document.cookie).toBe("");
+    setItem.mockRestore();
+  });
+
+  it("asks for the secret again on a fresh mount", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<App client={clientWith(vi.fn())} navigate={vi.fn()} pathname="/" />);
+    await continueAsOperator(user);
+    expect(screen.queryByLabelText("Operator secret")).not.toBeInTheDocument();
+    unmount();
+    render(<App client={clientWith(vi.fn())} navigate={vi.fn()} pathname="/" />);
+    expect(screen.getByLabelText("Operator secret")).toHaveValue("");
+  });
+
+  it("uses a page heading for an unknown route", async () => {
+    render(<App client={clientWith(vi.fn())} navigate={vi.fn()} pathname="/missing" />);
+    expect(screen.getByRole("heading", { level: 1, name: "IaC Agent" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Page not found." })).toBeInTheDocument();
+    expect(screen.queryByText("Local operator console. Review the server response before approving a request.")).not.toBeInTheDocument();
+    expect(await screen.findByText("Runtime ready")).toBeInTheDocument();
+  });
+
+  it("reports runtime readiness as one sentence", async () => {
     render(<App client={clientWith(vi.fn())} navigate={vi.fn()} pathname="/" />);
     expect(await screen.findByRole("region", { name: "Process status" })).toBeInTheDocument();
-    expect(screen.getAllByRole("term").map((term) => term.textContent)).toEqual(["API", "Readiness"]);
-    expect(screen.getByText("API process responded.")).toBeInTheDocument();
-    expect(screen.getByText("Application process is ready to accept requests.")).toBeInTheDocument();
+    expect(screen.getByText("Runtime ready")).toBeInTheDocument();
+    expect(screen.queryByRole("term", { name: "API" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("term", { name: "Readiness" })).not.toBeInTheDocument();
+    expect(screen.queryByText("API process responded.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Application process is ready to accept requests.")).not.toBeInTheDocument();
   });
 
   it("shows process health and an empty composer", async () => {
     const user = userEvent.setup();
     const submit = vi.fn();
     render(<App client={clientWith(submit)} navigate={vi.fn()} pathname="/" />);
-    expect(screen.getByRole("heading", { name: "IaC Agent Platform" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "IaC Agent" })).toBeInTheDocument();
     await continueAsOperator(user);
-    expect(await screen.findByText("API process responded.")).toBeInTheDocument();
-    expect(screen.getByText("Application process is ready to accept requests.")).toBeInTheDocument();
+    expect(await screen.findByText("Runtime ready")).toBeInTheDocument();
+    expect(screen.queryByText("API process responded.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Application process is ready to accept requests.")).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Infrastructure request" })).toBeInTheDocument();
   });
 
@@ -172,7 +269,10 @@ describe("operator shell", () => {
     await continueAsOperator(user);
     await user.type(screen.getByRole("textbox", { name: "Infrastructure request" }), "build a queue");
     await user.click(screen.getByRole("button", { name: "Submit request" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/^Invalid request\.$/);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/^Invalid request\.$/);
+    expect(alert).toHaveClass("notice-error");
+    expect(screen.queryByRole("heading", { name: "Workflow error" })).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Infrastructure request" })).toHaveValue("build a queue");
   });
 
@@ -186,7 +286,54 @@ describe("operator shell", () => {
     await continueAsOperator(user);
     await user.type(screen.getByRole("textbox", { name: "Infrastructure request" }), "build a queue");
     await user.click(screen.getByRole("button", { name: "Submit request" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("The API could not be reached.");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The API could not be reached.");
+    expect(alert).toHaveClass("notice-error");
+    expect(screen.queryByRole("heading", { name: "Workflow error" })).not.toBeInTheDocument();
+  });
+
+  it("shows a missing capability as configuration, not a workflow error", async () => {
+    const user = userEvent.setup();
+    const message =
+      "Intent interpretation is not configured. Set IAC_AGENT_LLM_PROVIDER, IAC_AGENT_LLM_MODEL, and OPENAI_API_KEY.";
+    const submit = vi.fn().mockResolvedValue({
+      kind: "http",
+      status: 503,
+      error: "capability_unavailable",
+      message,
+    });
+    const navigate = vi.fn();
+    render(<App client={clientWith(submit)} navigate={navigate} pathname="/" />);
+    await continueAsOperator(user);
+    await user.type(screen.getByRole("textbox", { name: "Infrastructure request" }), "build a queue");
+    await user.click(screen.getByRole("button", { name: "Submit request" }));
+    expect(await screen.findByRole("heading", { name: "Not configured" })).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(message);
+    expect(screen.getByRole("alert")).toHaveClass("notice-config");
+    expect(screen.getByText("This request was not saved.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Workflow error" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Infrastructure request" })).toHaveValue("build a queue");
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("shows a duplicate create without an approval-conflict heading", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn().mockResolvedValue({
+      kind: "http",
+      status: 409,
+      error: "request_exists",
+      message: "Request already exists.",
+    });
+    const navigate = vi.fn();
+    render(<App client={clientWith(submit)} navigate={navigate} pathname="/" />);
+    await continueAsOperator(user);
+    await user.type(screen.getByRole("textbox", { name: "Infrastructure request" }), "build a queue");
+    await user.click(screen.getByRole("button", { name: "Submit request" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveClass("notice-conflict");
+    expect(alert).toHaveTextContent("Request already exists.");
+    expect(screen.queryByRole("heading", { name: "Approval conflict" })).not.toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it("says an interpreter failure was not saved", async () => {
@@ -251,8 +398,8 @@ describe("operator shell", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "IaC Agent Platform" })).toBeInTheDocument();
-    expect(await screen.findByText("API process responded.")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "IaC Agent" })).toBeInTheDocument();
+    expect(await screen.findByText("Runtime ready")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Recent requests" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Request review" })).not.toBeInTheDocument();
     expect(screen.queryByText("Loading request.")).not.toBeInTheDocument();
@@ -283,15 +430,15 @@ describe("operator shell", () => {
     await user.type(screen.getByLabelText("Operator secret"), secret);
     await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(listRequests).toHaveBeenCalledOnce();
-    expect(await screen.findByRole("link", { name: "req-listed" })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: "orders" })).toHaveAttribute(
       "href",
       "/requests/req-listed",
     );
-    expect(screen.getByText("awaiting_approval")).toBeInTheDocument();
-    expect(screen.getByText("pass")).toBeInTheDocument();
-    expect(screen.getByText("Approval available")).toBeInTheDocument();
-    expect(screen.getByText("orders")).toBeInTheDocument();
-    expect(screen.getByText("2026-09-29T00:00:02.000000Z")).toBeInTheDocument();
+    expect(screen.getByText("req-listed").className).toContain("meta");
+    expect(screen.getAllByText("Awaiting approval")).toHaveLength(1);
+    expect(screen.getAllByText("Pass")).toHaveLength(1);
+    expect(screen.queryByText("Approval available")).not.toBeInTheDocument();
+    expect(screen.queryByText("2026-09-29T00:00:02.000000Z")).not.toBeInTheDocument();
     expect(screen.queryByText(secret)).not.toBeInTheDocument();
 
     listRequests.mockResolvedValue({

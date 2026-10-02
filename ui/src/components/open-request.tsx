@@ -20,7 +20,7 @@ export function OpenRequest({ navigate }: { navigate: (path: string) => void }) 
         value={requestId}
         onChange={(event) => setRequestId(event.target.value)}
       />
-      <button type="submit">Open request</button>
+      <button className="button-secondary" type="submit">Open request</button>
     </form>
   );
 }
