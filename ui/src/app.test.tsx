@@ -264,7 +264,10 @@ describe("operator shell", () => {
     await continueAsOperator(user);
     await user.type(screen.getByRole("textbox", { name: "Infrastructure request" }), "build a queue");
     await user.click(screen.getByRole("button", { name: "Submit request" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/^Invalid request\.$/);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/^Invalid request\.$/);
+    expect(alert).toHaveClass("notice-error");
+    expect(screen.queryByRole("heading", { name: "Workflow error" })).not.toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Infrastructure request" })).toHaveValue("build a queue");
   });
 
@@ -278,7 +281,54 @@ describe("operator shell", () => {
     await continueAsOperator(user);
     await user.type(screen.getByRole("textbox", { name: "Infrastructure request" }), "build a queue");
     await user.click(screen.getByRole("button", { name: "Submit request" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("The API could not be reached.");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The API could not be reached.");
+    expect(alert).toHaveClass("notice-error");
+    expect(screen.queryByRole("heading", { name: "Workflow error" })).not.toBeInTheDocument();
+  });
+
+  it("shows a missing capability as configuration, not a workflow error", async () => {
+    const user = userEvent.setup();
+    const message =
+      "Intent interpretation is not configured. Set IAC_AGENT_LLM_PROVIDER, IAC_AGENT_LLM_MODEL, and OPENAI_API_KEY.";
+    const submit = vi.fn().mockResolvedValue({
+      kind: "http",
+      status: 503,
+      error: "capability_unavailable",
+      message,
+    });
+    const navigate = vi.fn();
+    render(<App client={clientWith(submit)} navigate={navigate} pathname="/" />);
+    await continueAsOperator(user);
+    await user.type(screen.getByRole("textbox", { name: "Infrastructure request" }), "build a queue");
+    await user.click(screen.getByRole("button", { name: "Submit request" }));
+    expect(await screen.findByRole("heading", { name: "Not configured" })).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(message);
+    expect(screen.getByRole("alert")).toHaveClass("notice-config");
+    expect(screen.getByText("This request was not saved.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Workflow error" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Infrastructure request" })).toHaveValue("build a queue");
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("shows a duplicate create without an approval-conflict heading", async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn().mockResolvedValue({
+      kind: "http",
+      status: 409,
+      error: "request_exists",
+      message: "Request already exists.",
+    });
+    const navigate = vi.fn();
+    render(<App client={clientWith(submit)} navigate={navigate} pathname="/" />);
+    await continueAsOperator(user);
+    await user.type(screen.getByRole("textbox", { name: "Infrastructure request" }), "build a queue");
+    await user.click(screen.getByRole("button", { name: "Submit request" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveClass("notice-conflict");
+    expect(alert).toHaveTextContent("Request already exists.");
+    expect(screen.queryByRole("heading", { name: "Approval conflict" })).not.toBeInTheDocument();
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it("says an interpreter failure was not saved", async () => {

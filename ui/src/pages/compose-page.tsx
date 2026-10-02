@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { isUnauthenticated, type ApiClient, type ClientResult } from "../api/client";
 import type { RequestListItem, RequestResponse } from "../api/types";
-import { ErrorBanner } from "../components/error-banner";
+import { ErrorBanner, noticeTone, type NoticeTone } from "../components/error-banner";
 import { OpenRequest } from "../components/open-request";
 import { RequestForm } from "../components/request-form";
 import { chipClass, statusLabel } from "../components/status-label";
@@ -20,12 +20,12 @@ export function ComposePage({
 }) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
-  const [banner, setBanner] = useState<string | null>(null);
+  const [banner, setBanner] = useState<{ message: string; tone: NoticeTone } | null>(null);
   const [unsaved, setUnsaved] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<RequestResponse | null>(null);
   const [recent, setRecent] = useState<RequestListItem[] | null>(null);
-  const [listError, setListError] = useState<string | null>(null);
+  const [listError, setListError] = useState<{ message: string; tone: NoticeTone } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,7 +43,11 @@ export function ComposePage({
         return;
       }
       setRecent(null);
-      setListError(result.message);
+      setListError(
+        result.kind === "network"
+          ? { message: result.message, tone: "error" }
+          : { message: result.message, tone: noticeTone(result.error) },
+      );
     });
     return () => {
       cancelled = true;
@@ -71,7 +75,10 @@ export function ComposePage({
       return;
     }
     if (result.kind === "network" || result.kind === "http") {
-      setBanner(result.message);
+      setBanner({
+        message: result.message,
+        tone: result.kind === "http" ? noticeTone(result.error) : "error",
+      });
       setUnsaved(result.kind === "http" && isInterpreterFailure(result.status));
       return;
     }
@@ -91,7 +98,7 @@ export function ComposePage({
       <h3>Open a saved request</h3>
       <OpenRequest navigate={navigate} />
       {localError ? <p>{localError}</p> : null}
-      {banner ? <ErrorBanner message={banner} /> : null}
+      {banner ? <ErrorBanner message={banner.message} tone={banner.tone} /> : null}
       {unsaved ? <p>This request was not saved.</p> : null}
       {outcome ? <NonDurableOutcome body={outcome} /> : null}
     </section>
@@ -104,13 +111,13 @@ function RecentRequests({
   navigate,
 }: {
   rows: RequestListItem[] | null;
-  error: string | null;
+  error: { message: string; tone: NoticeTone } | null;
   navigate: (path: string) => void;
 }) {
   return (
     <section id="requests" tabIndex={-1} className="recent-requests" aria-labelledby="recent-requests-heading">
       <h3 id="recent-requests-heading">Recent requests</h3>
-      {error ? <ErrorBanner message={error} /> : null}
+      {error ? <ErrorBanner message={error.message} tone={error.tone} /> : null}
       {rows && rows.length === 0 ? <p>{EMPTY_COPY}</p> : null}
       {rows && rows.length > 0 ? (
         <ul>
