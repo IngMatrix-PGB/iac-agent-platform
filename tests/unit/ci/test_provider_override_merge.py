@@ -1,22 +1,12 @@
-"""Batch 25, Task 5 (redesigned — see commit message): prove the CI-owned
-override actually changes the *effective* provider configuration,
-without ever invoking the real `terraform` binary against a merged
-config that has the skip-flags disabled.
+"""Prove the CI-owned override changes the effective provider configuration
+without invoking Terraform.
 
-Why not a real_tool `terraform plan`: Terraform's AWS provider performs
-its own credential/account validation during `Configure()` — invoked
-for `validate`/`plan` alike — whenever `skip_credentials_validation`/
-`skip_requesting_account_id` are `false`. Running that against the
-real generated artifact, even with fake `AWS_ACCESS_KEY_ID=test`
-credentials, would make Terraform actually attempt a real network call
-to AWS's STS endpoint — a genuine AWS API reach, explicitly prohibited
-before Task 11/Gate C. Task 5 is therefore a deterministic, offline
-simulation of Terraform's own documented override-merge algorithm
-instead: for a `provider "aws" { ... }` block, an argument present in
-an override file completely replaces the corresponding argument in the
-original block; an argument the override omits is inherited unchanged.
-This is exactly the semantic tested here, on the real generated
-artifact's real text — never a live plan.
+Terraform's AWS provider validates credentials during Configure whenever
+the skip flags are false, including for validate and plan. This test
+therefore simulates Terraform's override-merge rule offline: an argument
+in an override file replaces that argument in the original provider
+block, and an omitted argument is inherited. The original block is an
+explicit fixture, not a published request.
 """
 
 from __future__ import annotations
@@ -24,7 +14,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-_GENERATED_MAIN_TF = Path("generated/req-20260926T215226Z/main.tf")
+_PROVIDER_FIXTURE = Path("tests/fixtures/provider_aws_skip_flags.tf")
 _OVERRIDE_TEMPLATE = Path("ci/aws_plan/provider_override.tf.template")
 
 _SKIP_FLAGS = (
@@ -58,10 +48,10 @@ def _provider_aws_arguments(text: str) -> dict[str, str]:
     return args
 
 
-def test_generated_artifact_still_has_every_skip_flag_true_unmodified():
-    """The real, committed artifact is untouched — proves this test
-    reads the actual PR content, not a hypothetical."""
-    args = _provider_aws_arguments(_GENERATED_MAIN_TF.read_text())
+def test_provider_fixture_still_has_every_skip_flag_true_unmodified():
+    """The fixture keeps the credential-free skip flags. The override
+    file is what turns them off."""
+    args = _provider_aws_arguments(_PROVIDER_FIXTURE.read_text())
     for flag in _SKIP_FLAGS:
         assert args[flag] == "true"
 
@@ -71,7 +61,7 @@ def test_override_merge_result_has_every_skip_flag_false():
     present in the override completely replace the original's — this
     is the effective configuration Terraform would actually plan with,
     computed without ever invoking the terraform binary."""
-    original = _provider_aws_arguments(_GENERATED_MAIN_TF.read_text())
+    original = _provider_aws_arguments(_PROVIDER_FIXTURE.read_text())
     override = _provider_aws_arguments(_OVERRIDE_TEMPLATE.read_text())
 
     effective = {**original, **override}  # override wins per Terraform's own merge rule
@@ -80,7 +70,7 @@ def test_override_merge_result_has_every_skip_flag_false():
         assert effective[flag] == "false", f"{flag} was not overridden"
 
 
-def test_override_does_not_touch_any_non_provider_resource_in_the_generated_artifact():
+def test_override_does_not_declare_a_resource_module_or_data_block():
     """The override only ever declares a provider "aws" block — it must
     never redeclare a resource/module/data block, which would make it
     generated infrastructure rather than execution-boundary config."""
