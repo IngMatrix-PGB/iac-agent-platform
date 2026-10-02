@@ -1,4 +1,4 @@
-"""Report-only Classify job records shards without gating other jobs."""
+"""Classify itself is ungated; Quality, Tests, and Tool Validation stay ungated."""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ def _classify_invocations(script: str) -> list[str]:
     return invocations
 
 
-def test_classify_job_always_runs_and_does_not_gate_others():
+def test_classify_itself_is_ungated_and_quality_tests_and_tool_validation_stay_ungated():
     jobs = _jobs()
     classify = jobs["classify"]
     assert classify["name"] == "Classify"
@@ -173,3 +173,27 @@ def test_bootstrap_validation_runs_credential_free_plan_when_classify_selects_or
     for key in _ABSENT_VALIDATION_JOBS:
         assert key not in jobs
     assert "if" not in jobs["frontend"]
+
+
+def test_checkov_pin_is_a_requirements_file():
+    pin = Path("ci/requirements-checkov.txt").read_text().strip()
+    assert pin == "checkov==3.3.13"
+    jobs = _jobs()
+    tool = jobs["tool-validation"]
+    assert "if" not in tool
+    setup = next(
+        step for step in tool["steps"] if step.get("uses", "").startswith("actions/setup-python@")
+    )
+    assert "ci/requirements-checkov.txt" in setup["with"]["cache-dependency-path"]
+    script = "\n".join(step.get("run", "") for step in tool["steps"])
+    assert "pip install -r ci/requirements-checkov.txt" in script
+    assert "pip install checkov==" not in script
+    assert "pytest -m real_tool" in script
+    bootstrap = jobs["bootstrap-validation"]
+    bootstrap_script = "\n".join(step.get("run", "") for step in bootstrap["steps"])
+    assert "checkov" not in bootstrap_script
+    assert "ci/requirements-checkov.txt" not in bootstrap_script
+    assert "pytest -m real_bootstrap_tool" in bootstrap_script
+    assert bootstrap["if"] == _BOOTSTRAP_IF
+    for key in _ABSENT_VALIDATION_JOBS:
+        assert key not in jobs

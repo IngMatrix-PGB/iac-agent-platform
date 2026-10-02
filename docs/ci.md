@@ -18,7 +18,7 @@ This is the deterministic suite, including the golden evals. It does not need cr
 
 ## Tool Validation
 
-`pytest -m real_tool` runs the same behavior against Terraform 1.16.1 and Checkov 3.3.13. It needs the public Terraform Registry and uses placeholder AWS credentials. It does not call a real AWS API. See `docs/terraform-credential-free-plan.md`. The job reports on every run and is not a required check.
+`pytest -m real_tool` runs the same behavior against Terraform 1.16.1 and Checkov 3.3.13. Tool Validation installs Checkov 3.3.13 from `ci/requirements-checkov.txt`. It needs the public Terraform Registry and uses placeholder AWS credentials. It does not call a real AWS API. See `docs/terraform-credential-free-plan.md`. The job reports on every run and is not a required check.
 
 ## Frontend
 

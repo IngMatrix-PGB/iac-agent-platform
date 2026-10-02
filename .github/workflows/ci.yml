@@ -93,6 +93,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            ci/requirements-checkov.txt
 
       - name: Install project (dev extras)
         run: pip install -e ".[dev]"
@@ -104,7 +107,7 @@ jobs:
           terraform_wrapper: false
 
       - name: Install Checkov 3.3.13
-        run: pip install checkov==3.3.13
+        run: pip install -r ci/requirements-checkov.txt
 
       - name: Run real-tool suite
         run: pytest -m real_tool
