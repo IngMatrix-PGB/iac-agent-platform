@@ -9,7 +9,9 @@ export function WorkflowStatus({ body }: { body: RequestResponse }) {
       <h3 id="workflow-heading">Workflow</h3>
       {workflow ? (
         <dl>
-          <AuthoritativeValue label="Workflow status" value={workflow.workflow_status} />
+          {workflow.workflow_status === "error" && workflow.error ? null : (
+            <AuthoritativeValue label="Workflow status" value={workflow.workflow_status} />
+          )}
           {workflow.current_stage ? (
             <AuthoritativeValue label="Stage" value={workflow.current_stage} />
           ) : null}
@@ -26,12 +28,15 @@ export function WorkflowStatus({ body }: { body: RequestResponse }) {
       ) : null}
       <p>Terraform apply was not executed.</p>
       {workflow?.error ? (
-        <dl>
-          {workflow.error.stage !== workflow.current_stage ? (
-            <AuthoritativeValue label="Error stage" value={workflow.error.stage} />
-          ) : null}
-          <AuthoritativeValue label="Error type" value={workflow.error.error_type} />
-        </dl>
+        <div className="notice-error" role="alert">
+          <h3>Workflow error</h3>
+          <dl>
+            {workflow.error.stage !== workflow.current_stage ? (
+              <AuthoritativeValue label="Error stage" value={workflow.error.stage} />
+            ) : null}
+            <AuthoritativeValue label="Error type" value={workflow.error.error_type} />
+          </dl>
+        </div>
       ) : null}
       {pullRequestUrl ? (
         <p>

@@ -156,7 +156,10 @@ function applyRead(result: ClientResult) {
           <RequestSummary body={body} />
           <WorkflowStatus body={body} />
           <PlanSummary plan={body.workflow?.plan ?? null} />
-          <Findings findings={body.workflow?.findings ?? []} />
+          <Findings
+            findings={body.workflow?.findings ?? []}
+            workflowStatus={body.workflow?.workflow_status}
+          />
           <ApprovalPanel body={body} client={client} onResult={onDecision} />
         </>
       ) : null}

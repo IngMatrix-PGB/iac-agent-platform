@@ -45,7 +45,10 @@ function Projection({ body }: { body: RequestResponse }) {
       <RequestSummary body={body} />
       <WorkflowStatus body={body} />
       <PlanSummary plan={body.workflow?.plan ?? null} />
-      <Findings findings={body.workflow?.findings ?? []} />
+      <Findings
+        findings={body.workflow?.findings ?? []}
+        workflowStatus={body.workflow?.workflow_status}
+      />
     </>
   );
 }
@@ -172,6 +175,33 @@ describe("request projection", () => {
     expect(screen.queryByText("arn:aws:sqs:us-east-1:123456789012:hidden")).not.toBeInTheDocument();
     expect(screen.queryByText("HIDDEN_FINDING_MESSAGE")).not.toBeInTheDocument();
     expect(screen.queryByText("123456789012")).not.toBeInTheDocument();
+  });
+
+  it("heads a durable workflow error once", () => {
+    const body: RequestResponse = {
+      ...posted,
+      outcome: "error",
+      approval_available: false,
+      workflow: {
+        ...posted.workflow!,
+        workflow_status: "error",
+        current_stage: "terraform",
+        security_status: null,
+        plan: null,
+        findings: [],
+        error: { stage: "terraform", error_type: "terraform_failed" },
+      },
+    };
+    render(<WorkflowStatus body={body} />);
+    expect(screen.getByRole("heading", { name: "Workflow error" })).toBeInTheDocument();
+    expect(screen.getAllByText("Terraform")).toHaveLength(1);
+    expect(screen.getByText("Terraform failed")).toBeInTheDocument();
+    expect(screen.getByTitle("terraform_failed")).toBeInTheDocument();
+    expect(screen.queryByText("terraform_failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("Error")).not.toBeInTheDocument();
+    expect(screen.queryByText("ERROR")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Traceback|Exception|checkpoint/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Not configured" })).not.toBeInTheDocument();
   });
 
   it("renders error stage and type without an error message", () => {

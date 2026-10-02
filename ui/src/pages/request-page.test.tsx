@@ -94,7 +94,11 @@ describe("request page", () => {
       message: "Request not found.",
     });
     render(<RequestPage client={clientReturning(getRequest)} requestId="req-missing" />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("Request not found.");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Request not found.");
+    expect(alert).toHaveClass("notice-missing");
+    expect(screen.queryByRole("heading", { name: "Workflow error" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Security findings" })).not.toBeInTheDocument();
     expect(screen.queryByText("pending")).not.toBeInTheDocument();
     expect(screen.queryByText("awaiting_approval")).not.toBeInTheDocument();
   });
@@ -105,7 +109,10 @@ describe("request page", () => {
       message: "The API could not be reached.",
     });
     render(<RequestPage client={clientReturning(getRequest)} requestId="req-1" />);
-    expect(await screen.findByRole("alert")).toHaveTextContent("The API could not be reached.");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("The API could not be reached.");
+    expect(alert).toHaveClass("notice-error");
+    expect(screen.queryByRole("heading", { name: "Workflow error" })).not.toBeInTheDocument();
     expect(screen.queryByText(/ECONNREFUSED/)).not.toBeInTheDocument();
   });
 
@@ -158,8 +165,11 @@ describe("request page", () => {
     render(<RequestPage client={clientReturning(getRequest, decide)} requestId="req-1" />);
     await user.click(await screen.findByRole("button", { name: "Approve" }));
     await user.click(screen.getByRole("button", { name: "Confirm approval" }));
-    expect(await screen.findByText("This request cannot accept that decision.")).toBeInTheDocument();
-    expect(screen.getAllByText("Rejected").length).toBeGreaterThan(0);
+    expect(await screen.findByRole("heading", { name: "Approval conflict" })).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveClass("notice-conflict");
+    expect(screen.getByText("This request cannot accept that decision.")).toBeInTheDocument();
+    expect(screen.getByText("Rejected")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Workflow error" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
   });
 
@@ -193,6 +203,71 @@ describe("request page", () => {
     vi.useRealTimers();
   });
 
+  it("shows a validation failure without a workflow heading", async () => {
+    const getRequest = vi.fn().mockResolvedValue({
+      kind: "http",
+      status: 400,
+      error: "invalid_request_id",
+      message: "Invalid request id.",
+    });
+    render(<RequestPage client={clientReturning(getRequest)} requestId="req-1" />);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveClass("notice-error");
+    expect(alert).toHaveTextContent("Invalid request id.");
+    expect(screen.queryByRole("heading", { name: "Workflow error" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Not configured" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a publishing capability failure distinct from a workflow error", async () => {
+    const user = userEvent.setup();
+    const message =
+      "Source-control publishing is not configured. Set GITHUB_OWNER, GITHUB_REPOSITORY, GITHUB_COMMIT_AUTHOR_NAME, GITHUB_COMMIT_AUTHOR_EMAIL, and GITHUB_TOKEN.";
+    const decide = vi.fn().mockResolvedValue({
+      kind: "http",
+      status: 503,
+      error: "capability_unavailable",
+      message,
+    } satisfies ClientResult);
+    const getRequest = vi.fn().mockResolvedValue({ kind: "success", status: 200, body: reloaded });
+    render(<RequestPage client={clientReturning(getRequest, decide)} requestId="req-1" />);
+    await user.click(await screen.findByRole("button", { name: "Approve" }));
+    await user.click(screen.getByRole("button", { name: "Confirm approval" }));
+    const alert = await screen.findByRole("alert");
+    expect(screen.getByRole("heading", { name: "Not configured" })).toBeInTheDocument();
+    expect(alert).toHaveClass("notice-config");
+    expect(alert).toHaveTextContent(message);
+    expect(screen.queryByRole("heading", { name: "Workflow error" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+  });
+
+  it("presents a failed stage as a workflow error without an empty findings table", async () => {
+    const failed: RequestResponse = {
+      ...reloaded,
+      outcome: "error",
+      approval_available: false,
+      workflow: {
+        ...reloaded.workflow!,
+        workflow_status: "error",
+        current_stage: "terraform",
+        security_status: null,
+        plan: null,
+        findings: [],
+        error: { stage: "terraform", error_type: "terraform_failed" },
+      },
+    };
+    const getRequest = vi.fn().mockResolvedValue({ kind: "success", status: 200, body: failed });
+    render(<RequestPage client={clientReturning(getRequest)} requestId="req-1" />);
+    expect(await screen.findByRole("heading", { name: "Workflow error" })).toBeInTheDocument();
+    expect(screen.getAllByText("Terraform")).toHaveLength(1);
+    expect(screen.getByText("Terraform failed")).toBeInTheDocument();
+    expect(screen.queryByText("terraform_failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("Error")).not.toBeInTheDocument();
+    expect(screen.queryByRole("table", { name: "Security findings" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Not configured" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Traceback|Exception/)).not.toBeInTheDocument();
+  });
+
   it("clears the in-memory secret when approval is unauthenticated", async () => {
     const user = userEvent.setup();
     const secret = "operator-secret-should-not-leak";
@@ -216,6 +291,7 @@ describe("request page", () => {
     expect(decide).toHaveBeenCalledTimes(1);
     expect(decide).toHaveBeenCalledWith("req-1", "approve");
     expect(await screen.findByLabelText("Operator secret")).toHaveValue("");
+    expect(screen.queryByRole("heading", { name: "Workflow error" })).not.toBeInTheDocument();
     expect(screen.queryByText(secret)).not.toBeInTheDocument();
     expect(screen.queryByText("Request not found.")).not.toBeInTheDocument();
     expect(screen.queryByText("rejected")).not.toBeInTheDocument();
