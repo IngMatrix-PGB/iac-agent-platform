@@ -121,3 +121,55 @@ def test_quality_tests_and_tool_validation_have_no_if():
     jobs = _jobs()
     for key in ("quality", "tests", "tool-validation", "frontend"):
         assert "if" not in jobs[key]
+
+
+_BOOTSTRAP_IF = (
+    "${{ !cancelled() && (needs.classify.result != 'success' "
+    "|| needs.classify.outputs.bootstrap == 'true') }}"
+)
+
+_ABSENT_VALIDATION_JOBS = (
+    "shard-s3",
+    "shard-sqs",
+    "shard-dynamodb",
+    "shard-ecr",
+    "shard-lambda",
+    "shard-api-gateway",
+    "shard-api-lambda",
+    "shard-api-lambda-dynamodb",
+    "shard-serverless-worker",
+    "shard-security",
+    "aws-plan",
+)
+
+_FORBIDDEN_CREDENTIAL_TEXT = (
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "id-token",
+    "aws-actions/configure-aws-credentials",
+)
+
+
+def test_bootstrap_validation_runs_credential_free_plan_when_classify_selects_or_fails():
+    jobs = _jobs()
+    job = jobs["bootstrap-validation"]
+    assert job["name"] == "Bootstrap Validation"
+    assert job["runs-on"] == "ubuntu-24.04"
+    assert job["needs"] == "classify"
+    assert job["if"] == _BOOTSTRAP_IF
+    assert "bootstrap/aws-oidc" not in job["if"]
+    assert "path" not in job["if"].lower()
+    script = "\n".join(step.get("run", "") for step in job["steps"])
+    assert "pytest -m real_bootstrap_tool" in script
+    assert "terraform apply" not in script
+    assert "terraform destroy" not in script
+    text = _text()
+    for secret in _FORBIDDEN_CREDENTIAL_TEXT:
+        assert secret not in text
+    tool = jobs["tool-validation"]
+    assert "if" not in tool
+    assert "pytest -m real_tool" in "\n".join(step.get("run", "") for step in tool["steps"])
+    for key in _ABSENT_VALIDATION_JOBS:
+        assert key not in jobs
+    assert "if" not in jobs["frontend"]

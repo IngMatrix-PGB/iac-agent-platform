@@ -1,6 +1,6 @@
 # Continuous integration
 
-`.github/workflows/ci.yml` runs on every pull request to `main` and every push to `main`. The jobs do not depend on each other. Every job runs on `ubuntu-24.04`.
+`.github/workflows/ci.yml` runs on every pull request to `main` and every push to `main`. Quality, Tests, Tool Validation, Frontend, and Classify do not depend on each other. Bootstrap Validation depends on Classify. Every job runs on `ubuntu-24.04`.
 
 ## Quality
 
@@ -26,7 +26,11 @@ In `ui/`: `npm ci`, `npm test`, and `npm run build`. The job is not a required c
 
 ## Classify
 
-`Classify` always runs. It writes a step summary and records which validation shards a diff would select. It does not skip any job. Tool Validation still runs the full real-tool suite (`pytest -m real_tool`).
+`Classify` always runs. It writes a step summary and records which validation shards a diff would select. Tool Validation still runs the full real-tool suite (`pytest -m real_tool`) and remains unconditional.
+
+## Bootstrap Validation
+
+Bootstrap Validation runs `pytest -m real_bootstrap_tool` when Classify selects bootstrap, or when Classify itself fails. It is the existing credential-free plan test. It does not call AWS and does not change the module. Tool Validation remains unconditional.
 
 ## What CI never does
 
@@ -39,6 +43,7 @@ ruff check .
 terraform fmt -check -recursive -diff terraform/ tests/terraform/
 pytest -m "not real_tool and not real_llm and not docker"
 pytest -m real_tool
+pytest -m real_bootstrap_tool
 ```
 
 Frontend: `npm ci && npm test && npm run build` from `ui/`.
