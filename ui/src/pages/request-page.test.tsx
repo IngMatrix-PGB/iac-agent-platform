@@ -69,8 +69,8 @@ describe("request page", () => {
     expect(screen.queryByText("Outcome")).not.toBeInTheDocument();
     expect(screen.queryByText("Approval available")).not.toBeInTheDocument();
     expect(screen.queryByText("serverless_worker")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Reject request" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toHaveClass("button-primary");
+    expect(screen.getByRole("button", { name: "Reject request" })).toHaveClass("button-secondary");
     expect(getRequest).toHaveBeenCalledWith("req-1");
   });
 

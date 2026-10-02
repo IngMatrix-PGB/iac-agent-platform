@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { FindingDTO, RequestResponse } from "../api/types";
+import { ApprovalPanel } from "./approval-panel";
 import { Findings } from "./findings";
 import { PlanSummary } from "./plan-summary";
 import { RequestSummary } from "./request-summary";
@@ -216,6 +217,116 @@ describe("request projection", () => {
     expect(link).toHaveAttribute("href", "https://example.invalid/pull/7");
     expect(screen.queryByText("branch")).not.toBeInTheDocument();
     expect(screen.queryByText("base_branch")).not.toBeInTheDocument();
+  });
+
+  it("says a warning can still reach a person", () => {
+    render(<WorkflowStatus body={posted} />);
+    expect(screen.getByText("Warn")).toBeInTheDocument();
+    expect(screen.getByText("Warnings still go to human review.")).toBeInTheDocument();
+    expect(screen.queryByText("Approval is closed.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Pass")).not.toBeInTheDocument();
+  });
+
+  it("keeps a pass open for a person without calling it published", () => {
+    const passed: RequestResponse = {
+      ...posted,
+      workflow: { ...posted.workflow!, security_status: "pass" },
+    };
+    render(
+      <>
+        <WorkflowStatus body={passed} />
+        <ApprovalPanel body={passed} client={{} as never} onResult={vi.fn()} />
+      </>,
+    );
+    expect(screen.getByText("Pass")).toBeInTheDocument();
+    expect(screen.getByText("Awaiting approval")).toBeInTheDocument();
+    expect(screen.queryByText("Warnings still go to human review.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Approval is closed.")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Terraform apply was not executed.")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reject request" })).toBeInTheDocument();
+  });
+
+  it("closes approval on a block without offering a decision", () => {
+    const blocked: RequestResponse = {
+      ...posted,
+      outcome: "blocked",
+      approval_available: false,
+      workflow: {
+        ...posted.workflow!,
+        workflow_status: "blocked",
+        security_status: "block",
+      },
+    };
+    render(
+      <>
+        <WorkflowStatus body={blocked} />
+        <ApprovalPanel body={blocked} client={{} as never} onResult={vi.fn()} />
+      </>,
+    );
+    expect(screen.getByText("Block")).toBeInTheDocument();
+    expect(screen.getByText("Approval is closed.")).toBeInTheDocument();
+    expect(screen.queryByText("Warnings still go to human review.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reject request" })).not.toBeInTheDocument();
+  });
+
+  it("shows a rejection as a completed decision, not a block", () => {
+    const rejected: RequestResponse = {
+      ...posted,
+      outcome: "rejected",
+      approval_available: false,
+      workflow: {
+        ...posted.workflow!,
+        workflow_status: "rejected",
+        security_status: "pass",
+        approval_decision: "reject",
+      },
+    };
+    render(
+      <>
+        <WorkflowStatus body={rejected} />
+        <ApprovalPanel body={rejected} client={{} as never} onResult={vi.fn()} />
+      </>,
+    );
+    expect(screen.getByText("Rejected")).toBeInTheDocument();
+    expect(screen.getByText("Pass")).toBeInTheDocument();
+    expect(screen.queryByText("Approval is closed.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Block")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Workflow error" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Not configured" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a destructive plan separate from a security block", () => {
+    render(
+      <>
+        <PlanSummary plan={posted.workflow?.plan ?? null} />
+        <ApprovalPanel body={posted} client={{} as never} onResult={vi.fn()} />
+      </>,
+    );
+    expect(screen.getByText("Destructive change detected.")).toBeInTheDocument();
+    expect(screen.queryByText("Approval is closed.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+  });
+
+  it("places the pull request with the no-apply sentence", () => {
+    const published: RequestResponse = {
+      ...posted,
+      approval_available: false,
+      workflow: {
+        ...posted.workflow!,
+        workflow_status: "pr_created",
+        security_status: "pass",
+        pull_request: { url: "https://example.invalid/pull/7" },
+      },
+    };
+    render(<WorkflowStatus body={published} />);
+    expect(screen.getByText("Pull request created")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "https://example.invalid/pull/7" })).toBeInTheDocument();
+    expect(screen.getAllByText("Terraform apply was not executed.")).toHaveLength(1);
+    expect(screen.queryByText("Warnings still go to human review.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
   });
 
   it("does not render internal sentinels stuffed beside the public body", () => {

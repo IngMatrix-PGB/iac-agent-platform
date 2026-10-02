@@ -56,19 +56,43 @@ export function ApprovalPanel({
     <section className="panel decision" aria-labelledby="approval-heading" aria-busy={busy}>
       <h3 id="approval-heading">Approval decision</h3>
       <p>Reject sends immediately and does not ask for confirmation.</p>
-      <button ref={approveRef} type="button" disabled={busy} onClick={() => setOpen(true)}>
-        Approve
-      </button>
-      <button type="button" disabled={busy} onClick={() => void decide("reject")}>
-        Reject request
-      </button>
+      <div className="approval-actions">
+        <button
+          ref={approveRef}
+          className="button-primary"
+          type="button"
+          disabled={busy}
+          onClick={() => setOpen(true)}
+        >
+          Approve
+        </button>
+        <button
+          className="button-secondary"
+          type="button"
+          disabled={busy}
+          onClick={() => void decide("reject")}
+        >
+          Reject request
+        </button>
+      </div>
       {open ? (
         <dialog ref={dialogRef} aria-labelledby="approve-confirm-title">
           <p id="approve-confirm-title">{CONFIRM_TEXT}</p>
-          <button type="button" data-dialog-initial-focus disabled={busy} onClick={cancel}>
+          <button
+            className="button-secondary"
+            type="button"
+            data-dialog-initial-focus
+            disabled={busy}
+            onClick={cancel}
+          >
             Cancel
           </button>
-          <button type="button" disabled={busy} onClick={() => void decide("approve")}>
+          <button
+            className="button-primary"
+            type="button"
+            disabled={busy}
+            onClick={() => void decide("approve")}
+          >
             Confirm approval
           </button>
         </dialog>

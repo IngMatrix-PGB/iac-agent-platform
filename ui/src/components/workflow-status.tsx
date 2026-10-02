@@ -5,7 +5,7 @@ export function WorkflowStatus({ body }: { body: RequestResponse }) {
   const workflow = body.workflow;
   const pullRequestUrl = workflow?.pull_request?.url;
   return (
-    <section className="panel" aria-labelledby="workflow-heading">
+    <section className="panel status-cluster" aria-labelledby="workflow-heading">
       <h3 id="workflow-heading">Workflow</h3>
       {workflow ? (
         <dl>
@@ -17,6 +17,12 @@ export function WorkflowStatus({ body }: { body: RequestResponse }) {
             <AuthoritativeValue label="Security status" value={workflow.security_status} />
           ) : null}
         </dl>
+      ) : null}
+      {workflow?.security_status === "warn" && body.approval_available ? (
+        <p>Warnings still go to human review.</p>
+      ) : null}
+      {workflow?.security_status === "block" || workflow?.workflow_status === "blocked" ? (
+        <p>Approval is closed.</p>
       ) : null}
       <p>Terraform apply was not executed.</p>
       {workflow?.error ? (
