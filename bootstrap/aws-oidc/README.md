@@ -1,4 +1,4 @@
-# Bootstrap: GitHub OIDC provider + IaCPlanRole (Batch 25)
+# Bootstrap: IaCPlanRole
 
 This module is **never applied by iac-agent-platform**. It is
 human-applied reference source only — no code under `src/`, no CI
@@ -11,19 +11,23 @@ value (`AWS_PLAN_ROLE_ARN`).
 The agent must never control the authority boundary that constrains it.
 See `docs/aws-plan-boundary.md`.
 
+The GitHub Actions OIDC provider is an account-level prerequisite. It
+must already exist for `https://token.actions.githubusercontent.com`.
+This module does not create that provider. It reads the existing
+provider and creates only `IaCPlanRole` and its inline permissions
+policy.
+
 ## Before applying
 
-1. This repository's `sub` claim is the exact subject in
-   `docs/aws-plan-boundary.md`: the immutable-format
-   `repo:IngMatrix-PGB@167713460/iac-agent-platform@1368782253:pull_request`
-   — never the legacy `repo:IngMatrix-PGB/iac-agent-platform:pull_request`
-   shape (this repository was created after GitHub's 2026-07-15
-   immutable-subject cutover, so the legacy shape never applied to it).
-   If this module is ever reused for a **different** repository, do
-   not reuse this value — repeat the discovery runbook for that
-   repository instead.
-2. Verify AWS's current guidance for the GitHub Actions OIDC provider
-   thumbprint(s) at apply time (this has changed before).
+The role trusts one exact `sub` claim, documented in
+`docs/aws-plan-boundary.md`:
+
+```text
+repo:IngMatrix-PGB@167713460/iac-agent-platform@1368782253:pull_request
+```
+
+The audience condition is `sts.amazonaws.com`. Both conditions are
+`StringEquals`. A different repository must use its own subject.
 
 ## Applying (by a human, from their own machine or a separate bootstrap
 pipeline — never from this repository's CI)
@@ -33,8 +37,7 @@ cd bootstrap/aws-oidc
 terraform init
 terraform plan \
   -var "aws_region=us-east-1" \
-  -var "github_oidc_subject=repo:IngMatrix-PGB@167713460/iac-agent-platform@1368782253:pull_request" \
-  -var 'github_oidc_thumbprints=["<current AWS/GitHub guidance>"]'
+  -var "github_oidc_subject=repo:IngMatrix-PGB@167713460/iac-agent-platform@1368782253:pull_request"
 terraform apply   # same -var flags
 ```
 
@@ -44,11 +47,9 @@ not sensitive) in `iac-agent-platform`'s GitHub repository settings.
 
 ## Extending the permissions policy
 
-`policy/iac_plan_role_permissions.json` starts at the empirical
-minimum (`sts:GetCallerIdentity` only). Follow the discovery loop in
-the design spec (§8) and the implementation plan (Task 14) exactly:
-one `AccessDenied` at a time, one action added per commit, each with a
-written justification — never a bulk grant, never
-`AdministratorAccess`/`PowerUserAccess`/persistent `ReadOnlyAccess`.
-After editing the policy file here, re-apply this module (`terraform
-apply` again, same as above) for the change to take effect in AWS.
+`policy/iac_plan_role_permissions.json` starts at `sts:GetCallerIdentity`
+only. Add one action per change, after a real plan reports
+`AccessDenied` for that action, with a written justification. Do not
+grant `AdministratorAccess`, `PowerUserAccess`, or a standing
+`ReadOnlyAccess`. After editing the policy file here, a human re-applies
+this module for the change to take effect in AWS.

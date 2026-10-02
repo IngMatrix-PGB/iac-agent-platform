@@ -14,15 +14,6 @@ variable "github_oidc_subject" {
   EOT
 }
 
-variable "github_oidc_thumbprints" {
-  type        = list(string)
-  description = <<-EOT
-    GitHub Actions OIDC provider thumbprint(s) — verify current
-    AWS/GitHub guidance at apply time (design spec §6); do not assume
-    this module's authoring-date values remain correct.
-  EOT
-}
-
 variable "iac_plan_role_name" {
   type        = string
   default     = "IaCPlanRole"

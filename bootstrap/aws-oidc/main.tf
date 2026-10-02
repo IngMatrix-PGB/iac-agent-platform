@@ -1,4 +1,5 @@
-# Bootstrap Terraform — GitHub OIDC provider + IaCPlanRole (Batch 25).
+# Bootstrap Terraform — IaCPlanRole trusted to the account's existing
+# GitHub Actions OIDC provider. This module does not create that provider.
 #
 # This module is NEVER applied by iac-agent-platform. It is human-
 # applied reference source only — see README.md in this directory.
@@ -17,7 +18,7 @@ data "aws_iam_policy_document" "github_actions_assume_role" {
 
     principals {
       type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.github_actions.arn]
+      identifiers = [data.aws_iam_openid_connect_provider.github_actions.arn]
     }
 
     condition {
@@ -34,10 +35,8 @@ data "aws_iam_policy_document" "github_actions_assume_role" {
   }
 }
 
-resource "aws_iam_openid_connect_provider" "github_actions" {
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = var.github_oidc_thumbprints
+data "aws_iam_openid_connect_provider" "github_actions" {
+  url = "https://token.actions.githubusercontent.com"
 }
 
 resource "aws_iam_role" "iac_plan_role" {

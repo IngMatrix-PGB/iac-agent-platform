@@ -1,32 +1,20 @@
-"""Batch 25, Task 10 (Gate B): real Terraform `fmt/init/validate/plan`
-against `bootstrap/aws-oidc/` — still fully credential-free.
+"""Credential-free Terraform fmt/init/validate/plan for bootstrap/aws-oidc/.
 
-`bootstrap/aws-oidc/main.tf`'s own `provider "aws" {}` block
-deliberately has NO skip-flags (unlike every renderer-generated
-artifact) — a human doing the real, one-time apply needs genuine
-credential validation, not a permanently-neutered provider. This test
-therefore supplies its own disposable, test-owned override file in a
-`tmp_path` copy of the module — never touching the real
-`bootstrap/aws-oidc/` files on disk — exactly mirroring the same
-credential-free-plan technique this repo already uses everywhere else
-(skip-flags + placeholder env vars), scoped to this one test run only.
-Variable values are supplied via `TF_VAR_*` environment variables
-(through `env_overrides`) since `TerraformRunner.plan()` has no
-CLI-arg-injection parameter — never a production-code change.
+The module provider block has no skip flags, because a human apply must
+validate real credentials. This test copies the module and adds a
+disposable provider override in that copy only.
 
-New-resource plans need no AWS read (design spec §0.2) — this applies
-equally to the OIDC-provider/role resources here, which are also
-entirely new; there is no backend, no prior state to refresh.
-
-`fmt`/`init`/`validate`/`plan` all raise `TerraformCommandError` on a
-non-zero exit (`TerraformRunner._run_checked`) rather than returning a
-failed `CommandResult` — success in this test is proven by NOT
-raising, not by inspecting a returncode.
+The plan reads the existing GitHub OIDC provider. A direct `terraform
+plan` would call AWS. `terraform test` overrides that one data source,
+so the plan stays credential-free and still renders the module's trust
+policy and managed resources.
 """
 
 from __future__ import annotations
 
+import os
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -43,11 +31,45 @@ _PLAN_ENV_OVERRIDES = {
     # repository was created 2026-09-13, after GitHub's 2026-07-15
     # immutable-subject cutover, so the legacy `owner/repo` shape never
     # applied here).
+    "AWS_EC2_METADATA_DISABLED": "true",
     "TF_VAR_github_oidc_subject": (
         "repo:IngMatrix-PGB@167713460/iac-agent-platform@1368782253:pull_request"
     ),
-    "TF_VAR_github_oidc_thumbprints": '["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]',
 }
+
+_OIDC_SUBJECT = "repo:IngMatrix-PGB@167713460/iac-agent-platform@1368782253:pull_request"
+_EXISTING_PROVIDER_ARN = (
+    "arn:aws:iam::000000000000:oidc-provider/token.actions.githubusercontent.com"
+)
+
+_PLAN_TEST = f"""\
+variables {{
+  aws_region          = "us-east-1"
+  github_oidc_subject = "{_OIDC_SUBJECT}"
+}}
+
+run "plan_creates_only_the_role_and_inline_policy" {{
+  command = plan
+
+  override_data {{
+    target = data.aws_iam_openid_connect_provider.github_actions
+    values = {{
+      arn = "{_EXISTING_PROVIDER_ARN}"
+      url = "https://token.actions.githubusercontent.com"
+    }}
+  }}
+
+  assert {{
+    condition     = aws_iam_role.iac_plan_role.name == "IaCPlanRole"
+    error_message = "IaCPlanRole was not planned."
+  }}
+
+  assert {{
+    condition     = aws_iam_role_policy.iac_plan_role_permissions.name == "IaCPlanRole-permissions"
+    error_message = "inline permissions policy was not planned."
+  }}
+}}
+"""
 
 _TEST_OWNED_OVERRIDE = """\
 provider "aws" {
@@ -70,6 +92,9 @@ def _copy_bootstrap_module(tmp_path: Path) -> Path:
     workspace = tmp_path / "aws-oidc"
     shutil.copytree(_BOOTSTRAP_SOURCE, workspace)
     (workspace / "zz_test_override.tf").write_text(_TEST_OWNED_OVERRIDE)
+    test_dir = workspace / "tests"
+    test_dir.mkdir()
+    (test_dir / "plan.tftest.hcl").write_text(_PLAN_TEST)
     return workspace
 
 
@@ -83,21 +108,31 @@ def test_bootstrap_module_plans_exactly_the_expected_new_resources(tmp_path):
 
     runner.init(workspace, env_overrides=_PLAN_ENV_OVERRIDES)
     runner.validate(workspace, env_overrides=_PLAN_ENV_OVERRIDES)
-    runner.plan(workspace, env_overrides=_PLAN_ENV_OVERRIDES)
 
-    plan_json = runner.show_json(workspace)
-    changes = plan_json["resource_changes"]
+    env = {key: os.environ[key] for key in ("PATH", "HOME") if key in os.environ}
+    env.update(_PLAN_ENV_OVERRIDES)
+    completed = subprocess.run(
+        ["terraform", "test", "-verbose", "-no-color"],
+        cwd=workspace,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    plan_text = completed.stdout + completed.stderr
+    assert completed.returncode == 0, plan_text
 
-    # `resource_changes` includes both managed resources and the local
-    # `data "aws_iam_policy_document"` read (mode="data") — only the
-    # managed ones represent real infrastructure this plan would create.
-    managed = [c for c in changes if c["mode"] == "managed"]
-    managed_types = {c["type"] for c in managed}
-    assert managed_types == {
-        "aws_iam_openid_connect_provider",
-        "aws_iam_role",
-        "aws_iam_role_policy",
-    }
-    for change in managed:
-        address = change["address"]
-        assert change["change"]["actions"] == ["create"], f"{address} is not a plain create"
+    assert '+ resource "aws_iam_role" "iac_plan_role"' in plan_text
+    assert '+ resource "aws_iam_role_policy" "iac_plan_role_permissions"' in plan_text
+    assert "aws_iam_openid_connect_provider" not in plan_text
+    assert "Plan: 2 to add, 0 to change, 0 to destroy." in plan_text
+    assert "will be destroyed" not in plan_text
+    assert "will be updated" not in plan_text
+    assert "sts:AssumeRoleWithWebIdentity" in plan_text
+    assert "StringEquals" in plan_text
+    assert "StringLike" not in plan_text
+    assert "token.actions.githubusercontent.com:aud" in plan_text
+    assert "sts.amazonaws.com" in plan_text
+    assert _OIDC_SUBJECT in plan_text
+    assert _EXISTING_PROVIDER_ARN in plan_text
+    assert "sts:GetCallerIdentity" in plan_text

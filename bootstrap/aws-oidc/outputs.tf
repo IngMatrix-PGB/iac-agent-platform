@@ -4,6 +4,6 @@ output "iac_plan_role_arn" {
 }
 
 output "github_oidc_provider_arn" {
-  value       = aws_iam_openid_connect_provider.github_actions.arn
-  description = "Non-secret. Reference only."
+  value       = data.aws_iam_openid_connect_provider.github_actions.arn
+  description = "Non-secret. The existing account-level GitHub OIDC provider. This module does not create it."
 }
