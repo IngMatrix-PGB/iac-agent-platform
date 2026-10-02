@@ -7,6 +7,28 @@
   --color-focus: #1d4ed8;
   --color-danger-text: #7f1d1d;
   --color-danger-border: #b91c1c;
+  --color-status-pass-text: #14532d;
+  --color-status-pass-surface: #dcfce7;
+  --color-status-warn-text: #78350f;
+  --color-status-warn-surface: #fef3c7;
+  --color-status-block-text: #7f1d1d;
+  --color-status-block-surface: #fee2e2;
+  --color-status-attention-text: #1e3a8a;
+  --color-status-attention-surface: #dbeafe;
+  --color-status-published-text: #312e81;
+  --color-status-published-surface: #e0e7ff;
+  --color-status-neutral-text: #44403c;
+  --color-status-neutral-surface: #f5f5f4;
+  --color-status-rejected-text: #292524;
+  --color-status-rejected-surface: #e7e5e4;
+  --color-notice-config-text: #78350f;
+  --color-notice-config-border: #d97706;
+  --color-notice-error-text: #1c1917;
+  --color-notice-error-border: #44403c;
+  --color-notice-conflict-text: #1e3a8a;
+  --color-notice-conflict-border: #1d4ed8;
+  --color-notice-missing-text: #44403c;
+  --color-notice-missing-border: #a8a29e;
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -221,4 +243,160 @@ dialog {
 
 dialog p {
   margin-top: 0;
+}
+
+.product-kicker {
+  margin: 0 0 var(--space-3);
+  color: var(--color-muted);
+}
+
+.meta {
+  margin: 0 0 var(--space-3);
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+}
+
+.chip {
+  display: inline-block;
+  margin: 0 var(--space-2) var(--space-2) 0;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid transparent;
+  font-weight: 650;
+}
+
+.chip-pass {
+  color: var(--color-status-pass-text);
+  background: var(--color-status-pass-surface);
+}
+
+.chip-warn {
+  color: var(--color-status-warn-text);
+  background: var(--color-status-warn-surface);
+}
+
+.chip-block {
+  color: var(--color-status-block-text);
+  background: var(--color-status-block-surface);
+}
+
+.chip-attention {
+  color: var(--color-status-attention-text);
+  background: var(--color-status-attention-surface);
+}
+
+.chip-published {
+  color: var(--color-status-published-text);
+  background: var(--color-status-published-surface);
+}
+
+.chip-neutral {
+  color: var(--color-status-neutral-text);
+  background: var(--color-status-neutral-surface);
+}
+
+.chip-rejected {
+  color: var(--color-status-rejected-text);
+  background: var(--color-status-rejected-surface);
+  border-color: var(--color-status-rejected-text);
+}
+
+.chip-error {
+  color: var(--color-notice-error-text);
+  background: var(--color-panel);
+  border-color: var(--color-notice-error-border);
+}
+
+.button-primary {
+  border-color: var(--color-text);
+  background: var(--color-text);
+  color: var(--color-surface);
+}
+
+.button-secondary {
+  border-color: var(--color-border);
+  background: var(--color-panel);
+  color: var(--color-text);
+}
+
+.notice-config,
+.notice-error,
+.notice-conflict,
+.notice-missing {
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-panel);
+}
+
+.notice-config {
+  border: 1px solid var(--color-notice-config-border);
+  color: var(--color-notice-config-text);
+}
+
+.notice-error {
+  border: 1px solid var(--color-notice-error-border);
+  color: var(--color-notice-error-text);
+}
+
+.notice-conflict {
+  border: 1px solid var(--color-notice-conflict-border);
+  color: var(--color-notice-conflict-text);
+}
+
+.notice-missing {
+  border: 1px solid var(--color-notice-missing-border);
+  color: var(--color-notice-missing-text);
+}
+
+.shell-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: end;
+  justify-content: space-between;
+}
+
+.shell-nav {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.catalog-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.finding-stack {
+  display: none;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 40rem) {
+  .shell-bar,
+  .approval-actions {
+    display: block;
+  }
+
+  .approval-actions button {
+    display: block;
+    width: 100%;
+  }
+
+  .findings-table {
+    display: none;
+  }
+
+  .finding-stack {
+    display: block;
+  }
 }
