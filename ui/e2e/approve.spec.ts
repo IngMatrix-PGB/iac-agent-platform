@@ -13,7 +13,7 @@ test("approve publishes the pull request url", async ({ page }) => {
     }
   });
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1, name: "IaC Agent Platform" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "IaC Agent" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Process status" })).toBeVisible();
   await continueAsOperator(page);
   await expect(page.getByRole("heading", { name: "New request" })).toBeVisible();

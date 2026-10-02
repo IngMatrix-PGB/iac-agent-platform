@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ApiClient } from "./api/client";
 import { HealthIndicator } from "./components/health-indicator";
 import { ComposePage } from "./pages/compose-page";
@@ -26,12 +26,53 @@ export function App({
     return createClient ? createClient(secret) : client;
   }, [client, createClient, secret]);
   const clearSecret = useCallback(() => setSecret(null), []);
+  const [focusId, setFocusId] = useState<"compose" | "requests" | null>(null);
+
+  function openRegion(id: "compose" | "requests") {
+    if (route.name !== "compose") {
+      navigate("/");
+    }
+    setFocusId(id);
+  }
+
+  useEffect(() => {
+    if (focusId === null || operatorClient === null) {
+      return;
+    }
+    document.getElementById(focusId)?.focus();
+    setFocusId(null);
+  }, [focusId, operatorClient, route.name]);
 
   return (
     <main>
       <header className="shell-header">
-        <h1>IaC Agent Platform</h1>
-        <p>Local operator console. Review the server response before approving a request.</p>
+        <div className="shell-bar">
+          <div>
+            <h1>IaC Agent</h1>
+            <p className="product-kicker">Infrastructure control plane</p>
+          </div>
+          <nav className="shell-nav" aria-label="Primary">
+            <a
+              href="/#compose"
+              aria-current={route.name === "compose" ? "page" : undefined}
+              onClick={(event) => {
+                event.preventDefault();
+                openRegion("compose");
+              }}
+            >
+              Compose
+            </a>
+            <a
+              href="/#requests"
+              onClick={(event) => {
+                event.preventDefault();
+                openRegion("requests");
+              }}
+            >
+              Requests
+            </a>
+          </nav>
+        </div>
         <HealthIndicator client={client} />
       </header>
       {operatorClient === null ? <OperatorSecretForm onContinue={setSecret} /> : null}
@@ -72,8 +113,8 @@ function OperatorSecretForm({ onContinue }: { onContinue: (secret: string) => vo
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
       />
-      <p>Enter the operator secret for this session. Reloading clears it.</p>
-      <button type="submit">Continue</button>
+      <p>This secret stays in this tab's memory. Reloading the page clears it.</p>
+      <button className="button-primary" type="submit">Continue</button>
     </form>
   );
 }

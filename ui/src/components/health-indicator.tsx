@@ -1,45 +1,43 @@
 import { useEffect, useState } from "react";
-import type { ApiClient } from "../api/client";
+import type { ApiClient, ProbeResult } from "../api/client";
+
+function runtimeMark(health: ProbeResult, ready: ProbeResult): string {
+  if (!(health.kind === "success" && health.status === "ok")) {
+    return "Runtime unreachable";
+  }
+  if (ready.kind === "success" && ready.status === "ready") {
+    return "Runtime ready";
+  }
+  return "Runtime not ready";
+}
 
 export function HealthIndicator({ client }: { client: ApiClient }) {
-  const [health, setHealth] = useState("API process did not respond.");
-  const [ready, setReady] = useState("Application process is not ready.");
+  const [text, setText] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    void client.health().then((result) => {
+    void Promise.all([client.health(), client.ready()]).then(([health, ready]) => {
       if (cancelled) {
         return;
       }
-      setHealth(
-        result.kind === "success" && result.status === "ok"
-          ? "API process responded."
-          : "API process did not respond.",
-      );
-    });
-    void client.ready().then((result) => {
-      if (cancelled) {
-        return;
-      }
-      setReady(
-        result.kind === "success" && result.status === "ready"
-          ? "Application process is ready to accept requests."
-          : "Application process is not ready.",
-      );
+      setText(runtimeMark(health, ready));
     });
     return () => {
       cancelled = true;
     };
   }, [client]);
 
+  const tone =
+    text === "Runtime ready" ? "ready" : text === "Runtime not ready" ? "closed" : "unreachable";
+
   return (
     <section aria-label="Process status">
-      <dl>
-        <dt role="term">API</dt>
-        <dd>{health}</dd>
-        <dt role="term">Readiness</dt>
-        <dd>{ready}</dd>
-      </dl>
+      {text ? (
+        <p className="runtime-mark">
+          <span className={`runtime-dot runtime-dot-${tone}`} aria-hidden="true" />
+          {text}
+        </p>
+      ) : null}
     </section>
   );
 }

@@ -66,4 +66,13 @@ describe("operator design tokens", () => {
     expect(error).toContain("var(--color-notice-error-border)");
     expect(error).not.toContain("var(--color-status-block-surface)");
   });
+
+  it("marks the current nav item with weight and underline", () => {
+    const start = css.indexOf('.shell-nav a[aria-current="page"]');
+    expect(start).toBeGreaterThanOrEqual(0);
+    const block = css.slice(start, css.indexOf("}", start));
+    expect(block).toContain("font-weight");
+    expect(block).toContain("text-decoration: underline");
+    expect(block).not.toContain("color:");
+  });
 });

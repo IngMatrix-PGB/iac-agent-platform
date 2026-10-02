@@ -4,7 +4,7 @@ import { continueAsOperator, OPERATOR_SECRET } from "./operator";
 test("a recent request opens the authoritative review", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1, name: "IaC Agent Platform" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "IaC Agent" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Process status" })).toBeVisible();
   await expect(page.getByLabel("Operator secret")).toBeVisible();
   await expect(page.getByLabel("Operator secret")).toHaveAttribute("type", "password");
