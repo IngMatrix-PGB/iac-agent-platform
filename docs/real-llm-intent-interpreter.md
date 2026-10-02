@@ -1,12 +1,10 @@
-# Real LLM intent interpreter (Batch 23)
+# Real LLM intent interpreter
 
 `iac_agent.intent.service.IntentResolutionService` can be backed by a
 real language model instead of the test-only `FakeIntentInterpreter`.
-The LLM only ever interprets natural language into a validated,
-semantic `ArchitectureIntent` — it never selects Terraform resources,
-never writes IAM policy, never makes a security or approval decision.
-See `docs/superpowers/specs/2026-09-18-real-llm-intent-interpreter-design.md`
-for the full trust-boundary design.
+The model only fills a validated `ArchitectureIntent`. It does not
+select Terraform resources, write IAM, or make a security or approval
+decision. The resolver contract is `docs/intent.md`.
 
 ## Provider and model selection
 

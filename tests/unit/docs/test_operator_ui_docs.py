@@ -53,28 +53,27 @@ def test_api_doc_describes_the_operator_ui():
     assert "Made with Cursor" not in text
 
 
-def test_roadmap_marks_batch_31_complete_without_auth():
-    text = Path("docs/roadmap.md").read_text()
-    assert "Batch 31 — operator UI (complete)" in text
-    assert "Batch 34 — operator authentication (complete)" in text
-    assert "Batch 35 — capability-scoped runtime (complete)" in text
-    assert "lifespan or startup decoupling are not started" not in text
-    assert (
-        "GitHub and OpenAI configuration are still required before the process serves."
-        not in text
-    )
-    assert "docs/superpowers/specs/2026-09-30-batch35-design.md" in text
-    assert "docs/superpowers/plans/2026-10-01-batch35-capability-scoped-runtime.md" in text
+def test_readme_states_the_local_operator_boundary():
+    text = Path("README.md").read_text()
+    assert "docs/superpowers/" not in text
+    assert "docs/roadmap.md" not in text
+    assert "Terraform apply is not performed." in text
     lowered = text.lower()
-    assert "authentication" in lowered
+    assert "operator secret" in lowered
+    assert "not rbac" in lowered
     assert "public deployment" in lowered
     assert "not started" in lowered
     assert "rbac" in lowered
-    assert "public deployment" in lowered
     assert "tls" in lowered
     assert "remote or public deployment" in lowered
     assert "Co-Authored-By" not in text
     assert "Made with Cursor" not in text
+    api = Path("docs/api.md").read_text()
+    assert "lifespan or startup decoupling are not started" not in api
+    assert (
+        "GitHub and OpenAI configuration are still required before the process serves."
+        not in api
+    )
 
 
 def test_env_example_names_the_operator_secret_without_a_value():

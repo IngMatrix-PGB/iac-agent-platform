@@ -1,4 +1,4 @@
-# ECR Repository (Phase 2, Batch 27)
+# ECR repository
 
 ECR is a standalone resource, `ResourceType.ECR` (`"ecr"`). It is not a
 composition. A container image registry is object storage's neighbor in
@@ -14,8 +14,8 @@ pattern is `storage+container_registry`. There is no clarification arm.
 (`CONTAINER_REGISTRY` with `OBJECT_STORAGE`, or with `PERSISTENCE`)
 stays `UNSUPPORTED_CAPABILITY`. The deterministic resolver is
 authoritative. The interpreter prompt (version 4) only teaches that
-`container_registry` is not `object_storage`, and the reverse. Gate A
-makes no OpenAI call.
+`container_registry` is not `object_storage`, and the reverse.
+Resolution does not call a model.
 
 ## Contract
 
@@ -52,8 +52,8 @@ The required-ID tuple also includes `TF_NO_DESTRUCTIVE_CHANGES`.
 `terraform/modules/ecr/` contains one `aws_ecr_repository`.
 `encryption_type = "AES256"` is hardcoded in the module. The root
 module does not pass `encryption_type`, a KMS key, `force_delete`, or a
-lifecycle policy. Existing trusted modules are unchanged. Gate A does
-not run `terraform apply` or `terraform destroy`.
+lifecycle policy. Existing trusted modules are unchanged. This
+module is not applied or destroyed by the platform.
 
 ## Checkov
 
@@ -63,9 +63,9 @@ finding:
 
 - `CKV_AWS_136` — "Ensure that ECR repositories are encrypted using KMS."
   Accepted architectural trade-off. The module hardcodes `AES256` and
-  Batch 27 does not add a KMS key. This is not a defect in the
-  repository, and it is not a false positive: Checkov is asking for a
-  customer-managed key that this batch refuses.
+  does not add a KMS key. This is not a defect in the repository, and
+  it is not a false positive. Checkov is asking for a customer-managed
+  key this resource does not create.
 
 The frozen profile is `skipped_checks=("CKV_AWS_136",)`. No other id is
 skipped. The list was not copied from S3, DynamoDB, Lambda, or API
@@ -82,26 +82,19 @@ the repository name, `image_tag_mutability`, and `scan_on_push`.
 
 Lifecycle policy, repository policy, KMS, public ECR, registry-level
 scanning (`aws_ecr_registry_scanning_configuration`), and `force_delete`
-are out of this batch.
+are not part of this resource.
 
-## Actual versus theoretical
+## Registration
 
-Design inventory: 20 production dispatch/registration sites, 1
-non-dispatch prompt site (`intent/adapters/openai.py`), and 24
-test/eval rows. Gate B did not add a 21st dispatch site. `request.py`
-stayed unchanged.
+ECR is registered on the dispatch surfaces: resource type, renderer,
+policy, Checkov, module directory, and checkpoint allowlist. Real-tool
+coverage is
+`tests/integration/test_ecr_renderer_terraform.py` and
+`tests/integration/test_ecr_golden_real_tool_eval.py`. Durable resume
+is `tests/integration/test_ecr_workflow_persistence.py`.
 
-The 24 inventory rows all exist after Gate B, including
-`tests/integration/test_ecr_renderer_terraform.py`,
-`tests/integration/test_ecr_golden_real_tool_eval.py`, and
-`tests/integration/test_ecr_workflow_persistence.py`. Three test/eval
-files were outside that inventory:
-`tests/unit/graph/test_state.py` (exact workflow-state union),
-`tests/unit/intent/adapters/test_openai_adapter.py` (recorded prompt
-version), and `evals/evaluators/architecture_intent_resolver.py`
-(`EcrResourceSpec` in the resolved-type map). `ApiLambdaDynamoDbSpec`
-is still absent from that map. That pre-existing hole did not block
-ECR.
+The resolver golden evaluator maps `EcrResourceSpec`. It does not map
+`ApiLambdaDynamoDbSpec`. That gap does not change ECR resolution.
 
 Omission behavior, from the tests that failed before the registration
 existed:

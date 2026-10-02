@@ -10,8 +10,7 @@ an SQS queue, a Lambda consumer, and a DynamoDB table, bound together
 by an event source mapping and two narrowly-scoped IAM policies — as
 **one** top-level request, without becoming an arbitrary graph DSL, a
 generic workflow engine, a generic IAM generator, or a generic
-Terraform module composer. See `docs/roadmap.md` for the exact
-registration touchpoints this batch used.
+Terraform module composer.
 
 ## Architecture
 

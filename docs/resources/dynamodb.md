@@ -8,9 +8,7 @@ Batch 17 adds DynamoDB as the *third* resource type specifically to
 prove that adding one more resource is mostly additive — a new
 `ResourceType` member, a new contract module, a new renderer, a new
 trusted module, and small resource-keyed entries in a handful of
-existing mappings, not a redesign of anything shared. See
-`docs/roadmap.md` for the exact registration touchpoints this batch
-discovered and used.
+existing mappings, not a redesign of anything shared.
 
 ## The contract: `DynamoDBResourceSpec`
 
@@ -228,13 +226,8 @@ property: `TerraformRunner` has no `apply` method anywhere, no AWS
 mutation of any kind ever occurs, and a GitHub pull request remains the
 terminal artifact for a DynamoDB request exactly as it is for SQS/S3.
 
-## Known application-layer debt (unchanged scope this batch)
+## Application layer
 
-`iac_agent.app.service.Phase1Application` and the composition layer
-remain SQS-only (tracked since Batch 16 — see `docs/roadmap.md`).
-DynamoDB, like S3, does not go through that layer in this batch; every
-DynamoDB test in this batch calls `build_iac_workflow` directly. This
-batch did not need to touch the application layer at all — DynamoDB's
-addition never required generalizing any "blocking assumption" there,
-since the graph layer it actually needs was already resource-neutral
-from Batch 16 onward.
+`IacApplication.submit` accepts an `IacRequestSpec`, including
+DynamoDB. The composition root uses `build_iac_workflow` and the
+shared trusted-module map. See `docs/application.md`.

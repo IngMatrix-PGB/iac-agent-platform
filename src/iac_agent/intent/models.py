@@ -1,5 +1,4 @@
-"""The semantic contract at the platform's first probabilistic boundary
-(Batch 21).
+"""The semantic contract at the platform's first probabilistic boundary.
 
 `ArchitectureIntent` is the only thing an interpreter adapter is ever
 allowed to produce — never a `ResourceType`/`CompositionType`/any
@@ -7,8 +6,7 @@ existing `*Spec` (see `iac_agent.intent.resolver` for the deterministic
 mapping from this semantic contract to one of those). Every field here
 is either a closed, code-versioned vocabulary or a bounded primitive;
 there is no `dict[str, Any]` and no unbounded string anywhere on this
-model, by design (see docs/superpowers/specs/2026-09-15-structured-
-architecture-intent-design.md §4 and §11.3).
+model. The current contract is `docs/intent.md`.
 """
 
 from __future__ import annotations

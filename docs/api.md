@@ -23,6 +23,14 @@ The 401 body has no `request_id`. It does not say whether an id exists.
 
 There is no Terraform-source route.
 
+## Request id
+
+An omitted `request_id` is generated in UTC as `req-%Y%m%dT%H%M%SZ-` plus 12 lowercase hexadecimal digits. The shape is `req-20260918T232211Z-a1b2c3d4e5f6`. The suffix is the first 12 digits of `uuid4().hex`. A caller-supplied id is kept as given. The generator does not rewrite it.
+
+That string is one identity. It is the checkpoint thread id, the workspace directory under `artifacts/`, the publication branch `iac-agent/<request_id>`, and the publication path `generated/<request_id>/`. The suffix exists so two requests created in the same UTC second do not share those four uses. It is not a distributed consensus id.
+
+The generator rejects a naive datetime. A caller-supplied id must be a single path segment: non-empty, not absolute, and without a separator or `..`.
+
 ## Lifecycle
 
 `POST` interprets the prompt and resolves it. A clarification or an unsupported architecture returns 200 with `workflow` set to null. Those outcomes are not written to SQLite, so a later `GET` of that id is 404.
@@ -83,9 +91,9 @@ The UI renders the public request DTO only. It does not receive credentials, Ter
 
 `GET /api/v1/requests` lists the newest checkpointed requests. The index stores the request id and the server creation time. Workflow status, approval availability, security status, and name are read from the checkpoint when the list is built. The list does not include checkpoints created before the index existed; those requests remain available at `GET /api/v1/requests/{request_id}`. A failed index write does not change the create response. The list route requires the operator secret. The index itself is not an authorization model and does not make the API safe for public Internet exposure.
 
-The default page is 20 requests. `limit` may be an integer from 1 through 50. There is no cursor and no offset. A stale index row whose checkpoint is gone is omitted, and the page is not filled from older rows. `request_index` in the existing `state.db` stores only `request_id` and `created_at`. Recent requests is discovery. The checkpoint remains the workflow authority. Compose remains `127.0.0.1:8000:8000`. Batch 33 did not authorize public exposure, and Batch 34 does not either.
+The default page is 20 requests. `limit` may be an integer from 1 through 50. There is no cursor and no offset. A stale index row whose checkpoint is gone is omitted, and the page is not filled from older rows. `request_index` in the existing `state.db` stores only `request_id` and `created_at`. Recent requests is discovery. The checkpoint remains the workflow authority. Compose remains `127.0.0.1:8000:8000`. This API does not authorize public exposure.
 
-Batch 32 presents that same public request DTO. It does not add a route, a field, or a workflow state. Server status values stay visible. A destructive plan is still the server boolean, and the page still says "Destructive change detected."
+The UI presents that same public request DTO. It does not add a route, a field, or a workflow state. Server status values stay visible. A destructive plan is still the server boolean, and the page still says "Destructive change detected."
 
 The operator enters `IAC_AGENT_OPERATOR_SECRET` in the page. React keeps that value in memory only. Authenticated API calls send it as `Authorization: Bearer`. SPA navigation can retain it because the React application stays mounted. A browser reload reconstructs the application and loses it, so the operator enters it again. The application does not store it in localStorage, sessionStorage, IndexedDB, cookies, the URL, query parameters, public API DTOs, checkpoints, or `request_index`. It must not be placed in URLs or request bodies. There is no `VITE_` build-time copy.
 
@@ -97,6 +105,6 @@ The operator UI does not make this API safe for public Internet exposure. GET /h
 
 The state plane is required before the operator runtime serves. It is the SQLite checkpoint and `request_index` in the same `state.db`. Intent interpretation and source-control publishing are optional. A group is configured when every required value is present and valid, absent when the whole group is omitted or whitespace, and partial when configuration was started but is incomplete or inconsistent. A partial group fails startup. GITHUB_BASE_BRANCH=main alone does not configure publication. A non-default branch without the GitHub group is partial. A blank branch beside a complete GitHub group is invalid and fails startup. Submit of a new request requires the interpreter group. An existing request does not. List and detail do not require GitHub or OpenAI. Reject does not require GitHub. Approve requires the GitHub publication group. That check applies only when the approve would resume. `GET /health` means the process is alive. /ready means the state plane is open, not that GitHub or OpenAI is configured or reachable. Ready does not mean submit or approve is available. A missing capability is HTTP 503 `{"error": "capability_unavailable", "message": "..."}`. The submit message begins `Intent interpretation is not configured.` The approve message begins `Source-control publishing is not configured.` `capability_unavailable` is not a workflow ERROR, an authentication failure, an approval conflict, a missing request, or a provider network failure. Success responses do not grow a capability field.
 
-## What this batch does not do
+## What this API does not do
 
 This API does not authorize callers beyond the single operator secret, deploy to AWS, publish through real GitHub in the HTTP acceptance test, generate arbitrary Terraform, expose a workflow event history, or return Terraform source. The acceptance test uses a fake source-control port and a local SQLite file. Its published URL is the fake `https://example.invalid/pull/7`.

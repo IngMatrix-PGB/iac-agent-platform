@@ -80,13 +80,11 @@ node ordering or error path exists. The same reasoning already applied
 to Checkov (Batch 8): only normalized `SecurityFinding` values and
 aggregate counts are ever state-shaped, never raw scanner JSON.
 
-## No human-in-the-loop yet
+## Human approval is durable
 
-Batch 12 proves persistence only — write a checkpoint, recover the
-current state. It adds no `interrupt()`, no `Command(resume=...)`, no
-approval fields. Durable HITL (pausing a workflow for a human decision
-and resuming it later, potentially in a different process) is Batch
-13's concern, built on top of the durability this batch establishes.
+The same checkpoint is what makes human approval survive a process restart. The graph pauses with `interrupt()` and a later process resumes that thread. The approval rules are in `docs/hitl.md`. Persistence does not decide approve or reject.
+
+`request_index`, in this same `state.db`, stores only `request_id` and `created_at` so the API can list requests. The checkpoint remains the workflow authority. See `docs/api.md`.
 
 ## The persistence adapter boundary
 

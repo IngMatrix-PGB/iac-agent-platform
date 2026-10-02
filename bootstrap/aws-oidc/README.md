@@ -8,14 +8,13 @@ real. `iac-agent-platform` only ever *consumes* the resulting
 `iac_plan_role_arn` output, as a plain, non-secret CI configuration
 value (`AWS_PLAN_ROLE_ARN`).
 
-This separation is the core Batch 25 invariant: the agent must never
-control the authority boundary that constrains it.
+The agent must never control the authority boundary that constrains it.
+See `docs/aws-plan-boundary.md`.
 
 ## Before applying
 
-1. This repository's `sub` claim was confirmed empirically in Batch 25
-   Task 11 (see `docs/aws-plan-boundary.md` Step 1 and design spec
-   §5): the immutable-format
+1. This repository's `sub` claim is the exact subject in
+   `docs/aws-plan-boundary.md`: the immutable-format
    `repo:IngMatrix-PGB@167713460/iac-agent-platform@1368782253:pull_request`
    — never the legacy `repo:IngMatrix-PGB/iac-agent-platform:pull_request`
    shape (this repository was created after GitHub's 2026-07-15
