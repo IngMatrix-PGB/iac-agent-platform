@@ -84,17 +84,16 @@ describe("request projection", () => {
     expect(screen.getAllByText("Warn").length).toBeGreaterThan(0);
     expect(screen.queryByText("warn")).not.toBeInTheDocument();
     expect(screen.getByText("Terraform apply was not executed.")).toBeInTheDocument();
-    expect(screen.getByText("Approval available")).toBeInTheDocument();
+    expect(screen.queryByText("Approval available")).not.toBeInTheDocument();
   });
 
-  it("labels the request id and outcome and still shows the server outcome", () => {
+  it("labels the request id under the resource heading", () => {
     render(<Projection body={posted} />);
-    expect(screen.getByRole("heading", { level: 3, name: "Request" })).toBeInTheDocument();
-    expect(screen.getByRole("term", { name: "Request id" })).toBeInTheDocument();
-    expect(screen.getByText("req-1")).toBeInTheDocument();
-    expect(screen.getByRole("term", { name: "Outcome" })).toBeInTheDocument();
-    expect(screen.getAllByText("Awaiting approval").length).toBeGreaterThan(0);
-    expect(screen.queryByText("awaiting_approval")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "order-events" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Request" })).not.toBeInTheDocument();
+    expect(screen.getByText("req-1").className).toContain("meta");
+    expect(screen.queryByRole("term", { name: "Outcome" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Approval available")).not.toBeInTheDocument();
   });
 
   it("renders the public submission fields", () => {
@@ -115,7 +114,7 @@ describe("request projection", () => {
     expect(screen.getByText("Destructive change detected.")).toBeInTheDocument();
     expect(screen.getAllByText("SQS_ENCRYPTION").length).toBeGreaterThan(0);
     expect(screen.getByText("Terraform apply was not executed.")).toBeInTheDocument();
-    expect(screen.getByText("Approval available")).toBeInTheDocument();
+    expect(screen.queryByText("Approval available")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Reject request" })).not.toBeInTheDocument();
   });
@@ -127,11 +126,34 @@ describe("request projection", () => {
       resolution: { outcome: "resolved", name: "order-events", components: [] },
     };
     render(<Projection body={reloaded} />);
-    expect(screen.getByText("Unavailable after reload.")).toBeInTheDocument();
-    expect(screen.getByText("order-events")).toBeInTheDocument();
+    expect(screen.queryByText("Unavailable after reload.")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "order-events" })).toBeInTheDocument();
     expect(screen.queryByText("serverless_worker")).not.toBeInTheDocument();
     expect(screen.queryByText("queue_processing")).not.toBeInTheDocument();
     expect(screen.queryByText("worker+asynchronous+queue_processing")).not.toBeInTheDocument();
+  });
+
+  it("omits checkpoint fields the GET does not know", () => {
+    const reloaded: RequestResponse = {
+      ...posted,
+      intent: null,
+      resolution: { outcome: "resolved", name: "order-events", components: [] },
+    };
+    render(<Projection body={reloaded} />);
+    expect(screen.queryByText("Unavailable after reload.")).not.toBeInTheDocument();
+    expect(screen.queryByText("serverless_worker")).not.toBeInTheDocument();
+    expect(screen.queryByText("queue_processing")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "order-events" })).toBeInTheDocument();
+  });
+
+  it("does not warn about destruction when the server flag is false", () => {
+    render(
+      <PlanSummary
+        plan={{ add: 1, change: 0, destroy: 1, destructive_change_detected: false }}
+      />,
+    );
+    expect(screen.getAllByText("1")).toHaveLength(2);
+    expect(screen.queryByText("Destructive change detected.")).not.toBeInTheDocument();
   });
 
   it("does not render finding resource or message", () => {

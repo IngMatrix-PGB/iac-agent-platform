@@ -84,6 +84,7 @@ export function App({
           client={operatorClient}
           requestId={route.requestId}
           onUnauthenticated={clearSecret}
+          onBack={() => openRegion("requests")}
         />
       ) : null}
       {route.name === "unknown" ? <h2>Page not found.</h2> : null}

@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ApiClient, ClientResult } from "../api/client";
@@ -41,16 +41,49 @@ function clientReturning(
 
 describe("request page", () => {
   it("loads a reconstructed request and offers approval when the server allows it", async () => {
+    const user = userEvent.setup();
+    const onBack = vi.fn();
     const getRequest = vi.fn().mockResolvedValue({ kind: "success", status: 200, body: reloaded });
-    render(<RequestPage client={clientReturning(getRequest)} requestId="req-1" />);
-    expect(await screen.findByText("Unavailable after reload.")).toBeInTheDocument();
-    expect(screen.getAllByText("Awaiting approval").length).toBeGreaterThan(0);
-    expect(screen.getByText("order-events")).toBeInTheDocument();
-    expect(screen.getAllByText("SQS_ENCRYPTION").length).toBeGreaterThan(0);
-    expect(screen.getByText("Approval available")).toBeInTheDocument();
+    render(
+      <RequestPage client={clientReturning(getRequest)} requestId="req-1" onBack={onBack} />,
+    );
+    expect(await screen.findByRole("heading", { level: 2, name: "order-events" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Request review" })).not.toBeInTheDocument();
+    expect(screen.getByText("req-1").className).toContain("meta");
+    const back = screen.getByRole("link", { name: "Requests" });
+    expect(back).toHaveAttribute("href", "/#requests");
+    await user.click(back);
+    expect(onBack).toHaveBeenCalledOnce();
+    const workflow = screen.getByRole("region", { name: "Workflow" });
+    expect(within(workflow).getAllByText("Awaiting approval")).toHaveLength(1);
+    expect(within(workflow).getAllByText("Pass")).toHaveLength(1);
+    expect(screen.queryByText("awaiting_approval")).not.toBeInTheDocument();
+    expect(screen.queryByText("pass")).not.toBeInTheDocument();
+    expect(screen.getByText("Terraform apply was not executed.")).toBeInTheDocument();
+    const plan = screen.getByRole("heading", { name: "Terraform plan summary" });
+    const findings = screen.getByRole("table", { name: "Security findings" });
+    const approval = screen.getByRole("heading", { name: "Approval decision" });
+    expect(plan.compareDocumentPosition(findings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(findings.compareDocumentPosition(approval) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText("Unavailable after reload.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Outcome")).not.toBeInTheDocument();
+    expect(screen.queryByText("Approval available")).not.toBeInTheDocument();
+    expect(screen.queryByText("serverless_worker")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reject request" })).toBeInTheDocument();
     expect(getRequest).toHaveBeenCalledWith("req-1");
+  });
+
+  it("uses the request id as the heading when the projection has no name", async () => {
+    const unnamed: RequestResponse = {
+      ...reloaded,
+      resolution: { outcome: "resolved", name: null, components: [] },
+    };
+    const getRequest = vi.fn().mockResolvedValue({ kind: "success", status: 200, body: unnamed });
+    render(<RequestPage client={clientReturning(getRequest)} requestId="req-1" />);
+    expect(await screen.findByRole("heading", { level: 2, name: "req-1" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Request review" })).not.toBeInTheDocument();
+    expect(document.querySelector(".meta")).toBeNull();
   });
 
   it("shows the API not-found message without inventing a pending request", async () => {
@@ -287,7 +320,8 @@ describe("request page", () => {
     });
     const getRequest = vi.fn().mockReturnValue(pending);
     render(<RequestPage client={clientReturning(getRequest)} requestId="req-1" />);
-    expect(screen.getByRole("heading", { level: 2, name: "Request review" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Request review" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Requests" })).toHaveAttribute("href", "/#requests");
     expect(screen.getByRole("status")).toHaveTextContent("Loading request.");
     resolveGet({ kind: "success", status: 200, body: reloaded });
     expect(await screen.findByText("req-1")).toBeInTheDocument();

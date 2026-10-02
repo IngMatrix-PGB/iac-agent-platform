@@ -56,7 +56,7 @@ test("a recent request opens the authoritative review", async ({ page }) => {
   expect(detailRequest.url()).not.toContain(OPERATOR_SECRET);
   await expect(page).toHaveURL(/\/requests\/req-indexed$/);
   expect(page.url()).not.toContain(OPERATOR_SECRET);
-  await expect(page.getByRole("heading", { name: "Request review" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "orders" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Terraform plan summary" })).toBeVisible();
   await expect(page.locator("table.findings-table")).toBeHidden();
   await expect(page.locator(".finding-stack")).toBeVisible();
@@ -101,8 +101,7 @@ test("reloading a request url drops the credential until it is entered again", a
   await expect(page.getByText("req-indexed")).toHaveCount(0);
 
   await continueAsOperator(page);
-  await expect(page.getByText("orders")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Request review" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "orders" })).toBeVisible();
   expect(detailGets.length).toBeGreaterThan(0);
   expect(detailGets.every((authorization) => authorization === `Bearer ${OPERATOR_SECRET}`)).toBe(
     true,

@@ -19,10 +19,11 @@ export function WorkflowStatus({ body }: { body: RequestResponse }) {
         </dl>
       ) : null}
       <p>Terraform apply was not executed.</p>
-      <p>{body.approval_available ? "Approval available" : "Approval not available"}</p>
       {workflow?.error ? (
         <dl>
-          <AuthoritativeValue label="Error stage" value={workflow.error.stage} />
+          {workflow.error.stage !== workflow.current_stage ? (
+            <AuthoritativeValue label="Error stage" value={workflow.error.stage} />
+          ) : null}
           <AuthoritativeValue label="Error type" value={workflow.error.error_type} />
         </dl>
       ) : null}

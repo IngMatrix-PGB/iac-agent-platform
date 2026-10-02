@@ -81,9 +81,14 @@ describe("operator shell", () => {
     render(<App client={client} navigate={navigate} pathname="/requests/req-1" />);
     await continueAsOperator(user);
     expect(screen.getByRole("link", { name: "Compose" })).not.toHaveAttribute("aria-current");
-    expect(screen.getByRole("link", { name: "Requests" })).not.toHaveAttribute("aria-current");
-    expect(await screen.findByRole("heading", { name: "Request review" })).toBeInTheDocument();
-    await user.click(screen.getByRole("link", { name: "Requests" }));
+    expect(screen.getByRole("navigation", { name: "Primary" }).querySelector('[aria-current="page"]')).toBeNull();
+    expect(await screen.findByRole("heading", { level: 2, name: "order-events" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Request review" })).not.toBeInTheDocument();
+    const pageLink = screen
+      .getAllByRole("link", { name: "Requests" })
+      .find((link) => link.closest("nav") === null);
+    expect(pageLink).toHaveAttribute("href", "/#requests");
+    await user.click(pageLink!);
     expect(navigate).toHaveBeenCalledWith("/");
   });
 

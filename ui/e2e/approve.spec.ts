@@ -21,7 +21,7 @@ test("approve publishes the pull request url", async ({ page }) => {
     "build a worker that processes a queue and stores results",
   );
   await page.getByRole("button", { name: "Submit request" }).click();
-  await expect(page.getByRole("heading", { name: "Request review" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "order-events" })).toBeVisible();
   await expect(page.getByText("req-browser")).toBeVisible();
   await expect(page.getByText("Awaiting approval").first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Terraform plan summary" })).toBeVisible();

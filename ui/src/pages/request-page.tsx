@@ -13,10 +13,12 @@ export function RequestPage({
   client,
   requestId,
   onUnauthenticated,
+  onBack,
 }: {
   client: ApiClient;
   requestId: string;
   onUnauthenticated?: () => void;
+  onBack?: () => void;
 }) {
   const [body, setBody] = useState<RequestResponse | null>(null);
   const [banner, setBanner] = useState<{ message: string; tone: NoticeTone } | null>(null);
@@ -135,7 +137,17 @@ function applyRead(result: ClientResult) {
   const polling = shouldPoll(status) && !pollExhausted;
   return (
     <section aria-labelledby="request-review-heading">
-      <h2 id="request-review-heading">Request review</h2>
+      <p>
+        <a
+          href="/#requests"
+          onClick={(event) => {
+            event.preventDefault();
+            onBack?.();
+          }}
+        >
+          Requests
+        </a>
+      </p>
       {banner ? <ErrorBanner message={banner.message} tone={banner.tone} /> : null}
       {!body && !banner ? <p role="status">Loading request.</p> : null}
       {polling ? <p role="status">Checking this request.</p> : null}
