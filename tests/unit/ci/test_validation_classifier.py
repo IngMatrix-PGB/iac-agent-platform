@@ -482,3 +482,261 @@ class TestGroupBClassifyContract:
         for name in names:
             result = module.classify([f"terraform/modules/{name}/main.tf"])
             assert any(name in module.SHARD_CONSUMES[shard] for shard in result.shards)
+
+
+class TestPathEvidenceAndReasons:
+    """Locks the three verified paths and the stable reason tokens."""
+
+    def test_lambda_function_provider_selects_lambda_module_closure(self):
+        result = _load().classify(
+            ["src/iac_agent/providers/aws/lambda_function/renderer.py"]
+        )
+        _assert_selection(
+            result,
+            {"lambda", "api_lambda", "api_lambda_dynamodb", "serverless_worker"},
+            bootstrap=False,
+            frontend=False,
+            full=False,
+        )
+
+    def test_terraform_s3_fixture_selects_s3_only(self):
+        result = _load().classify(["tests/terraform/s3/main.tf"])
+        _assert_selection(result, {"s3"}, bootstrap=False, frontend=False, full=False)
+
+    def test_terraform_sqs_fixture_selects_sqs_closure_only(self):
+        result = _load().classify(["tests/terraform/sqs/main.tf"])
+        assert result.shards == frozenset({"sqs", "serverless_worker", "security"})
+        assert result.shards.isdisjoint({"s3", "ecr", "lambda"})
+        assert result.bootstrap is False
+        assert result.frontend is False
+        assert result.full is False
+
+    def test_bootstrap_integration_file_selects_bootstrap_only(self):
+        result = _load().classify(
+            ["tests/integration/test_bootstrap_aws_oidc_terraform.py"]
+        )
+        _assert_selection(result, set(), bootstrap=True, frontend=False, full=False)
+        assert result.reasons == ("bootstrap change",)
+
+    def test_s3_reason_is_direct_s3(self):
+        result = _load().classify(["terraform/modules/s3/main.tf"])
+        assert result.reasons == ("direct:s3",)
+
+    def test_sqs_reasons_are_direct_plus_transitive(self):
+        result = _load().classify(["terraform/modules/sqs/main.tf"])
+        assert result.reasons == (
+            "direct:sqs",
+            "transitive:security",
+            "transitive:serverless_worker",
+        )
+
+    def test_kms_reasons_name_both_direct_modules(self):
+        result = _load().classify(["src/iac_agent/providers/aws/kms.py"])
+        assert result.reasons == (
+            "direct:s3",
+            "direct:sqs",
+            "transitive:security",
+            "transitive:serverless_worker",
+        )
+
+    def test_real_tool_and_composition_reasons_are_direct_only(self):
+        module = _load()
+        real_tool = module.classify(["tests/integration/test_s3_renderer_terraform.py"])
+        assert real_tool.reasons == ("direct:s3",)
+        composition = module.classify(
+            ["src/iac_agent/compositions/serverless_worker/renderer.py"]
+        )
+        assert composition.reasons == ("direct:serverless_worker",)
+
+    @pytest.mark.parametrize(
+        ("path", "reason"),
+        [
+            ("src/iac_agent/graph/workflow.py", "shared product path"),
+            ("src/iac_agent/execution/terraform_runner.py", "shared product path"),
+            ("src/iac_agent/security/checkov_profiles.py", "shared product path"),
+            ("src/iac_agent/policies/platform.py", "shared product path"),
+            ("src/iac_agent/app/composition.py", "shared product path"),
+            ("src/iac_agent/providers/aws/renderer.py", "shared product path"),
+            ("src/iac_agent/providers/aws/resource.py", "shared product path"),
+            ("src/iac_agent/providers/aws/terraform_render.py", "shared product path"),
+            ("src/iac_agent/providers/aws/__init__.py", "shared product path"),
+            ("src/iac_agent/intent/models.py", "unknown path"),
+            ("terraform/modules/newfam/main.tf", "unknown path"),
+        ],
+    )
+    def test_shared_and_unknown_reasons(self, path, reason):
+        result = _load().classify([path])
+        assert result.reasons == (reason,)
+        assert result.bootstrap is False
+        assert result.frontend is False
+
+    def test_empty_diff_reason(self):
+        assert _load().classify([]).reasons == ("empty diff",)
+
+    def test_unreadable_diff_reason(self):
+        assert _load().classify(None).reasons == ("unreadable diff",)
+
+    def test_classifier_failure_reason_ignores_docs(self):
+        module = _load()
+        assert module.classify(["docs/ci.md"], failed=True).reasons == (
+            "classifier failure",
+        )
+        assert module.classify([], failed=True).reasons == ("classifier failure",)
+        assert module.classify(None, failed=True).reasons == ("classifier failure",)
+
+    def test_workflow_change_reason_replaces_other_paths(self):
+        result = _load().classify(
+            ["terraform/modules/s3/main.tf", ".github/workflows/ci.yml"]
+        )
+        assert result.reasons == ("workflow change",)
+        assert result.shards == frozenset(_load().SHARD_ORDER)
+        assert result.bootstrap is True
+        assert result.frontend is True
+        assert result.full is True
+
+    def test_docs_plus_s3_reason_is_only_direct_s3(self):
+        result = _load().classify(["docs/ci.md", "terraform/modules/s3/main.tf"])
+        assert result.reasons == ("direct:s3",)
+
+    def test_ui_plus_s3_reasons_omit_bootstrap(self):
+        result = _load().classify(["ui/src/App.tsx", "terraform/modules/s3/main.tf"])
+        assert result.reasons == ("direct:s3", "frontend change")
+        assert "bootstrap change" not in result.reasons
+
+    def test_reasons_do_not_depend_on_order_or_duplicates(self):
+        module = _load()
+        sqs = "terraform/modules/sqs/main.tf"
+        s3 = "terraform/modules/s3/main.tf"
+        expected = (
+            "direct:s3",
+            "direct:sqs",
+            "transitive:security",
+            "transitive:serverless_worker",
+        )
+        assert module.classify([sqs, s3]).reasons == expected
+        assert module.classify([s3, sqs, sqs]).reasons == expected
+
+    def test_normalized_separators_do_not_change_selection_or_reasons(self):
+        module = _load()
+        plain = module.classify(["terraform/modules/s3/main.tf"])
+        dotted = module.classify(["./terraform/modules/s3/main.tf"])
+        windows = module.classify(["terraform\\modules\\s3\\main.tf"])
+        assert _fields(dotted) == _fields(plain)
+        assert dotted.reasons == plain.reasons == ("direct:s3",)
+        assert _fields(windows) == _fields(plain)
+        assert windows.reasons == plain.reasons
+
+    def test_shard_consumes_is_the_module_closure_table(self):
+        assert _load().SHARD_CONSUMES == {
+            "s3": frozenset({"s3"}),
+            "sqs": frozenset({"sqs"}),
+            "dynamodb": frozenset({"dynamodb"}),
+            "ecr": frozenset({"ecr"}),
+            "lambda": frozenset({"lambda"}),
+            "api_gateway": frozenset({"api_gateway"}),
+            "api_lambda": frozenset({"api_gateway", "lambda"}),
+            "api_lambda_dynamodb": frozenset({"api_gateway", "lambda", "dynamodb"}),
+            "serverless_worker": frozenset({"sqs", "lambda", "dynamodb"}),
+            "security": frozenset({"sqs"}),
+        }
+
+
+def test_github_output_emits_one_boolean_per_shard(tmp_path: Path):
+    module = _load()
+    selection = module.classify(["terraform/modules/s3/main.tf"])
+    text = module.format_github_output(selection)
+    assert "s3=true" in text
+    assert "sqs=false" in text
+    assert "bootstrap=false" in text
+    assert "frontend=false" in text
+    assert "full=false" in text
+    assert "reasons=direct:s3" in text.splitlines()
+    shard_lines = text.splitlines()[: len(module.SHARD_ORDER)]
+    assert shard_lines == [
+        f"{name}={'true' if name in selection.shards else 'false'}"
+        for name in module.SHARD_ORDER
+    ]
+
+
+def test_cli_writes_output_and_exits_zero(tmp_path: Path):
+    module = _load()
+    paths = tmp_path / "paths.txt"
+    paths.write_text("terraform/modules/ecr/main.tf\n")
+    output = tmp_path / "github.txt"
+    summary = tmp_path / "summary.md"
+    code = module.main(
+        [
+            "--paths-file",
+            str(paths),
+            "--github-output",
+            str(output),
+            "--step-summary",
+            str(summary),
+        ]
+    )
+    assert code == 0
+    assert "ecr=true" in output.read_text()
+    assert "s3=false" in output.read_text()
+    summary_text = summary.read_text()
+    assert "ecr" in summary_text
+    assert "Selected shards:" in summary_text
+    assert "Skipped shards:" in summary_text
+    assert "direct:ecr" in summary_text
+
+
+def test_cli_missing_paths_file_exits_nonzero(tmp_path: Path):
+    output = tmp_path / "github.txt"
+    code = _load().main(
+        [
+            "--paths-file",
+            str(tmp_path / "missing.txt"),
+            "--github-output",
+            str(output),
+        ]
+    )
+    assert code == 2
+    assert not output.exists()
+
+
+def test_cli_empty_file_is_empty_diff(tmp_path: Path):
+    paths = tmp_path / "paths.txt"
+    paths.write_text("")
+    output = tmp_path / "github.txt"
+    code = _load().main(
+        ["--paths-file", str(paths), "--github-output", str(output)]
+    )
+    assert code == 0
+    assert "reasons=empty diff" in output.read_text().splitlines()
+
+
+def test_cli_unreadable_flag_classifies_none(tmp_path: Path):
+    paths = tmp_path / "paths.txt"
+    paths.write_text("docs/ci.md\n")
+    output = tmp_path / "github.txt"
+    code = _load().main(
+        [
+            "--paths-file",
+            str(paths),
+            "--unreadable",
+            "--github-output",
+            str(output),
+        ]
+    )
+    assert code == 0
+    text = output.read_text()
+    assert "reasons=unreadable diff" in text.splitlines()
+    assert "full=true" in text
+    assert "bootstrap=true" in text
+
+
+def test_cli_strips_blank_lines(tmp_path: Path):
+    paths = tmp_path / "paths.txt"
+    paths.write_text("\n  terraform/modules/s3/main.tf  \n\n")
+    output = tmp_path / "github.txt"
+    code = _load().main(
+        ["--paths-file", str(paths), "--github-output", str(output)]
+    )
+    assert code == 0
+    text = output.read_text()
+    assert "s3=true" in text
+    assert "reasons=direct:s3" in text.splitlines()
