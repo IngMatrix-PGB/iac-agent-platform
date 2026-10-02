@@ -129,6 +129,7 @@ code,
 .enum {
   font-family: var(--font-mono);
   font-size: 0.95em;
+  overflow-wrap: anywhere;
 }
 
 .banner {
@@ -434,6 +435,7 @@ dialog p {
   margin: 0;
   padding: 0;
   list-style: none;
+  overflow-wrap: anywhere;
 }
 
 .approval-actions {

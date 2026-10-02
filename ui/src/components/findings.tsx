@@ -49,7 +49,7 @@ export function Findings({
           ))}
         </tbody>
       </table>
-      <ul className="finding-stack">
+      <ul className="finding-stack" aria-label="Security findings">
         {findings.map((finding) => (
           <li key={`${finding.policy_id}:${finding.status}:${finding.severity}`}>
             <p>Policy</p>
