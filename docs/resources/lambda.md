@@ -77,7 +77,8 @@ silently absent:
   supports, and they are plaintext, not a secrets mechanism (see
   "Environment variables" below).
 - **Event source mappings** (SQS triggers, EventBridge rules, Function
-  URLs, API Gateway integrations) — deliberately deferred to Batch 19.
+  URLs, API Gateway integrations) — not part of the standalone Lambda
+  resource. The SQS mapping is on the serverless-worker composition.
 - **Customer-managed KMS** for the log group or environment variables —
   mirrors the identical DynamoDB deferral; see "Checkov" below.
 - **Code signing configuration.**
