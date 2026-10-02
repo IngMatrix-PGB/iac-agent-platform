@@ -1,6 +1,6 @@
 # Continuous integration
 
-`.github/workflows/ci.yml` runs on every pull request to `main` and every push to `main`. The jobs do not depend on each other.
+`.github/workflows/ci.yml` runs on every pull request to `main` and every push to `main`. Pull request activity includes `opened`, `synchronize`, `reopened`, and `labeled`. Quality, Tests, Tool Validation, and Frontend do not depend on each other.
 
 ## Quality
 
@@ -26,7 +26,7 @@ In `ui/`: `npm ci`, `npm test`, and `npm run build`. The job is not a required c
 
 ## What CI never does
 
-No job runs `terraform apply` or `terraform destroy`, deploys to AWS, or publishes a pull request. The workflow permission is `contents: read`. It does not request `id-token: write`. The `real_llm` marker is excluded. The one real-model eval also skips when `IAC_AGENT_LLM_PROVIDER` is unset. See `docs/intent.md` and `docs/aws-plan-boundary.md`.
+No job runs `terraform apply` or `terraform destroy`, or publishes a pull request. The workflow permission is `contents: read`. Only the opt-in `aws-plan` job requests `id-token: write`, and only to call `aws sts get-caller-identity`. It does not run Terraform. The `real_llm` marker is excluded. The one real-model eval also skips when `IAC_AGENT_LLM_PROVIDER` is unset. See `docs/intent.md` and `docs/aws-plan-boundary.md`.
 
 ## Reproducing CI locally
 

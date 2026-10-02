@@ -10,13 +10,11 @@ GitHub Actions for this repository triggers on `pull_request` to `main` and on `
 
 `pull_request_target` is not used. That event would run workflow code in the base repository's trust context against a pull request head, including a head the base repository does not control. The CI workflow must not gain that event. A unit test asserts the string `pull_request_target` does not appear in `.github/workflows/ci.yml`.
 
-The workflow's token permission is `contents: read`. It does not request `id-token: write`, pull-request write, or a secret.
+The workflow's token permission is `contents: read`. Only the `aws-plan` job adds `id-token: write`. No job requests pull-request write or a secret.
 
 ## Fork constraint
 
-A future job that assumes an AWS plan role must run only when the pull request head repository is this repository. A fork pull request must not receive that role, even if it carries a label. OIDC `id-token` permission is a workflow grant, not a secret, so the event type and the head-repository check are what keep a fork from assuming the role.
-
-The current CI workflow does not assume an AWS role.
+The `aws-plan` job runs only for a `pull_request` whose head repository is this repository, whose `aws-plan` label is present, and whose author and triggering actor are the repository owner. A fork pull request must not receive the role, even if it carries the label. OIDC `id-token` permission is a workflow grant, not a secret, so the event type and the head-repository check are what keep a fork from assuming the role.
 
 ## Claim shape
 
@@ -32,6 +30,6 @@ The audience condition is `sts.amazonaws.com`. The subject ends in `:pull_reques
 
 ## What remains outside this repository
 
-Applying `bootstrap/aws-oidc/` and enabling a labeled `aws-plan` job are human actions. They are not performed by CI here, and they are not performed by `TerraformRunner`. Until a human does that work, this platform's plans stay credential-free, as described in `docs/terraform-credential-free-plan.md`.
+The `aws-plan` job assumes `IaCPlanRole` through GitHub OIDC and runs `aws sts get-caller-identity`. The role ARN comes from the `AWS_PLAN_ROLE_ARN` repository variable. The job does not run `terraform plan`, `terraform apply`, or `terraform destroy`. Product plans stay credential-free, as described in `docs/terraform-credential-free-plan.md`. `TerraformRunner` does not apply `bootstrap/aws-oidc/`.
 
 No `terraform apply` and no `terraform destroy` are part of this boundary.
