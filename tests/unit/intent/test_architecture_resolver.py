@@ -154,6 +154,17 @@ def test_container_registry_name_comes_from_the_logical_name_hint():
     assert result.request_spec.name == "orders-api"
 
 
+def test_unspecified_workload_with_object_storage_still_requires_clarification():
+    intent = ArchitectureIntent(
+        workload_type=WorkloadType.UNSPECIFIED,
+        interaction_pattern=InteractionPattern.UNSPECIFIED,
+        capabilities=frozenset({Capability.OBJECT_STORAGE}),
+    )
+    result = _resolver().resolve(intent=intent, request_id=_REQUEST_ID)
+    assert isinstance(result, ClarificationRequired)
+    assert result.request.reason == ClarificationReason.WORKLOAD_TYPE_REQUIRED
+
+
 def test_unspecified_workload_type_returns_clarification_required_workload_type_required():
     intent = ArchitectureIntent(
         workload_type=WorkloadType.UNSPECIFIED,
