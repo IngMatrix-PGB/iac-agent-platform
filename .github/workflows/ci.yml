@@ -88,29 +88,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: |
-            pyproject.toml
-            ci/requirements-checkov.txt
-
-      - name: Install project (dev extras)
-        run: pip install -e ".[dev]"
-
-      - name: Set up Terraform 1.16.1
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.16.1"
-          terraform_wrapper: false
-
-      - name: Install Checkov 3.3.13
-        run: pip install -r ci/requirements-checkov.txt
-
       - name: Run real-tool suite
-        run: pytest -m real_tool
+        uses: ./.github/actions/real-tool-setup
+        with:
+          pytest-args: pytest -m real_tool
 
   frontend:
     name: Frontend
@@ -217,3 +198,40 @@ jobs:
 
       - name: Run credential-free bootstrap plan test
         run: pytest -m real_bootstrap_tool
+
+  provider-cache:
+    name: Provider Cache
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform 1.16.1
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.1"
+          terraform_wrapper: false
+
+      - name: Restore Terraform provider cache
+        id: restore
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/tf-plugin-cache
+          key: tf-1.16.1-aws-6-${{ hashFiles('terraform/modules/**/versions.tf', 'bootstrap/aws-oidc/versions.tf') }}
+
+      - name: Initialize the S3 module into the private cache
+        run: |
+          mkdir -p "$RUNNER_TEMP/tf-plugin-cache"
+          cp -R terraform/modules/s3 "$RUNNER_TEMP/s3-init"
+          export TF_PLUGIN_CACHE_DIR=$RUNNER_TEMP/tf-plugin-cache
+          export AWS_EC2_METADATA_DISABLED=true
+          cd "$RUNNER_TEMP/s3-init"
+          terraform init -backend=false
+
+      - name: Save Terraform provider cache
+        if: success() && steps.restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/tf-plugin-cache
+          key: tf-1.16.1-aws-6-${{ hashFiles('terraform/modules/**/versions.tf', 'bootstrap/aws-oidc/versions.tf') }}

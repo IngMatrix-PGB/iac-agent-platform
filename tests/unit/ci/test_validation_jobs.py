@@ -8,6 +8,12 @@ from pathlib import Path
 import yaml
 
 _CI = Path(".github/workflows/ci.yml")
+_ACTION = Path(".github/actions/real-tool-setup/action.yml")
+_PRIVATE_CACHE_PATH = "${{ runner.temp }}/tf-plugin-cache"
+_CACHE_KEY = (
+    "tf-1.16.1-aws-6-${{ hashFiles('terraform/modules/**/versions.tf', "
+    "'bootstrap/aws-oidc/versions.tf') }}"
+)
 
 _OUTPUT_NAMES = (
     "s3",
@@ -169,7 +175,12 @@ def test_bootstrap_validation_runs_credential_free_plan_when_classify_selects_or
         assert secret not in text
     tool = jobs["tool-validation"]
     assert "if" not in tool
-    assert "pytest -m real_tool" in "\n".join(step.get("run", "") for step in tool["steps"])
+    tool_action = next(
+        step
+        for step in tool["steps"]
+        if str(step.get("uses", "")).startswith("./.github/actions/real-tool-setup")
+    )
+    assert tool_action["with"]["pytest-args"] == "pytest -m real_tool"
     for key in _ABSENT_VALIDATION_JOBS:
         assert key not in jobs
     assert "if" not in jobs["frontend"]
@@ -181,14 +192,28 @@ def test_checkov_pin_is_a_requirements_file():
     jobs = _jobs()
     tool = jobs["tool-validation"]
     assert "if" not in tool
+    action = yaml.safe_load(_ACTION.read_text())
     setup = next(
-        step for step in tool["steps"] if step.get("uses", "").startswith("actions/setup-python@")
+        step
+        for step in action["runs"]["steps"]
+        if str(step.get("uses", "")).startswith("actions/setup-python@")
     )
-    assert "ci/requirements-checkov.txt" in setup["with"]["cache-dependency-path"]
-    script = "\n".join(step.get("run", "") for step in tool["steps"])
+    assert setup["uses"] == "actions/setup-python@v5"
+    assert setup["with"]["python-version"] == "3.12"
+    assert setup["with"]["cache"] == "pip"
+    dependency_path = setup["with"]["cache-dependency-path"]
+    assert "pyproject.toml" in dependency_path
+    assert "ci/requirements-checkov.txt" in dependency_path
+    script = "\n".join(step.get("run", "") for step in action["runs"]["steps"])
+    assert 'pip install -e ".[dev]"' in script
     assert "pip install -r ci/requirements-checkov.txt" in script
     assert "pip install checkov==" not in script
-    assert "pytest -m real_tool" in script
+    tool_action = next(
+        step
+        for step in tool["steps"]
+        if str(step.get("uses", "")).startswith("./.github/actions/real-tool-setup")
+    )
+    assert tool_action["with"]["pytest-args"] == "pytest -m real_tool"
     bootstrap = jobs["bootstrap-validation"]
     bootstrap_script = "\n".join(step.get("run", "") for step in bootstrap["steps"])
     assert "checkov" not in bootstrap_script
@@ -197,3 +222,133 @@ def test_checkov_pin_is_a_requirements_file():
     assert bootstrap["if"] == _BOOTSTRAP_IF
     for key in _ABSENT_VALIDATION_JOBS:
         assert key not in jobs
+
+
+def test_real_tool_setup_restores_and_does_not_save():
+    action = Path(".github/actions/real-tool-setup/action.yml").read_text()
+    assert "actions/cache/restore@v4" in action
+    assert "actions/cache/save@" not in action
+    assert "hashicorp/setup-terraform@v3" in action
+    assert 'terraform_version: "1.16.1"' in action
+    assert "pip install -r ci/requirements-checkov.txt" in action
+    assert "AWS_ACCESS_KEY_ID" not in action
+    assert "terraform apply" not in action
+
+
+def test_provider_cache_saves_only_on_main_push():
+    job = _jobs()["provider-cache"]
+    assert job["name"] == "Provider Cache"
+    assert job["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    assert "actions/cache/save@v4" in _text()
+    script = "\n".join(step.get("run", "") for step in job["steps"])
+    assert "terraform init -backend=false" in script
+    assert "terraform apply" not in script
+
+
+def _uses(step: dict) -> str:
+    return str(step.get("uses", ""))
+
+
+def test_private_provider_cache_uses_one_path_and_saves_only_on_a_main_miss():
+    action_text = _ACTION.read_text()
+    action = yaml.safe_load(action_text)
+    action_steps = action["runs"]["steps"]
+    action_restores = [
+        step for step in action_steps if _uses(step).startswith("actions/cache/restore@")
+    ]
+    assert [step["uses"] for step in action_restores] == ["actions/cache/restore@v4"]
+    assert all(not _uses(step).startswith("actions/cache/save@") for step in action_steps)
+    action_restore = action_restores[0]
+    assert action_restore["with"]["path"] == _PRIVATE_CACHE_PATH
+    assert action_restore["with"]["key"] == _CACHE_KEY
+    assert "restore-keys" not in action_restore["with"]
+    assert "restore-keys" not in action_text
+    assert "provider-restore" not in action_text
+    action_script = "\n".join(step.get("run", "") for step in action_steps)
+    assert 'mkdir -p "${{ runner.temp }}/tf-plugin-cache"' in action_script
+    assert (
+        'echo "TF_PLUGIN_CACHE_DIR=${{ runner.temp }}/tf-plugin-cache" >> "$GITHUB_ENV"'
+        in action_script
+    )
+    assert "AWS_EC2_METADATA_DISABLED" in action_text
+    assert "${{ inputs.pytest-args }}" in action_script
+    assert "id-token" not in action_text
+    assert "terraform destroy" not in action_text
+
+    workflow = _text()
+    assert "restore-keys" not in workflow
+    assert "provider-restore" not in workflow
+    jobs = _jobs()
+    assert not any(name.startswith("shard-") for name in jobs)
+    for key in _ABSENT_VALIDATION_JOBS:
+        assert key not in jobs
+
+    tool = jobs["tool-validation"]
+    assert "if" not in tool
+    assert tool["runs-on"] == "ubuntu-24.04"
+    tool_uses = [_uses(step) for step in tool["steps"]]
+    assert "actions/checkout@v4" in tool_uses
+    assert any(item.startswith("./.github/actions/real-tool-setup") for item in tool_uses)
+    assert not any(item.startswith("actions/cache/") for item in tool_uses)
+    assert not any(item.startswith("actions/setup-python@") for item in tool_uses)
+    tool_action = next(
+        step
+        for step in tool["steps"]
+        if _uses(step).startswith("./.github/actions/real-tool-setup")
+    )
+    assert tool_action["with"]["pytest-args"] == "pytest -m real_tool"
+
+    job = jobs["provider-cache"]
+    assert job["runs-on"] == "ubuntu-24.04"
+    assert job["name"] == "Provider Cache"
+    assert job["if"] == "github.event_name == 'push' && github.ref == 'refs/heads/main'"
+    restores = [step for step in job["steps"] if _uses(step).startswith("actions/cache/restore@")]
+    saves = [step for step in job["steps"] if _uses(step).startswith("actions/cache/save@")]
+    assert [step["uses"] for step in restores] == ["actions/cache/restore@v4"]
+    assert [step["uses"] for step in saves] == ["actions/cache/save@v4"]
+    restore = restores[0]
+    save = saves[0]
+    assert restore["with"]["path"] == _PRIVATE_CACHE_PATH
+    assert save["with"]["path"] == _PRIVATE_CACHE_PATH
+    assert restore["with"]["path"] == save["with"]["path"] == action_restore["with"]["path"]
+    assert restore["with"]["key"] == _CACHE_KEY
+    assert save["with"]["key"] == _CACHE_KEY
+    assert restore["with"]["key"] == save["with"]["key"] == action_restore["with"]["key"]
+    assert "restore-keys" not in restore["with"]
+    assert "restore-keys" not in save["with"]
+    assert save["if"] == "success() && steps.restore.outputs.cache-hit != 'true'"
+    assert restore.get("id") == "restore"
+    for name, other in jobs.items():
+        for step in other["steps"]:
+            if _uses(step).startswith("actions/cache/save@"):
+                assert name == "provider-cache"
+                assert step["uses"] == "actions/cache/save@v4"
+    script = "\n".join(step.get("run", "") for step in job["steps"])
+    assert 'mkdir -p "$RUNNER_TEMP/tf-plugin-cache"' in script
+    assert "cp -R terraform/modules/s3" in script
+    assert "$RUNNER_TEMP/s3-init" in script
+    assert "export TF_PLUGIN_CACHE_DIR=$RUNNER_TEMP/tf-plugin-cache" in script
+    assert "export AWS_EC2_METADATA_DISABLED=true" in script
+    assert 'cd "$RUNNER_TEMP/s3-init"' in script
+    assert "terraform init -backend=false" in script
+    assert "terraform apply" not in script
+    assert "terraform destroy" not in script
+    assert save["with"]["path"] == "${{ runner.temp }}/tf-plugin-cache"
+
+    bootstrap = jobs["bootstrap-validation"]
+    assert bootstrap["name"] == "Bootstrap Validation"
+    assert bootstrap["needs"] == "classify"
+    assert bootstrap["if"] == _BOOTSTRAP_IF
+    assert bootstrap["runs-on"] == "ubuntu-24.04"
+    bootstrap_uses = [step["uses"] for step in bootstrap["steps"] if "uses" in step]
+    assert bootstrap_uses == [
+        "actions/checkout@v4",
+        "actions/setup-python@v5",
+        "hashicorp/setup-terraform@v3",
+    ]
+    bootstrap_script = "\n".join(step.get("run", "") for step in bootstrap["steps"])
+    assert "pytest -m real_bootstrap_tool" in bootstrap_script
+    assert "checkov" not in bootstrap_script
+    assert "TF_PLUGIN_CACHE_DIR" not in bootstrap_script
+    assert "tf-plugin-cache" not in bootstrap_script
+    assert "actions/cache" not in bootstrap_script
