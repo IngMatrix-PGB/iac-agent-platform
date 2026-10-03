@@ -1,6 +1,6 @@
 # Continuous integration
 
-`.github/workflows/ci.yml` runs on every pull request to `main` and every push to `main`. The jobs do not depend on each other.
+`.github/workflows/ci.yml` runs on every pull request to `main` and every push to `main`. Quality, Tests, Tool Validation, Frontend, and Classify do not depend on each other. Bootstrap Validation depends on Classify. Every job runs on `ubuntu-24.04`.
 
 ## Quality
 
@@ -18,11 +18,19 @@ This is the deterministic suite, including the golden evals. It does not need cr
 
 ## Tool Validation
 
-`pytest -m real_tool` runs the same behavior against Terraform 1.16.1 and Checkov 3.3.13. It needs the public Terraform Registry and uses placeholder AWS credentials. It does not call a real AWS API. See `docs/terraform-credential-free-plan.md`. The job reports on every run and is not a required check.
+`pytest -m real_tool` runs the same behavior against Terraform 1.16.1 and Checkov 3.3.13. Tool Validation installs Checkov 3.3.13 from `ci/requirements-checkov.txt`. It needs the public Terraform Registry and uses placeholder AWS credentials. It does not call a real AWS API. See `docs/terraform-credential-free-plan.md`. The job reports on every run and is not a required check.
 
 ## Frontend
 
 In `ui/`: `npm ci`, `npm test`, and `npm run build`. The job is not a required check.
+
+## Classify
+
+`Classify` always runs. It writes a step summary and records which validation shards a diff would select. Tool Validation still runs the full real-tool suite (`pytest -m real_tool`) and remains unconditional.
+
+## Bootstrap Validation
+
+Bootstrap Validation runs `pytest -m real_bootstrap_tool` when Classify selects bootstrap, or when Classify itself fails. It is the existing credential-free plan test. It does not call AWS and does not change the module. Tool Validation remains unconditional.
 
 ## What CI never does
 
@@ -35,6 +43,7 @@ ruff check .
 terraform fmt -check -recursive -diff terraform/ tests/terraform/
 pytest -m "not real_tool and not real_llm and not docker"
 pytest -m real_tool
+pytest -m real_bootstrap_tool
 ```
 
 Frontend: `npm ci && npm test && npm run build` from `ui/`.

@@ -16,7 +16,7 @@ concurrency:
 jobs:
   quality:
     name: Quality
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -64,7 +64,7 @@ jobs:
 
   tests:
     name: Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -83,7 +83,119 @@ jobs:
 
   tool-validation:
     name: Tool Validation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            ci/requirements-checkov.txt
+
+      - name: Install project (dev extras)
+        run: pip install -e ".[dev]"
+
+      - name: Set up Terraform 1.16.1
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.1"
+          terraform_wrapper: false
+
+      - name: Install Checkov 3.3.13
+        run: pip install -r ci/requirements-checkov.txt
+
+      - name: Run real-tool suite
+        run: pytest -m real_tool
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install, test, and build the operator UI
+        working-directory: ui
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+  classify:
+    name: Classify
+    runs-on: ubuntu-24.04
+    outputs:
+      s3: ${{ steps.result.outputs.s3 }}
+      sqs: ${{ steps.result.outputs.sqs }}
+      dynamodb: ${{ steps.result.outputs.dynamodb }}
+      ecr: ${{ steps.result.outputs.ecr }}
+      lambda: ${{ steps.result.outputs.lambda }}
+      api_gateway: ${{ steps.result.outputs.api_gateway }}
+      api_lambda: ${{ steps.result.outputs.api_lambda }}
+      api_lambda_dynamodb: ${{ steps.result.outputs.api_lambda_dynamodb }}
+      serverless_worker: ${{ steps.result.outputs.serverless_worker }}
+      security: ${{ steps.result.outputs.security }}
+      bootstrap: ${{ steps.result.outputs.bootstrap }}
+      frontend: ${{ steps.result.outputs.frontend }}
+      full: ${{ steps.result.outputs.full }}
+      reasons: ${{ steps.result.outputs.reasons }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Classify changed paths
+        id: result
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          paths="$RUNNER_TEMP/paths.txt"
+          zero="0000000000000000000000000000000000000000"
+          classify_unreadable() {
+            : > "$paths"
+            python scripts/ci_classify.py --paths-file "$paths" --unreadable --github-output "$GITHUB_OUTPUT" --step-summary "$GITHUB_STEP_SUMMARY"
+          }
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            if [ -z "$BASE_SHA" ]; then
+              classify_unreadable
+              exit 0
+            fi
+            git diff --name-only "$BASE_SHA"...HEAD > "$paths"
+          elif [ -z "$BEFORE_SHA" ] || [ "$BEFORE_SHA" = "$zero" ]; then
+            classify_unreadable
+            exit 0
+          else
+            git diff --name-only "$BEFORE_SHA" "$AFTER_SHA" > "$paths"
+          fi
+          python scripts/ci_classify.py --paths-file "$paths" --github-output "$GITHUB_OUTPUT" --step-summary "$GITHUB_STEP_SUMMARY"
+
+  bootstrap-validation:
+    name: Bootstrap Validation
+    runs-on: ubuntu-24.04
+    needs: classify
+    if: "${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.bootstrap == 'true') }}"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -103,29 +215,5 @@ jobs:
           terraform_version: "1.16.1"
           terraform_wrapper: false
 
-      - name: Install Checkov 3.3.13
-        run: pip install checkov==3.3.13
-
-      - name: Run real-tool suite
-        run: pytest -m real_tool
-
-  frontend:
-    name: Frontend
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: ui/package-lock.json
-
-      - name: Install, test, and build the operator UI
-        working-directory: ui
-        run: |
-          npm ci
-          npm test
-          npm run build
+      - name: Run credential-free bootstrap plan test
+        run: pytest -m real_bootstrap_tool
