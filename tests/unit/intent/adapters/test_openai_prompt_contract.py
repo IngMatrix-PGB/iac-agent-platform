@@ -34,7 +34,7 @@ def _prompt_contract() -> tuple[str, str]:
 
 def test_prompt_version_is_3():
     version, _ = _prompt_contract()
-    assert version == "4"
+    assert version == "5"
 
 
 def test_prompt_distinguishes_architecture_ambiguity_from_implementation_detail():
