@@ -1,7 +1,8 @@
-"""Classify itself is ungated; Quality, Tests, and Tool Validation stay ungated."""
+"""Classify itself is ungated; Quality, Tests, and Frontend stay ungated."""
 
 from __future__ import annotations
 
+import importlib.util
 import re
 from pathlib import Path
 
@@ -66,19 +67,17 @@ def _classify_invocations(script: str) -> list[str]:
     return invocations
 
 
-def test_classify_itself_is_ungated_and_quality_tests_and_tool_validation_stay_ungated():
+def test_classify_itself_is_ungated_and_quality_and_tests_stay_ungated():
     jobs = _jobs()
     classify = jobs["classify"]
     assert classify["name"] == "Classify"
     assert classify["runs-on"] == "ubuntu-24.04"
     assert "if" not in classify
-    assert "tool-validation" in jobs
-    assert "if" not in jobs["tool-validation"]
     assert "if" not in jobs["quality"]
     assert "if" not in jobs["tests"]
     script = "\n".join(step.get("run", "") for step in classify["steps"])
     assert "scripts/ci_classify.py" in script
-    assert "pytest -m real_tool" in _text()
+    assert "pytest -m real_tool tests/integration/" in _text()
 
 
 def test_classify_outputs_include_reasons_and_every_shard():
@@ -123,10 +122,33 @@ def test_classify_checkout_fetches_full_history():
     assert checkout["with"]["fetch-depth"] == 0
 
 
-def test_quality_tests_and_tool_validation_have_no_if():
+def test_quality_tests_and_frontend_have_no_if():
     jobs = _jobs()
-    for key in ("quality", "tests", "tool-validation", "frontend"):
+    for key in ("quality", "tests", "frontend"):
         assert "if" not in jobs[key]
+
+
+def test_shard_conditions_only_read_classifier_outputs():
+    jobs = _jobs()
+    for key, output in (
+        ("shard-s3", "s3"),
+        ("shard-sqs", "sqs"),
+        ("shard-dynamodb", "dynamodb"),
+        ("shard-ecr", "ecr"),
+        ("shard-lambda", "lambda"),
+        ("shard-api-gateway", "api_gateway"),
+        ("shard-api-lambda", "api_lambda"),
+        ("shard-api-lambda-dynamodb", "api_lambda_dynamodb"),
+        ("shard-serverless-worker", "serverless_worker"),
+        ("shard-security", "security"),
+    ):
+        condition = jobs[key]["if"]
+        assert condition == (
+            "${{ !cancelled() && (needs.classify.result != 'success' || "
+            f"needs.classify.outputs.{output} == 'true') }}}}"
+        )
+        assert "terraform/modules" not in condition
+        assert jobs[key]["needs"] == "classify"
 
 
 _BOOTSTRAP_IF = (
@@ -134,18 +156,19 @@ _BOOTSTRAP_IF = (
     "|| needs.classify.outputs.bootstrap == 'true') }}"
 )
 
-_ABSENT_VALIDATION_JOBS = (
-    "shard-s3",
-    "shard-sqs",
-    "shard-dynamodb",
-    "shard-ecr",
-    "shard-lambda",
-    "shard-api-gateway",
-    "shard-api-lambda",
-    "shard-api-lambda-dynamodb",
-    "shard-serverless-worker",
-    "shard-security",
-    "aws-plan",
+_ABSENT_VALIDATION_JOBS = ("aws-plan",)
+
+_SHARD_JOBS = (
+    ("shard-s3", "s3", "Terraform — S3"),
+    ("shard-sqs", "sqs", "Terraform — SQS"),
+    ("shard-dynamodb", "dynamodb", "Terraform — DynamoDB"),
+    ("shard-ecr", "ecr", "Terraform — ECR"),
+    ("shard-lambda", "lambda", "Terraform — Lambda"),
+    ("shard-api-gateway", "api_gateway", "Terraform — API Gateway"),
+    ("shard-api-lambda", "api_lambda", "Terraform — API Lambda"),
+    ("shard-api-lambda-dynamodb", "api_lambda_dynamodb", "Terraform — API Lambda DynamoDB"),
+    ("shard-serverless-worker", "serverless_worker", "Terraform — Serverless Worker"),
+    ("shard-security", "security", "Security Validation"),
 )
 
 _FORBIDDEN_CREDENTIAL_TEXT = (
@@ -173,14 +196,6 @@ def test_bootstrap_validation_runs_credential_free_plan_when_classify_selects_or
     text = _text()
     for secret in _FORBIDDEN_CREDENTIAL_TEXT:
         assert secret not in text
-    tool = jobs["tool-validation"]
-    assert "if" not in tool
-    tool_action = next(
-        step
-        for step in tool["steps"]
-        if str(step.get("uses", "")).startswith("./.github/actions/real-tool-setup")
-    )
-    assert tool_action["with"]["pytest-args"] == "pytest -m real_tool"
     for key in _ABSENT_VALIDATION_JOBS:
         assert key not in jobs
     assert "if" not in jobs["frontend"]
@@ -190,8 +205,6 @@ def test_checkov_pin_is_a_requirements_file():
     pin = Path("ci/requirements-checkov.txt").read_text().strip()
     assert pin == "checkov==3.3.13"
     jobs = _jobs()
-    tool = jobs["tool-validation"]
-    assert "if" not in tool
     action = yaml.safe_load(_ACTION.read_text())
     setup = next(
         step
@@ -208,12 +221,6 @@ def test_checkov_pin_is_a_requirements_file():
     assert 'pip install -e ".[dev]"' in script
     assert "pip install -r ci/requirements-checkov.txt" in script
     assert "pip install checkov==" not in script
-    tool_action = next(
-        step
-        for step in tool["steps"]
-        if str(step.get("uses", "")).startswith("./.github/actions/real-tool-setup")
-    )
-    assert tool_action["with"]["pytest-args"] == "pytest -m real_tool"
     bootstrap = jobs["bootstrap-validation"]
     bootstrap_script = "\n".join(step.get("run", "") for step in bootstrap["steps"])
     assert "checkov" not in bootstrap_script
@@ -279,24 +286,8 @@ def test_private_provider_cache_uses_one_path_and_saves_only_on_a_main_miss():
     assert "restore-keys" not in workflow
     assert "provider-restore" not in workflow
     jobs = _jobs()
-    assert not any(name.startswith("shard-") for name in jobs)
     for key in _ABSENT_VALIDATION_JOBS:
         assert key not in jobs
-
-    tool = jobs["tool-validation"]
-    assert "if" not in tool
-    assert tool["runs-on"] == "ubuntu-24.04"
-    tool_uses = [_uses(step) for step in tool["steps"]]
-    assert "actions/checkout@v4" in tool_uses
-    assert any(item.startswith("./.github/actions/real-tool-setup") for item in tool_uses)
-    assert not any(item.startswith("actions/cache/") for item in tool_uses)
-    assert not any(item.startswith("actions/setup-python@") for item in tool_uses)
-    tool_action = next(
-        step
-        for step in tool["steps"]
-        if _uses(step).startswith("./.github/actions/real-tool-setup")
-    )
-    assert tool_action["with"]["pytest-args"] == "pytest -m real_tool"
 
     job = jobs["provider-cache"]
     assert job["runs-on"] == "ubuntu-24.04"
@@ -352,3 +343,92 @@ def test_private_provider_cache_uses_one_path_and_saves_only_on_a_main_miss():
     assert "TF_PLUGIN_CACHE_DIR" not in bootstrap_script
     assert "tf-plugin-cache" not in bootstrap_script
     assert "actions/cache" not in bootstrap_script
+
+
+def _fail_closed(output: str) -> str:
+    return (
+        "${{ !cancelled() && (needs.classify.result != 'success' || "
+        f"needs.classify.outputs.{output} == 'true') }}}}"
+    )
+
+
+def _load_shard_files() -> dict[str, tuple[str, ...]]:
+    path = Path(__file__).resolve().parents[3] / "scripts" / "ci_classify.py"
+    spec = importlib.util.spec_from_file_location("ci_classify", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"classifier module is missing: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.SHARD_FILES
+
+
+def _real_tool_setup(job: dict) -> dict:
+    return next(
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("./.github/actions/real-tool-setup")
+    )
+
+
+def _listed_files(pytest_args: str) -> tuple[str, ...]:
+    prefix = "pytest -m real_tool "
+    assert pytest_args.startswith(prefix)
+    parts = pytest_args.removeprefix(prefix).split()
+    assert parts
+    assert all(part.startswith("tests/integration/") for part in parts)
+    return tuple(Path(part).name for part in parts)
+
+
+def test_shard_jobs_lock_names_needs_and_fail_closed_conditions():
+    jobs = _jobs()
+    shard_keys = {key for key, _, _ in _SHARD_JOBS}
+    assert shard_keys == {name for name in jobs if name.startswith("shard-")}
+    for key, output, display_name in _SHARD_JOBS:
+        job = jobs[key]
+        condition = job["if"]
+        assert job["name"] == display_name
+        assert job["runs-on"] == "ubuntu-24.04"
+        assert job["needs"] == "classify"
+        assert condition == _fail_closed(output)
+        assert "terraform/modules" not in condition
+        assert "serverless_worker/" not in condition
+        assert [step.get("uses") for step in job["steps"]] == [
+            "actions/checkout@v4",
+            "./.github/actions/real-tool-setup",
+        ]
+        for step in job["steps"]:
+            assert not str(step.get("uses", "")).startswith("actions/cache/save")
+    assert "aws-plan" not in jobs
+
+
+def test_monolithic_tool_validation_job_is_gone():
+    jobs = _jobs()
+    assert "tool-validation" not in jobs
+    assert all(job["name"] != "Tool Validation" for job in jobs.values())
+    for job in jobs.values():
+        for step in job["steps"]:
+            assert step.get("with", {}).get("pytest-args") != "pytest -m real_tool"
+
+
+def test_shard_pytest_args_follow_shard_files_without_overlap():
+    jobs = _jobs()
+    shard_files = _load_shard_files()
+    assert set(shard_files) == {output for _, output, _ in _SHARD_JOBS}
+    listed: dict[str, tuple[str, ...]] = {}
+    for key, output, _display_name in _SHARD_JOBS:
+        expected = "pytest -m real_tool " + " ".join(
+            f"tests/integration/{name}" for name in shard_files[output]
+        )
+        pytest_args = _real_tool_setup(jobs[key])["with"]["pytest-args"]
+        assert pytest_args == expected
+        listed[key] = _listed_files(pytest_args)
+        assert listed[key] == tuple(shard_files[output])
+    workflow_union = {name for files in listed.values() for name in files}
+    classifier_union = {name for files in shard_files.values() for name in files}
+    assert workflow_union == classifier_union
+    keys = list(listed)
+    for index, left in enumerate(keys):
+        for right in keys[index + 1 :]:
+            assert set(listed[left]).isdisjoint(set(listed[right]))
+    assert "test_sqs_renderer_terraform.py" not in listed["shard-s3"]
+    assert "test_lambda_renderer_terraform.py" not in listed["shard-sqs"]

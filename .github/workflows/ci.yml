@@ -81,18 +81,6 @@ jobs:
       - name: Run deterministic offline suite
         run: pytest -m "not real_tool and not real_llm and not docker"
 
-  tool-validation:
-    name: Tool Validation
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Run real-tool suite
-        uses: ./.github/actions/real-tool-setup
-        with:
-          pytest-args: pytest -m real_tool
-
   frontend:
     name: Frontend
     runs-on: ubuntu-24.04
@@ -198,6 +186,146 @@ jobs:
 
       - name: Run credential-free bootstrap plan test
         run: pytest -m real_bootstrap_tool
+
+  shard-s3:
+    name: Terraform — S3
+    runs-on: ubuntu-24.04
+    needs: classify
+    if: "${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.s3 == 'true') }}"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run real-tool suite
+        uses: ./.github/actions/real-tool-setup
+        with:
+          pytest-args: pytest -m real_tool tests/integration/test_s3_renderer_terraform.py tests/integration/test_s3_golden_real_tool_eval.py tests/integration/test_s3_workflow_integration.py tests/integration/test_s3_workflow_persistence.py
+
+  shard-sqs:
+    name: Terraform — SQS
+    runs-on: ubuntu-24.04
+    needs: classify
+    if: "${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.sqs == 'true') }}"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run real-tool suite
+        uses: ./.github/actions/real-tool-setup
+        with:
+          pytest-args: pytest -m real_tool tests/integration/test_sqs_renderer_terraform.py tests/integration/test_sqs_golden_real_tool_eval.py tests/integration/test_sqs_workflow_integration.py tests/integration/test_sqs_workflow_persistence.py tests/integration/test_sqs_workflow_hitl.py
+
+  shard-dynamodb:
+    name: Terraform — DynamoDB
+    runs-on: ubuntu-24.04
+    needs: classify
+    if: "${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.dynamodb == 'true') }}"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run real-tool suite
+        uses: ./.github/actions/real-tool-setup
+        with:
+          pytest-args: pytest -m real_tool tests/integration/test_dynamodb_renderer_terraform.py tests/integration/test_dynamodb_golden_real_tool_eval.py tests/integration/test_dynamodb_workflow_integration.py tests/integration/test_dynamodb_workflow_persistence.py
+
+  shard-ecr:
+    name: Terraform — ECR
+    runs-on: ubuntu-24.04
+    needs: classify
+    if: "${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.ecr == 'true') }}"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run real-tool suite
+        uses: ./.github/actions/real-tool-setup
+        with:
+          pytest-args: pytest -m real_tool tests/integration/test_ecr_renderer_terraform.py tests/integration/test_ecr_golden_real_tool_eval.py tests/integration/test_ecr_workflow_persistence.py
+
+  shard-lambda:
+    name: Terraform — Lambda
+    runs-on: ubuntu-24.04
+    needs: classify
+    if: "${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.lambda == 'true') }}"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run real-tool suite
+        uses: ./.github/actions/real-tool-setup
+        with:
+          pytest-args: pytest -m real_tool tests/integration/test_lambda_renderer_terraform.py tests/integration/test_lambda_golden_real_tool_eval.py tests/integration/test_lambda_workflow_integration.py tests/integration/test_lambda_workflow_persistence.py
+
+  shard-api-gateway:
+    name: Terraform — API Gateway
+    runs-on: ubuntu-24.04
+    needs: classify
+    if: "${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.api_gateway == 'true') }}"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run real-tool suite
+        uses: ./.github/actions/real-tool-setup
+        with:
+          pytest-args: pytest -m real_tool tests/integration/test_api_gateway_renderer_terraform.py
+
+  shard-api-lambda:
+    name: Terraform — API Lambda
+    runs-on: ubuntu-24.04
+    needs: classify
+    if: "${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.api_lambda == 'true') }}"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run real-tool suite
+        uses: ./.github/actions/real-tool-setup
+        with:
+          pytest-args: pytest -m real_tool tests/integration/test_api_lambda_renderer_terraform.py tests/integration/test_api_lambda_golden_real_tool_eval.py tests/integration/test_api_lambda_workflow_integration.py tests/integration/test_api_lambda_workflow_persistence.py
+
+  shard-api-lambda-dynamodb:
+    name: Terraform — API Lambda DynamoDB
+    runs-on: ubuntu-24.04
+    needs: classify
+    if: "${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.api_lambda_dynamodb == 'true') }}"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run real-tool suite
+        uses: ./.github/actions/real-tool-setup
+        with:
+          pytest-args: pytest -m real_tool tests/integration/test_api_lambda_dynamodb_renderer_terraform.py tests/integration/test_api_lambda_dynamodb_golden_real_tool_eval.py tests/integration/test_api_lambda_dynamodb_workflow_persistence.py
+
+  shard-serverless-worker:
+    name: Terraform — Serverless Worker
+    runs-on: ubuntu-24.04
+    needs: classify
+    if: "${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.serverless_worker == 'true') }}"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run real-tool suite
+        uses: ./.github/actions/real-tool-setup
+        with:
+          pytest-args: pytest -m real_tool tests/integration/test_serverless_worker_renderer_terraform.py tests/integration/test_serverless_worker_golden_real_tool_eval.py tests/integration/test_serverless_worker_workflow_integration.py tests/integration/test_serverless_worker_workflow_persistence.py tests/integration/test_application_composition.py tests/integration/test_cli_real_tool.py
+
+  shard-security:
+    name: Security Validation
+    runs-on: ubuntu-24.04
+    needs: classify
+    if: "${{ !cancelled() && (needs.classify.result != 'success' || needs.classify.outputs.security == 'true') }}"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run real-tool suite
+        uses: ./.github/actions/real-tool-setup
+        with:
+          pytest-args: pytest -m real_tool tests/integration/test_checkov_integration.py tests/integration/test_security_gate_integration.py tests/integration/test_platform_policy_integration.py tests/integration/test_plan_analyzer_integration.py tests/integration/test_terraform_runner_integration.py
 
   provider-cache:
     name: Provider Cache
