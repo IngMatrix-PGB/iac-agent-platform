@@ -20,6 +20,12 @@ This is the deterministic suite, including the golden evals. It does not need cr
 
 `pytest -m real_tool` runs the same behavior against Terraform 1.16.1 and Checkov 3.3.13. Tool Validation installs Checkov 3.3.13 from `ci/requirements-checkov.txt`. It needs the public Terraform Registry and uses placeholder AWS credentials. It does not call a real AWS API. See `docs/terraform-credential-free-plan.md`. The job reports on every run and is not a required check.
 
+Tool Validation restores the private Terraform plugin cache and does not save it. Only the Provider Cache job, on a push to `main`, saves that same path, and only on a cache miss.
+
+## Provider Cache
+
+Provider Cache runs only on a push to `main`. It restores `${{ runner.temp }}/tf-plugin-cache`, initializes a copy of `terraform/modules/s3` with `terraform init -backend=false`, and saves that same directory when the restore was a cache miss. It does not save Terraform state.
+
 ## Frontend
 
 In `ui/`: `npm ci`, `npm test`, and `npm run build`. The job is not a required check.
