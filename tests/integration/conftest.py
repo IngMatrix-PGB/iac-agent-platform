@@ -25,7 +25,9 @@ or mutate, a directory another developer session might also be using.
 mechanism) is used instead, so the cache is disposable pytest-owned
 scratch, cleaned up by pytest's normal `tmp_path` retention policy like
 any other test artifact — this module never recursively deletes an
-arbitrary system temp directory itself.
+arbitrary system temp directory itself. When the process environment
+sets `TF_PLUGIN_CACHE_DIR`, that directory is created if needed and
+used instead, so a shard runner can seed a private cache.
 
 Concurrency note: Terraform's provider plugin cache is not documented
 as safe for unlimited concurrent writers to the *same* uncached
@@ -49,14 +51,26 @@ import pytest
 _PLAN_ENV_OVERRIDES = {"AWS_ACCESS_KEY_ID": "test", "AWS_SECRET_ACCESS_KEY": "test"}
 
 
+def resolve_plugin_cache_dir(env_value: str | None, factory: pytest.TempPathFactory) -> Path:
+    """Return a Terraform provider plugin cache directory.
+
+    A non-None ``env_value`` is created if needed and returned. ``None``
+    keeps pytest's session temp directory named ``tf-plugin-cache``.
+    """
+    if env_value is not None:
+        path = Path(env_value)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    return factory.mktemp("tf-plugin-cache", numbered=False)
+
+
 @pytest.fixture(scope="session")
 def tf_plugin_cache_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    """One pytest-session-owned Terraform provider plugin cache
-    directory, created explicitly (Terraform requires the directory to
-    already exist). Never the developer's global
-    `~/.terraform.d/plugin-cache` or any other shared, mutable,
-    non-disposable location."""
-    return tmp_path_factory.mktemp("tf-plugin-cache", numbered=False)
+    """One Terraform provider plugin cache directory, created explicitly
+    (Terraform requires the directory to already exist). A process
+    ``TF_PLUGIN_CACHE_DIR`` is reused. Otherwise this is pytest-session
+    scratch, not the developer's global ``~/.terraform.d/plugin-cache``."""
+    return resolve_plugin_cache_dir(os.environ.get("TF_PLUGIN_CACHE_DIR"), tmp_path_factory)
 
 
 @pytest.fixture
