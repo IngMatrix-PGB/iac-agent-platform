@@ -81,18 +81,6 @@ jobs:
       - name: Run deterministic offline suite
         run: pytest -m "not real_tool and not real_llm and not docker"
 
-  tool-validation:
-    name: Tool Validation
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Run real-tool suite
-        uses: ./.github/actions/real-tool-setup
-        with:
-          pytest-args: pytest -m real_tool
-
   frontend:
     name: Frontend
     runs-on: ubuntu-24.04

@@ -1,4 +1,4 @@
-"""Classify itself is ungated; Quality, Tests, and Tool Validation stay ungated."""
+"""Classify itself is ungated; Quality, Tests, and Frontend stay ungated."""
 
 from __future__ import annotations
 
@@ -67,19 +67,17 @@ def _classify_invocations(script: str) -> list[str]:
     return invocations
 
 
-def test_classify_itself_is_ungated_and_quality_tests_and_tool_validation_stay_ungated():
+def test_classify_itself_is_ungated_and_quality_and_tests_stay_ungated():
     jobs = _jobs()
     classify = jobs["classify"]
     assert classify["name"] == "Classify"
     assert classify["runs-on"] == "ubuntu-24.04"
     assert "if" not in classify
-    assert "tool-validation" in jobs
-    assert "if" not in jobs["tool-validation"]
     assert "if" not in jobs["quality"]
     assert "if" not in jobs["tests"]
     script = "\n".join(step.get("run", "") for step in classify["steps"])
     assert "scripts/ci_classify.py" in script
-    assert "pytest -m real_tool" in _text()
+    assert "pytest -m real_tool tests/integration/" in _text()
 
 
 def test_classify_outputs_include_reasons_and_every_shard():
@@ -124,9 +122,9 @@ def test_classify_checkout_fetches_full_history():
     assert checkout["with"]["fetch-depth"] == 0
 
 
-def test_quality_tests_and_tool_validation_have_no_if():
+def test_quality_tests_and_frontend_have_no_if():
     jobs = _jobs()
-    for key in ("quality", "tests", "tool-validation", "frontend"):
+    for key in ("quality", "tests", "frontend"):
         assert "if" not in jobs[key]
 
 
@@ -151,14 +149,6 @@ def test_shard_conditions_only_read_classifier_outputs():
         )
         assert "terraform/modules" not in condition
         assert jobs[key]["needs"] == "classify"
-    assert "if" not in jobs["tool-validation"]
-    tool_steps = jobs["tool-validation"]["steps"]
-    action = next(
-        step
-        for step in tool_steps
-        if str(step.get("uses", "")).startswith("./.github/actions/real-tool-setup")
-    )
-    assert action["with"]["pytest-args"] == "pytest -m real_tool"
 
 
 _BOOTSTRAP_IF = (
@@ -206,14 +196,6 @@ def test_bootstrap_validation_runs_credential_free_plan_when_classify_selects_or
     text = _text()
     for secret in _FORBIDDEN_CREDENTIAL_TEXT:
         assert secret not in text
-    tool = jobs["tool-validation"]
-    assert "if" not in tool
-    tool_action = next(
-        step
-        for step in tool["steps"]
-        if str(step.get("uses", "")).startswith("./.github/actions/real-tool-setup")
-    )
-    assert tool_action["with"]["pytest-args"] == "pytest -m real_tool"
     for key in _ABSENT_VALIDATION_JOBS:
         assert key not in jobs
     assert "if" not in jobs["frontend"]
@@ -223,8 +205,6 @@ def test_checkov_pin_is_a_requirements_file():
     pin = Path("ci/requirements-checkov.txt").read_text().strip()
     assert pin == "checkov==3.3.13"
     jobs = _jobs()
-    tool = jobs["tool-validation"]
-    assert "if" not in tool
     action = yaml.safe_load(_ACTION.read_text())
     setup = next(
         step
@@ -241,12 +221,6 @@ def test_checkov_pin_is_a_requirements_file():
     assert 'pip install -e ".[dev]"' in script
     assert "pip install -r ci/requirements-checkov.txt" in script
     assert "pip install checkov==" not in script
-    tool_action = next(
-        step
-        for step in tool["steps"]
-        if str(step.get("uses", "")).startswith("./.github/actions/real-tool-setup")
-    )
-    assert tool_action["with"]["pytest-args"] == "pytest -m real_tool"
     bootstrap = jobs["bootstrap-validation"]
     bootstrap_script = "\n".join(step.get("run", "") for step in bootstrap["steps"])
     assert "checkov" not in bootstrap_script
@@ -314,21 +288,6 @@ def test_private_provider_cache_uses_one_path_and_saves_only_on_a_main_miss():
     jobs = _jobs()
     for key in _ABSENT_VALIDATION_JOBS:
         assert key not in jobs
-
-    tool = jobs["tool-validation"]
-    assert "if" not in tool
-    assert tool["runs-on"] == "ubuntu-24.04"
-    tool_uses = [_uses(step) for step in tool["steps"]]
-    assert "actions/checkout@v4" in tool_uses
-    assert any(item.startswith("./.github/actions/real-tool-setup") for item in tool_uses)
-    assert not any(item.startswith("actions/cache/") for item in tool_uses)
-    assert not any(item.startswith("actions/setup-python@") for item in tool_uses)
-    tool_action = next(
-        step
-        for step in tool["steps"]
-        if _uses(step).startswith("./.github/actions/real-tool-setup")
-    )
-    assert tool_action["with"]["pytest-args"] == "pytest -m real_tool"
 
     job = jobs["provider-cache"]
     assert job["runs-on"] == "ubuntu-24.04"
@@ -439,9 +398,16 @@ def test_shard_jobs_lock_names_needs_and_fail_closed_conditions():
         ]
         for step in job["steps"]:
             assert not str(step.get("uses", "")).startswith("actions/cache/save")
-    assert "if" not in jobs["tool-validation"]
-    assert _real_tool_setup(jobs["tool-validation"])["with"]["pytest-args"] == "pytest -m real_tool"
     assert "aws-plan" not in jobs
+
+
+def test_monolithic_tool_validation_job_is_gone():
+    jobs = _jobs()
+    assert "tool-validation" not in jobs
+    assert all(job["name"] != "Tool Validation" for job in jobs.values())
+    for job in jobs.values():
+        for step in job["steps"]:
+            assert step.get("with", {}).get("pytest-args") != "pytest -m real_tool"
 
 
 def test_shard_pytest_args_follow_shard_files_without_overlap():

@@ -1,6 +1,6 @@
 # Continuous integration
 
-`.github/workflows/ci.yml` runs on every pull request to `main` and every push to `main`. Quality, Tests, Tool Validation, Frontend, and Classify do not depend on each other. Bootstrap Validation and ten shard jobs depend on Classify. Every job runs on `ubuntu-24.04`.
+`.github/workflows/ci.yml` runs on every pull request to `main` and every push to `main`. Quality, Tests, Frontend, and Classify do not depend on each other. Bootstrap Validation and ten real-tool shard jobs depend on Classify. Every job runs on `ubuntu-24.04`.
 
 ## Quality
 
@@ -16,15 +16,13 @@ pytest -m "not real_tool and not real_llm and not docker"
 
 This is the deterministic suite, including the golden evals. It does not need credentials. `Tests` is a required status check on `main`.
 
-## Tool Validation
-
-`pytest -m real_tool` runs the same behavior against Terraform 1.16.1 and Checkov 3.3.13. Tool Validation installs Checkov 3.3.13 from `ci/requirements-checkov.txt`. It needs the public Terraform Registry and uses placeholder AWS credentials. It does not call a real AWS API. See `docs/terraform-credential-free-plan.md`. The job reports on every run and is not a required check.
-
-Tool Validation restores the private Terraform plugin cache and does not save it. Only the Provider Cache job, on a push to `main`, saves that same path, and only on a cache miss.
-
 ## Validation shards
 
-Ten shard jobs run beside unconditional Tool Validation. Each shard runs only its owned real_tool files. A failed Classify job runs every shard.
+Real-tool validation is blast-radius-specific. Classify selects the shard that owns a changed resource and the transitive shards that consume it. A resource-specific pull request does not run the full real-tool suite.
+
+The full shard union runs for a shared or high-blast-radius product path, a workflow change, an empty or unreadable diff, or a classifier failure. A failed Classify job runs every shard. Each shard runs `pytest -m real_tool` plus only its owned files, against Terraform 1.16.1 and Checkov 3.3.13 installed from `ci/requirements-checkov.txt`. Shards restore the private Terraform plugin cache and do not save it. Only the Provider Cache job, on a push to `main`, saves that same path, and only on a cache miss. The tests need the public Terraform Registry and use placeholder AWS credentials. They do not call a real AWS API. See `docs/terraform-credential-free-plan.md`.
+
+The monolithic Tool Validation job was the migration control. On run [37124356929](https://github.com/IngMatrix-PGB/iac-agent-platform/actions/runs/37124356929), its 79 passed tests matched the shard union for the same 39 files. That job is removed. The suite was not reduced.
 
 ## Provider Cache
 
@@ -36,11 +34,11 @@ In `ui/`: `npm ci`, `npm test`, and `npm run build`. The job is not a required c
 
 ## Classify
 
-`Classify` always runs. It writes a step summary and records which validation shards a diff would select. Tool Validation still runs the full real-tool suite (`pytest -m real_tool`) and remains unconditional.
+`Classify` always runs. It writes a step summary and records which validation shards a diff selects. Shard jobs read those outputs. They do not match paths in the workflow.
 
 ## Bootstrap Validation
 
-Bootstrap Validation runs `pytest -m real_bootstrap_tool` when Classify selects bootstrap, or when Classify itself fails. It is the existing credential-free plan test. It does not call AWS and does not change the module. Tool Validation remains unconditional.
+Bootstrap Validation runs `pytest -m real_bootstrap_tool` when Classify selects bootstrap, or when Classify itself fails. It is the existing credential-free plan test. It does not call AWS and does not change the module.
 
 ## What CI never does
 
