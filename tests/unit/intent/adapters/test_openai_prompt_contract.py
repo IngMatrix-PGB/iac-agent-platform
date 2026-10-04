@@ -34,7 +34,7 @@ def _prompt_contract() -> tuple[str, str]:
 
 def test_prompt_version_is_3():
     version, _ = _prompt_contract()
-    assert version == "5"
+    assert version == "6"
 
 
 def test_prompt_distinguishes_architecture_ambiguity_from_implementation_detail():
@@ -95,6 +95,20 @@ def test_prompt_states_http_api_does_not_imply_synchronous():
         "does not imply synchronous" in lowered
     )
     assert "never infer synchronous" in lowered
+
+
+def test_prompt_maps_explicit_response_immediacy_to_synchronous():
+    """Immediate or direct response wording is stated synchronous interaction.
+
+    Mentioning HTTP or API alone remains unspecified. The golden case1
+    sentence is not part of this contract.
+    """
+    _, instructions = _prompt_contract()
+    lowered = instructions.lower()
+    assert "http/api does not imply synchronous" in lowered
+    assert "explicit immediate or direct response semantics" in lowered
+    assert "interaction_pattern = synchronous" in lowered
+    assert "invokes some backend logic" not in lowered
 
 
 def test_prompt_states_forbidden_only_uses_unspecified_and_empty_capabilities():
