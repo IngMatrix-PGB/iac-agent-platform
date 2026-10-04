@@ -48,7 +48,7 @@ _LOGGER = logging.getLogger(__name__)
 #: Bumped whenever the instruction text below changes materially —
 #: recorded in telemetry so a behavior change is traceable to a prompt
 #: version, not silently invisible.
-_PROMPT_VERSION = "5"
+_PROMPT_VERSION = "6"
 
 _MAX_ATTEMPTS = 2
 _RETRY_BACKOFF_SECONDS = 1.0
@@ -140,6 +140,12 @@ HTTP/API does not imply synchronous. Never infer synchronous merely \
 because HTTP or API is mentioned. If interaction semantics are \
 architecturally required but not stated: interaction_pattern = \
 unspecified. Storage interaction_pattern may remain unspecified.
+Explicit immediate or direct response semantics are stated \
+interaction, not an infrastructure choice. Wording that a response is \
+returned immediately, that the system responds immediately, or that \
+an answer is given right away means interaction_pattern = \
+synchronous. A request that only mentions an HTTP API, without that \
+immediacy, keeps interaction_pattern = unspecified.
 
 ARCHITECTURE-BLOCKING AMBIGUITY:
 If workload_type, interaction_pattern, or capabilities cannot be \

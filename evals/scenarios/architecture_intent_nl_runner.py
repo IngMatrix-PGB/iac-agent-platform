@@ -103,11 +103,16 @@ def run_architecture_intent_nl_evals(
     guarded_interpreter = _CeilingEnforcingInterpreter(interpreter, ceiling=ceiling)
     capture = AdapterTelemetryCapture()
     adapter_logger = logging.getLogger("iac_agent.intent.adapters")
+    previous_level = adapter_logger.level
     adapter_logger.addHandler(capture)
 
     results: list[EvalResult] = []
     traces: list[tuple] = []
     try:
+        # The adapter emits attempt_count at INFO. The live process inherits
+        # WARNING from the root logger, so the capture handler would otherwise
+        # never see the record. Enable INFO only on this logger, then restore.
+        adapter_logger.setLevel(logging.INFO)
         for scenario in scenarios:
             try:
                 outcome = guarded_interpreter.interpret(
@@ -127,6 +132,7 @@ def run_architecture_intent_nl_evals(
             if is_configuration_rejection(outcome):
                 break
     finally:
+        adapter_logger.setLevel(previous_level)
         adapter_logger.removeHandler(capture)
 
     if guarded_interpreter.call_count != len(traces):
