@@ -1,0 +1,132 @@
+name: AWS plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number
+        required: true
+        type: number
+      proposal_sha:
+        description: Full proposal commit SHA
+        required: true
+        type: string
+      purpose:
+        description: profile or acceptance
+        required: true
+        type: choice
+        options:
+          - profile
+          - acceptance
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aws-plan-${{ inputs.pr_number }}-${{ inputs.proposal_sha }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project
+        run: pip install -e ".[dev]"
+
+      - name: Prepare trusted workspace
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python -m iac_agent.aws_plan prepare
+          --pr-number "${{ inputs.pr_number }}"
+          --proposal-sha "${{ inputs.proposal_sha }}"
+          --purpose "${{ inputs.purpose }}"
+          --executor-sha "${{ github.sha }}"
+          --output-dir artifacts/v3/handoff
+
+      - name: Upload handoff
+        uses: actions/upload-artifact@v4
+        with:
+          name: v3-plan-handoff
+          path: artifacts/v3/handoff
+          if-no-files-found: error
+
+  plan:
+    name: Plan
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: aws-plan
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project
+        run: pip install -e ".[dev]"
+
+      - name: Download handoff
+        uses: actions/download-artifact@v4
+        with:
+          name: v3-plan-handoff
+          path: artifacts/v3/handoff
+
+      - name: Verify handoff
+        run: >-
+          python -m iac_agent.aws_plan verify-handoff
+          --handoff artifacts/v3/handoff
+          --executor-sha "${{ github.sha }}"
+          --purpose "${{ inputs.purpose }}"
+          --evidence artifacts/v3/v3-plan-evidence.json
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::891377250201:role/IaCPlanRole
+          aws-region: us-east-1
+          role-duration-seconds: 900
+
+      - name: Real plan
+        run: >-
+          python -m iac_agent.aws_plan plan
+          --handoff artifacts/v3/handoff
+          --executor-sha "${{ github.sha }}"
+          --purpose "${{ inputs.purpose }}"
+          --evidence artifacts/v3/v3-plan-evidence.json
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v3-plan-evidence
+          path: artifacts/v3/v3-plan-evidence.json
+          if-no-files-found: error

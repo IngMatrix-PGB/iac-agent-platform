@@ -42,13 +42,33 @@ Record the `iac_plan_role_arn` output and set it as the
 `AWS_PLAN_ROLE_ARN` repository variable (not a secret — role ARNs are
 not sensitive) in `iac-agent-platform`'s GitHub repository settings.
 
+## V3 trust migration (human, not yet applied)
+
+V3 acceptance requires the role trust subject to be replaced. Do not
+leave both subjects in the policy. The replacement value is:
+
+```text
+repo:IngMatrix-PGB@167713460/iac-agent-platform@1368782253:environment:aws-plan
+```
+
+Audience stays `sts.amazonaws.com`, still `StringEquals`, still one
+subject. Apply that change from a human workstation after the GitHub
+Environment `aws-plan` exists and admits only `main`. The
+`pull_request` subject above is the currently documented live value
+until that human apply. This repository's workflows do not run
+`terraform apply` in this directory.
+
+The earlier OIDC smoke for the `pull_request` subject is federation
+evidence only. It is not V3 acceptance.
+
 ## Extending the permissions policy
 
 `policy/iac_plan_role_permissions.json` starts at the empirical
-minimum (`sts:GetCallerIdentity` only). Follow the discovery loop in
-the design spec (§8) and the implementation plan (Task 14) exactly:
-one `AccessDenied` at a time, one action added per commit, each with a
-written justification — never a bulk grant, never
-`AdministratorAccess`/`PowerUserAccess`/persistent `ReadOnlyAccess`.
-After editing the policy file here, re-apply this module (`terraform
-apply` again, same as above) for the change to take effect in AWS.
+minimum (`sts:GetCallerIdentity` only). A profile run that receives
+`AccessDenied` records the exact action when the error text includes
+it, returns `AUTHORIZATION_ERROR`, and stops. A human then decides
+whether that action is an acceptable non-mutating read. The workflow
+does not classify the action by its name and does not attach
+`ReadOnlyAccess`. After a human edits the policy file here, re-apply
+this module (`terraform apply` again, same as above) for the change to
+take effect in AWS.
