@@ -36,6 +36,7 @@ from iac_agent.intent.models import (
 )
 from iac_agent.intent.port import (
     IntentInterpreterError,
+    IntentProviderAuthenticationError,
     IntentProviderRefusalError,
     IntentProviderTimeoutError,
     IntentProviderUnavailableError,
@@ -251,7 +252,7 @@ class OpenAIIntentInterpreter:
             except openai.AuthenticationError as exc:
                 latency_ms = (time.monotonic() - start) * 1000
                 self._log(request_id, "unavailable", attempt, latency_ms)
-                raise IntentProviderUnavailableError(
+                raise IntentProviderAuthenticationError(
                     "OpenAI rejected the configured credential"
                 ) from exc
             except _REFUSAL_SHAPED_EXCEPTIONS as exc:

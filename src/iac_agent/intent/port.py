@@ -52,6 +52,14 @@ class IntentProviderUnavailableError(IntentInterpreterError):
     """The interpreter's provider could not be reached at all."""
 
 
+class IntentProviderAuthenticationError(IntentInterpreterError):
+    """The provider rejected the configured credential.
+
+    Raised on the first provider attempt. This is not a transient outage
+    and it is not a subclass of `IntentProviderUnavailableError`.
+    """
+
+
 class IntentProviderTimeoutError(IntentInterpreterError):
     """The interpreter's provider did not respond in time."""
 

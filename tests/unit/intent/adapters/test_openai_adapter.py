@@ -29,6 +29,7 @@ from iac_agent.intent.adapters.openai import OpenAIIntentInterpreter  # noqa: E4
 from iac_agent.intent.models import Capability, InteractionPattern, WorkloadType  # noqa: E402
 from iac_agent.intent.port import (  # noqa: E402
     IntentInterpreterError,
+    IntentProviderAuthenticationError,
     IntentProviderRefusalError,
     IntentProviderTimeoutError,
     IntentProviderUnavailableError,
@@ -229,10 +230,11 @@ def test_refusal_field_raises_intent_provider_refusal_error():
         adapter.interpret(natural_language_request="x", request_id=_REQUEST_ID)
 
 
-def test_authentication_error_at_request_time_raises_intent_provider_unavailable_error():
-    adapter, _ = _adapter([_auth_error()])
-    with pytest.raises(IntentProviderUnavailableError):
+def test_authentication_error_at_request_time_raises_intent_provider_authentication_error():
+    adapter, client = _adapter([_auth_error()])
+    with pytest.raises(IntentProviderAuthenticationError):
         adapter.interpret(natural_language_request="x", request_id=_REQUEST_ID)
+    assert len(client.responses.calls) == 1
 
 
 @pytest.mark.parametrize(

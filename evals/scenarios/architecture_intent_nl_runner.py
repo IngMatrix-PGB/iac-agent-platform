@@ -29,7 +29,11 @@ from evals.observability.layer2 import (
     build_layer2_document,
     write_layer2_diagnostic,
 )
-from evals.scenarios.architecture_intent_nl_loader import load_architecture_intent_nl_golden_dataset
+from evals.scenarios.architecture_intent_nl_loader import (
+    load_architecture_intent_nl_golden_dataset,
+    read_dataset_version,
+)
+from evals.scenarios.live_aggregate import is_configuration_rejection
 from evals.scenarios.runner import format_summary
 from iac_agent.domain.evals import EvalResult, EvalSuiteResult
 from iac_agent.intent.port import IntentInterpreterError, IntentInterpreterPort
@@ -120,8 +124,17 @@ def run_architecture_intent_nl_evals(
                 scenario_results.append(evaluate_resolver_compatibility(scenario, outcome))
             results.extend(scenario_results)
             traces.append((scenario, outcome, tuple(scenario_results)))
+            if is_configuration_rejection(outcome):
+                break
     finally:
         adapter_logger.removeHandler(capture)
+
+    if guarded_interpreter.call_count != len(traces):
+        raise RuntimeError(
+            "interpreter invocations "
+            f"{guarded_interpreter.call_count} did not match "
+            f"scenario executions {len(traces)}"
+        )
 
     if diagnostic_path is not None:
         document = build_layer2_document(
@@ -129,6 +142,8 @@ def run_architecture_intent_nl_evals(
             dataset_path=str(dataset_path),
             run_metadata=run_metadata,
             telemetry_by_request_id=capture.by_request_id,
+            interpreter_invocations=guarded_interpreter.call_count,
+            dataset_version=read_dataset_version(dataset_path),
         )
         write_layer2_diagnostic(document, path=Path(diagnostic_path))
 

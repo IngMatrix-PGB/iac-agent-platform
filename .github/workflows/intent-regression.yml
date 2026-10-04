@@ -1,0 +1,44 @@
+name: Intent regression
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: intent-regression
+  cancel-in-progress: false
+
+jobs:
+  live-intent-regression:
+    name: Live intent regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install project
+        run: pip install -e ".[dev,openai]"
+
+      - name: Run live intent regression
+        env:
+          IAC_AGENT_LLM_PROVIDER: openai
+          IAC_AGENT_LLM_MODEL: gpt-5-nano
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: python -m evals.live_intent_regression
+
+      - name: Upload run record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: intent-regression-run-record
+          path: artifacts/evals/layer2/layer2-diagnostic.json
+          if-no-files-found: error

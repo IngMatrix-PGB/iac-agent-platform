@@ -16,6 +16,7 @@ from iac_agent.domain.security import PolicyStatus
 from iac_agent.domain.workflow import WorkflowStatus
 from iac_agent.intent.models import ArchitectureIntent
 from iac_agent.intent.port import (
+    IntentProviderAuthenticationError,
     IntentProviderRefusalError,
     IntentProviderTimeoutError,
     IntentProviderUnavailableError,
@@ -34,6 +35,10 @@ from iac_agent.request import IacRequestSpec
 
 _ERROR_CODES: dict[type[BaseException], tuple[str, str]] = {
     IntentProviderUnavailableError: (
+        "intent_provider_unavailable",
+        "Intent provider unavailable.",
+    ),
+    IntentProviderAuthenticationError: (
         "intent_provider_unavailable",
         "Intent provider unavailable.",
     ),

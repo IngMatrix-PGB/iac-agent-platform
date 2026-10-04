@@ -21,6 +21,7 @@ from iac_agent.graph.workflow import build_iac_workflow
 from iac_agent.intent.models import ArchitectureIntent
 from iac_agent.intent.port import (
     IntentInterpreterError,
+    IntentProviderAuthenticationError,
     IntentProviderRefusalError,
     IntentProviderTimeoutError,
     IntentProviderUnavailableError,
@@ -147,6 +148,11 @@ class _UnreadableStdin(io.StringIO):
 _ERROR_CASES = [
     (
         IntentProviderUnavailableError("down"),
+        "intent_provider_unavailable",
+        "Intent provider unavailable.",
+    ),
+    (
+        IntentProviderAuthenticationError("rejected credential text"),
         "intent_provider_unavailable",
         "Intent provider unavailable.",
     ),

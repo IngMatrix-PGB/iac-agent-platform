@@ -11,6 +11,14 @@ import json
 
 from evals.scenarios.architecture_intent_nl_loader import load_architecture_intent_nl_golden_dataset
 from evals.scenarios.architecture_intent_nl_runner import DEFAULT_DATASET_PATH
+from iac_agent.intent.models import (
+    ArchitectureIntent,
+    AwsServiceHint,
+    Capability,
+    InteractionPattern,
+    WorkloadType,
+)
+from iac_agent.intent.resolver import ArchitectureResolver
 
 
 def _by_id():
@@ -29,6 +37,48 @@ def test_case4_and_case5_still_expect_object_storage_only():
         expected = by_id[scenario_id].expected
         assert expected.capabilities == ("object_storage",)
         assert expected.unresolved_questions_expected is False
+
+
+def test_storage_scenarios_expect_unspecified_interaction():
+    by_id = _by_id()
+    for scenario_id in (
+        "case4_object_storage_en",
+        "case4_object_storage_es",
+        "case5_explicit_hints_en",
+        "case5_explicit_hints_es",
+        "case11_request_terraform_generation",
+    ):
+        expected = by_id[scenario_id].expected
+        assert expected.workload_type == "storage"
+        assert expected.interaction_pattern == "unspecified"
+        assert expected.capabilities == ("object_storage",)
+
+
+def test_clear_s3_sentence_resolves_and_ambiguous_sentence_clarifies():
+    by_id = _by_id()
+    resolver = ArchitectureResolver()
+    clear = by_id["case5_explicit_hints_en"].expected
+    clear_result = resolver.resolve(
+        intent=ArchitectureIntent(
+            workload_type=WorkloadType(clear.workload_type),
+            interaction_pattern=InteractionPattern(clear.interaction_pattern),
+            capabilities=frozenset(Capability(c) for c in clear.capabilities),
+            user_provided_hints=frozenset(AwsServiceHint(h) for h in clear.user_provided_hints),
+        ),
+        request_id="v2-golden-clear",
+    )
+    assert clear_result.outcome == "resolved"
+    assert clear_result.matched_pattern == "storage+object_storage"
+    ambiguous = by_id["case6_ambiguous_architecture_en"].expected
+    ambiguous_result = resolver.resolve(
+        intent=ArchitectureIntent(
+            workload_type=WorkloadType(ambiguous.workload_type),
+            interaction_pattern=InteractionPattern.UNSPECIFIED,
+            capabilities=frozenset(),
+        ),
+        request_id="v2-golden-ambiguous",
+    )
+    assert ambiguous_result.outcome == "clarification_required"
 
 
 def test_case7_still_expects_unspecified_interaction():

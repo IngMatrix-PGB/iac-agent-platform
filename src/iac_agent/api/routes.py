@@ -24,6 +24,7 @@ from iac_agent.domain.approval import (
 from iac_agent.domain.workflow import validate_request_id
 from iac_agent.intent.port import (
     IntentInterpreterError,
+    IntentProviderAuthenticationError,
     IntentProviderRefusalError,
     IntentProviderTimeoutError,
     IntentProviderUnavailableError,
@@ -33,6 +34,11 @@ from iac_agent.intent.port import (
 
 _INTERPRETER_ERRORS: dict[type[BaseException], tuple[str, str, int]] = {
     IntentProviderUnavailableError: (
+        "intent_provider_unavailable",
+        "Intent provider unavailable.",
+        503,
+    ),
+    IntentProviderAuthenticationError: (
         "intent_provider_unavailable",
         "Intent provider unavailable.",
         503,

@@ -47,13 +47,14 @@ IAC_AGENT_LLM_PROVIDER=openai IAC_AGENT_LLM_MODEL=gpt-5-nano \
   OPENAI_API_KEY=... pytest -m real_llm
 ```
 
-This makes real network calls to OpenAI and consumes real tokens — it
-is never run automatically. The `real_llm` pytest marker is excluded
-from every CI job (`Quality`, `Tests`, `Tool Validation`); nothing in
-this repository sets `IAC_AGENT_LLM_PROVIDER` on your behalf. The
-golden dataset has ~24 scenarios, so a full run makes roughly that many
-provider calls (at most double that, since a transient failure is
-retried once).
+This makes real network calls to OpenAI and consumes real tokens.
+Pull-request CI still excludes the `real_llm` marker and does not set
+`IAC_AGENT_LLM_PROVIDER`. A human measures the golden set by dispatching
+the Intent regression workflow (`.github/workflows/intent-regression.yml`).
+That workflow is `workflow_dispatch` only. The golden dataset has 26
+scenarios, so a complete run makes 26 interpreter invocations and 26
+provider attempts, or 52 provider attempts when every invocation uses
+its one transient retry.
 
 ## Privacy
 
