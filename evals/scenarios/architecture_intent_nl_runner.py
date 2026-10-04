@@ -30,6 +30,7 @@ from evals.observability.layer2 import (
     write_layer2_diagnostic,
 )
 from evals.scenarios.architecture_intent_nl_loader import load_architecture_intent_nl_golden_dataset
+from evals.scenarios.live_aggregate import is_configuration_rejection
 from evals.scenarios.runner import format_summary
 from iac_agent.domain.evals import EvalResult, EvalSuiteResult
 from iac_agent.intent.port import IntentInterpreterError, IntentInterpreterPort
@@ -120,6 +121,8 @@ def run_architecture_intent_nl_evals(
                 scenario_results.append(evaluate_resolver_compatibility(scenario, outcome))
             results.extend(scenario_results)
             traces.append((scenario, outcome, tuple(scenario_results)))
+            if is_configuration_rejection(outcome):
+                break
     finally:
         adapter_logger.removeHandler(capture)
 
