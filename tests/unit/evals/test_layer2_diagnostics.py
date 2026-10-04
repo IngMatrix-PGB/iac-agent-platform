@@ -405,6 +405,55 @@ def _intent_from_expected(expected: ExpectedOutcome) -> ArchitectureIntent:
     )
 
 
+def test_runner_records_measured_adapter_attempts_without_leaving_info_enabled(tmp_path):
+    """The live adapter logs attempt_count at INFO on the child logger.
+
+    The test starts from the process default that suppresses INFO. It
+    does not enable INFO itself and does not inject telemetry.
+    """
+    child = logging.getLogger("iac_agent.intent.adapters.openai")
+    parent = logging.getLogger("iac_agent.intent.adapters")
+    saved_child_level = child.level
+    saved_parent_level = parent.level
+    child.setLevel(logging.NOTSET)
+    parent.setLevel(logging.NOTSET)
+    assert child.isEnabledFor(logging.INFO) is False
+    measured_attempts = 2
+
+    class _LoggingInterpreter:
+        def interpret(self, *, natural_language_request: str, request_id: str):
+            logging.getLogger("iac_agent.intent.adapters.openai").info(
+                "intent interpretation schema_valid",
+                extra={
+                    "request_id": request_id,
+                    "attempt_count": measured_attempts,
+                    "provider": "openai",
+                    "model": "gpt-5-nano",
+                    "prompt_version": "6",
+                    "latency_ms": 1.0,
+                    "outcome_category": "schema_valid",
+                },
+            )
+            return _intent(assumptions=(), unresolved_questions=(), logical_name_hint=None)
+
+    dataset_path = _tiny_dataset(tmp_path / "dataset.json")
+    diagnostic_path = tmp_path / "layer2-diagnostic.json"
+    try:
+        run_architecture_intent_nl_evals(
+            interpreter=_LoggingInterpreter(),
+            dataset_path=dataset_path,
+            diagnostic_path=diagnostic_path,
+        )
+        payload = json.loads(diagnostic_path.read_text(encoding="utf-8"))
+        assert payload["scenarios"][0]["provider_attempt_count"] == measured_attempts
+        assert payload["run"]["provider_attempts"] == measured_attempts
+        assert parent.level == logging.NOTSET
+        assert child.isEnabledFor(logging.INFO) is False
+    finally:
+        child.setLevel(saved_child_level)
+        parent.setLevel(saved_parent_level)
+
+
 def test_golden_dataset_fake_run_records_twenty_six_executions_and_invocations(tmp_path):
     scenarios = load_architecture_intent_nl_golden_dataset(DEFAULT_DATASET_PATH)
     interpreter = FakeIntentInterpreter(
