@@ -13,7 +13,14 @@ from pydantic import ValidationError
 
 from iac_agent.aws_plan.target import HANDOFF_MAX_BYTES
 from iac_agent.aws_plan.workspace import build_v3_workspace
+from iac_agent.domain.security import (
+    FindingSource,
+    PolicyStatus,
+    SecurityFinding,
+    SecuritySeverity,
+)
 from iac_agent.providers.aws.sqs.contract import DlqSpec, EncryptionSpec, SQSResourceSpec
+from iac_agent.security.checkov import CheckovScanResult
 
 _ROOT_FILES = frozenset(
     {"workspace/main.tf", "workspace/versions.tf", "workspace/provider.tf"}
@@ -119,6 +126,92 @@ class HandoffFile:
 
 
 @dataclass(frozen=True)
+class StoredCheckov:
+    """Normalized Checkov result carried from Job A. No raw scanner JSON."""
+
+    findings: tuple[SecurityFinding, ...]
+    passed_checks: int
+    failed_checks: int
+    skipped_checks: int
+    scanner_version: str | None
+
+    def to_result(self) -> CheckovScanResult:
+        return CheckovScanResult(
+            findings=self.findings,
+            passed_checks=self.passed_checks,
+            failed_checks=self.failed_checks,
+            skipped_checks=self.skipped_checks,
+            scanner_version=self.scanner_version,
+        )
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "findings": [
+                {
+                    "policy_id": finding.policy_id,
+                    "severity": finding.severity.value,
+                    "status": finding.status.value,
+                    "resource": finding.resource,
+                    "message": finding.message,
+                    "source": finding.source.value,
+                }
+                for finding in self.findings
+            ],
+            "passed_checks": self.passed_checks,
+            "failed_checks": self.failed_checks,
+            "skipped_checks": self.skipped_checks,
+            "scanner_version": self.scanner_version,
+        }
+
+    @classmethod
+    def from_result(cls, result: CheckovScanResult) -> StoredCheckov:
+        return cls(
+            findings=result.findings,
+            passed_checks=result.passed_checks,
+            failed_checks=result.failed_checks,
+            skipped_checks=result.skipped_checks,
+            scanner_version=result.scanner_version,
+        )
+
+    @classmethod
+    def from_json(cls, payload: object) -> StoredCheckov:
+        if payload is None:
+            return cls((), 0, 0, 0, None)
+        if not isinstance(payload, dict):
+            raise HandoffRejected("checkov result is not an object")
+        findings: list[SecurityFinding] = []
+        raw_findings = payload.get("findings", [])
+        if not isinstance(raw_findings, list):
+            raise HandoffRejected("checkov findings are not a list")
+        for item in raw_findings:
+            if not isinstance(item, dict):
+                raise HandoffRejected("checkov finding is not an object")
+            try:
+                findings.append(
+                    SecurityFinding(
+                        policy_id=item["policy_id"],
+                        severity=SecuritySeverity(item["severity"]),
+                        status=PolicyStatus(item["status"]),
+                        resource=item["resource"],
+                        message=item["message"],
+                        source=FindingSource(item["source"]),
+                    )
+                )
+            except (KeyError, ValueError) as exc:
+                raise HandoffRejected("checkov finding is incomplete") from exc
+        try:
+            return cls(
+                findings=tuple(findings),
+                passed_checks=int(payload["passed_checks"]),
+                failed_checks=int(payload["failed_checks"]),
+                skipped_checks=int(payload["skipped_checks"]),
+                scanner_version=payload.get("scanner_version"),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HandoffRejected("checkov result is incomplete") from exc
+
+
+@dataclass(frozen=True)
 class HandoffManifest:
     schema_version: str
     proposal_sha: str
@@ -129,6 +222,7 @@ class HandoffManifest:
     proposal_main_sha256: str
     proposal_versions_sha256: str
     canonical_inputs: CanonicalInputs
+    checkov: StoredCheckov
     files: tuple[HandoffFile, ...]
 
 
@@ -144,6 +238,7 @@ def write_handoff(
     proposal_main_sha256: str,
     proposal_versions_sha256: str,
     spec: SQSResourceSpec,
+    checkov: CheckovScanResult | None = None,
 ) -> HandoffManifest:
     root.mkdir(parents=True, exist_ok=False)
     destination = root / "workspace"
@@ -159,6 +254,11 @@ def write_handoff(
         proposal_main_sha256=proposal_main_sha256,
         proposal_versions_sha256=proposal_versions_sha256,
         canonical_inputs=CanonicalInputs.from_spec(spec),
+        checkov=(
+            StoredCheckov.from_result(checkov)
+            if checkov is not None
+            else StoredCheckov((), 0, 0, 0, None)
+        ),
         files=files,
     )
     _write_manifest(root / "manifest.json", manifest)
@@ -240,6 +340,7 @@ def _write_manifest(path: Path, manifest: HandoffManifest) -> None:
         "proposal_main_sha256": manifest.proposal_main_sha256,
         "proposal_versions_sha256": manifest.proposal_versions_sha256,
         "canonical_inputs": manifest.canonical_inputs.to_json(),
+        "checkov": manifest.checkov.to_json(),
         "files": [
             {"path": item.path, "size": item.size, "sha256": item.sha256}
             for item in manifest.files
@@ -281,6 +382,7 @@ def _read_manifest(path: Path) -> HandoffManifest:
             proposal_main_sha256=payload["proposal_main_sha256"],
             proposal_versions_sha256=payload["proposal_versions_sha256"],
             canonical_inputs=CanonicalInputs.from_json(payload.get("canonical_inputs")),
+            checkov=StoredCheckov.from_json(payload.get("checkov")),
             files=tuple(files),
         )
     except KeyError as exc:
