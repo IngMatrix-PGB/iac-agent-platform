@@ -12,6 +12,7 @@ import pytest
 from iac_agent.intent.models import ArchitectureIntent
 from iac_agent.intent.port import (
     IntentInterpreterError,
+    IntentProviderAuthenticationError,
     IntentProviderRefusalError,
     IntentProviderTimeoutError,
     IntentProviderUnavailableError,
@@ -51,6 +52,7 @@ class FakeIntentInterpreter:
         IntentSchemaVersionUnsupportedError,
         IntentValidationError,
         IntentProviderUnavailableError,
+        IntentProviderAuthenticationError,
         IntentProviderTimeoutError,
         IntentProviderRefusalError,
     ],
@@ -58,6 +60,10 @@ class FakeIntentInterpreter:
 def test_intent_interpreter_error_hierarchy_bases(subtype):
     assert issubclass(subtype, IntentInterpreterError)
     assert issubclass(IntentInterpreterError, Exception)
+
+
+def test_authentication_error_is_not_an_unavailability_subclass():
+    assert not issubclass(IntentProviderAuthenticationError, IntentProviderUnavailableError)
 
 
 def test_parse_intent_payload_valid_payload_returns_architecture_intent():

@@ -12,7 +12,10 @@ from iac_agent.app.capabilities import CapabilityPresence, RuntimeCapabilities
 from iac_agent.app.service import WorkflowView
 from iac_agent.domain.workflow import WorkflowStage, WorkflowStatus
 from iac_agent.intent.models import ArchitectureIntent, Capability, InteractionPattern, WorkloadType
-from iac_agent.intent.port import IntentProviderUnavailableError
+from iac_agent.intent.port import (
+    IntentProviderAuthenticationError,
+    IntentProviderUnavailableError,
+)
 from iac_agent.intent.resolver import (
     ClarificationReason,
     ClarificationRequest,
@@ -238,6 +241,18 @@ def test_interpreter_failure_hides_exception_text():
     assert response.json()["error"] == "intent_provider_unavailable"
     assert response.json()["message"] == "Intent provider unavailable."
     assert "secret downstream" not in response.text
+
+
+def test_authentication_rejection_keeps_the_public_unavailable_response():
+    holder = Holder(error=IntentProviderAuthenticationError("rejected credential text"))
+    response = _client(holder).post(
+        "/api/v1/requests",
+        json={"natural_language_request": "queue", "request_id": "req-auth"},
+    )
+    assert response.status_code == 503
+    assert response.json()["error"] == "intent_provider_unavailable"
+    assert response.json()["message"] == "Intent provider unavailable."
+    assert "rejected credential text" not in response.text
 
 
 def test_unknown_valid_request_id_is_404_and_not_a_synthetic_status():
