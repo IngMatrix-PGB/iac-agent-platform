@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from evals.scenarios.architecture_intent_nl_loader import ExpectedOutcome, Scenario
+from evals.scenarios.live_aggregate import aggregate_result, scenario_result
 from iac_agent.domain.evals import EvalResult
 from iac_agent.intent.models import ArchitectureIntent, Capability, InteractionPattern, WorkloadType
 from iac_agent.intent.resolver import ArchitectureResolver
@@ -25,15 +26,38 @@ DEFAULT_LAYER2_DIAGNOSTIC_PATH = DEFAULT_LAYER2_DIAGNOSTIC_DIR / "layer2-diagnos
 
 _EVAL_REQUEST_ID = "layer2-eval-fixture-request"
 
-_ALLOWED_DOCUMENT_KEYS = frozenset({"run", "results"})
+_ALLOWED_DOCUMENT_KEYS = frozenset({"schema_version", "run", "results", "scenarios"})
 _ALLOWED_RUN_KEYS = frozenset(
     {
         "provider",
         "model",
         "prompt_version",
         "dataset_path",
+        "dataset_version",
         "scenario_count",
+        "scenario_executions",
+        "interpreter_invocations",
+        "provider_attempts",
+        "aggregate_result",
         "evaluation_count",
+        "run_id",
+        "timestamp",
+        "git_sha",
+    }
+)
+_ALLOWED_SCENARIO_KEYS = frozenset(
+    {
+        "scenario_id",
+        "scenario_result",
+        "interpreter_invocations",
+        "provider_attempt_count",
+        "expected",
+        "actual",
+        "resolver_outcome_expected",
+        "resolver_outcome_actual",
+        "provider_error_class",
+        "latency_ms",
+        "token_usage",
     }
 )
 _ALLOWED_RESULT_KEYS = frozenset(
@@ -89,6 +113,7 @@ _TELEMETRY_KEYS = frozenset(
         "prompt_version",
         "attempt_count",
         "outcome_category",
+        "latency_ms",
         "input_tokens",
         "output_tokens",
     }
@@ -174,10 +199,16 @@ def build_layer2_document(
     dataset_path: str,
     run_metadata: Mapping[str, str] | None = None,
     telemetry_by_request_id: Mapping[str, Mapping[str, object]] | None = None,
+    interpreter_invocations: int | None = None,
+    dataset_version: int | None = None,
+    aggregate_override: str | None = None,
 ) -> dict[str, Any]:
     metadata = dict(run_metadata or {})
     telemetry = telemetry_by_request_id or {}
     results: list[dict[str, object]] = []
+    scenarios: list[dict[str, object]] = []
+    scenario_names: list[str] = []
+    provider_attempts = 0
     for scenario, outcome, eval_results in traces:
         expected_normalized = normalize_expected_semantics(scenario.expected)
         if isinstance(outcome, ArchitectureIntent):
@@ -200,20 +231,55 @@ def build_layer2_document(
                     row_telemetry=row_telemetry,
                 )
             )
+        name, error_class = scenario_result(outcome, eval_results)
+        scenario_names.append(name)
+        attempt_count = row_telemetry.get("attempt_count")
+        if isinstance(attempt_count, int) and not isinstance(attempt_count, bool):
+            provider_attempts += attempt_count
+        scenarios.append(
+            _scenario_row(
+                scenario_id=scenario.id,
+                scenario_name=name,
+                error_class=error_class,
+                expected_normalized=expected_normalized,
+                actual_normalized=actual_normalized,
+                expected_resolver=expected_resolver,
+                actual_resolver=actual_resolver,
+                row_telemetry=row_telemetry,
+            )
+        )
 
+    if traces:
+        aggregate = aggregate_result(scenario_names)
+    elif aggregate_override is not None:
+        aggregate = aggregate_override
+    else:
+        aggregate = aggregate_result(())
+    invocations = len(traces) if interpreter_invocations is None else interpreter_invocations
     run: dict[str, object] = {
         "dataset_path": dataset_path,
         "scenario_count": len(traces),
+        "scenario_executions": len(traces),
+        "interpreter_invocations": invocations,
+        "provider_attempts": provider_attempts,
+        "aggregate_result": aggregate,
         "evaluation_count": len(results),
     }
-    for key in ("provider", "model", "prompt_version"):
+    if dataset_version is not None:
+        run["dataset_version"] = dataset_version
+    for key in ("provider", "model", "prompt_version", "run_id", "timestamp", "git_sha"):
         value = metadata.get(key)
-        if value is None:
+        if value is None and key in ("provider", "model", "prompt_version"):
             value = _first_telemetry_value(telemetry, key)
         if value is not None:
             run[key] = value
 
-    document = {"run": run, "results": results}
+    document = {
+        "schema_version": "1",
+        "run": run,
+        "results": results,
+        "scenarios": scenarios,
+    }
     _validate_document(document)
     return document
 
@@ -226,6 +292,39 @@ def write_layer2_diagnostic(document: Mapping[str, Any], *, path: Path) -> Path:
         json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     return destination
+
+
+def _scenario_row(
+    *,
+    scenario_id: str,
+    scenario_name: str,
+    error_class: str | None,
+    expected_normalized: dict[str, object],
+    actual_normalized: dict[str, object] | None,
+    expected_resolver: str | None,
+    actual_resolver: str | None,
+    row_telemetry: Mapping[str, object],
+) -> dict[str, object]:
+    row: dict[str, object] = {
+        "scenario_id": scenario_id,
+        "scenario_result": scenario_name,
+        "interpreter_invocations": 1,
+        "expected": expected_normalized,
+        "actual": actual_normalized,
+        "resolver_outcome_expected": expected_resolver,
+        "resolver_outcome_actual": actual_resolver,
+    }
+    if error_class is not None:
+        row["provider_error_class"] = error_class
+    attempt_count = row_telemetry.get("attempt_count")
+    if isinstance(attempt_count, int) and not isinstance(attempt_count, bool):
+        row["provider_attempt_count"] = attempt_count
+    if "latency_ms" in row_telemetry:
+        row["latency_ms"] = row_telemetry["latency_ms"]
+    token_usage = {key: row_telemetry[key] for key in _ALLOWED_TOKEN_KEYS if key in row_telemetry}
+    if token_usage:
+        row["token_usage"] = token_usage
+    return row
 
 
 def _result_row(
@@ -275,6 +374,26 @@ def _first_telemetry_value(
     return None
 
 
+def _validate_normalized_mapping(nested: object, name: str) -> None:
+    if nested is None:
+        return
+    if not isinstance(nested, Mapping):
+        raise ValueError(f"{name} must be an object")
+    extra_nested = set(nested) - _ALLOWED_NORMALIZED_KEYS
+    if extra_nested:
+        raise ValueError(f"forbidden or unknown normalized key: {sorted(extra_nested)}")
+
+
+def _validate_token_mapping(tokens: object) -> None:
+    if tokens is None:
+        return
+    if not isinstance(tokens, Mapping):
+        raise ValueError("token_usage must be an object")
+    extra_tokens = set(tokens) - _ALLOWED_TOKEN_KEYS
+    if extra_tokens:
+        raise ValueError(f"forbidden or unknown token_metadata key: {sorted(extra_tokens)}")
+
+
 def _validate_document(document: Mapping[str, Any]) -> None:
     _reject_forbidden_keys(document)
     extra_top = set(document) - _ALLOWED_DOCUMENT_KEYS
@@ -286,9 +405,24 @@ def _validate_document(document: Mapping[str, Any]) -> None:
     extra_run = set(run) - _ALLOWED_RUN_KEYS
     if extra_run:
         raise ValueError(f"diagnostic run has unknown keys: {sorted(extra_run)}")
+    schema_version = document.get("schema_version")
+    if schema_version is not None and schema_version != "1":
+        raise ValueError("diagnostic schema_version must be '1'")
     results = document.get("results")
     if not isinstance(results, list):
         raise ValueError("diagnostic document is missing 'results'")
+    scenarios = document.get("scenarios", [])
+    if not isinstance(scenarios, list):
+        raise ValueError("diagnostic scenarios must be a list")
+    for scenario_row in scenarios:
+        if not isinstance(scenario_row, Mapping):
+            raise ValueError("diagnostic scenario row must be an object")
+        extra_scenario = set(scenario_row) - _ALLOWED_SCENARIO_KEYS
+        if extra_scenario:
+            raise ValueError(f"forbidden or unknown diagnostic key: {sorted(extra_scenario)}")
+        _validate_normalized_mapping(scenario_row.get("expected"), "expected")
+        _validate_normalized_mapping(scenario_row.get("actual"), "actual")
+        _validate_token_mapping(scenario_row.get("token_usage"))
     for row in results:
         if not isinstance(row, Mapping):
             raise ValueError("diagnostic result row must be an object")

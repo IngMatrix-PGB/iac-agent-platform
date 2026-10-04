@@ -52,6 +52,21 @@ class Scenario:
     expected: ExpectedOutcome
 
 
+def read_dataset_version(path: Path | str) -> int:
+    """Return the integer `version` of a golden dataset file."""
+    file_path = Path(path)
+    try:
+        payload = json.loads(file_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise DatasetError(f"could not read dataset version: {file_path}") from exc
+    if not isinstance(payload, dict):
+        raise DatasetError(f"dataset root must be a JSON object: {file_path}")
+    version = payload.get("version")
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise DatasetError(f"dataset 'version' must be an integer: {file_path}")
+    return version
+
+
 def load_architecture_intent_nl_golden_dataset(path: Path | str) -> tuple[Scenario, ...]:
     """Load and validate the golden dataset at `path`. Scenarios are
     returned in exactly the order they appear in the dataset file."""

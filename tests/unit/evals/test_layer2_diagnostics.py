@@ -18,15 +18,25 @@ from evals.observability.layer2 import (
     normalize_intent_semantics,
     write_layer2_diagnostic,
 )
-from evals.scenarios.architecture_intent_nl_loader import ExpectedOutcome, Scenario
-from evals.scenarios.architecture_intent_nl_runner import run_architecture_intent_nl_evals
+from evals.scenarios.architecture_intent_nl_loader import (
+    ExpectedOutcome,
+    Scenario,
+    load_architecture_intent_nl_golden_dataset,
+    read_dataset_version,
+)
+from evals.scenarios.architecture_intent_nl_runner import (
+    DEFAULT_DATASET_PATH,
+    run_architecture_intent_nl_evals,
+)
 from iac_agent.domain.evals import EvalResult, EvalStatus
 from iac_agent.intent.models import (
     ArchitectureIntent,
+    AwsServiceHint,
     Capability,
     InteractionPattern,
     WorkloadType,
 )
+from iac_agent.intent.port import IntentProviderTimeoutError
 
 RAW_REQUEST_SENTINEL = "RAW_REQUEST_SENTINEL_DO_NOT_PERSIST"
 ASSUMPTION_SENTINEL = "ASSUMPTION_SENTINEL_DO_NOT_PERSIST"
@@ -150,13 +160,22 @@ def test_build_layer2_document_allowlist_and_resolver_outcomes():
         dataset_path="evals/datasets/architecture_intent_nl_golden.json",
         run_metadata={"provider": "openai", "model": "gpt-5-nano", "prompt_version": "2"},
     )
-    assert set(document) <= {"run", "results"}
+    assert set(document) <= {"schema_version", "run", "results", "scenarios"}
+    assert document["schema_version"] == "1"
     run = document["run"]
     assert run["provider"] == "openai"
     assert run["model"] == "gpt-5-nano"
     assert run["prompt_version"] == "2"
     assert run["scenario_count"] == 1
+    assert run["scenario_executions"] == 1
+    assert run["interpreter_invocations"] == 1
+    assert run["provider_attempts"] == 0
+    assert run["aggregate_result"] == "PASS"
     assert run["evaluation_count"] == 1
+    scenario_row = document["scenarios"][0]
+    assert scenario_row["scenario_id"] == "case1_sync_api_en"
+    assert scenario_row["scenario_result"] == "PASS"
+    assert scenario_row["interpreter_invocations"] == 1
     row = document["results"][0]
     assert row["scenario_id"] == "case1_sync_api_en"
     assert row["evaluator"] == "semantic_fields"
@@ -247,6 +266,7 @@ def test_telemetry_capture_copies_only_safe_extras():
                 "model": "gpt-5-nano",
                 "prompt_version": "2",
                 "attempt_count": 1,
+                "latency_ms": 12.5,
                 "outcome_category": "schema_valid",
                 "input_tokens": 4,
                 "output_tokens": 8,
@@ -256,6 +276,7 @@ def test_telemetry_capture_copies_only_safe_extras():
         rec = capture.by_request_id["layer2-case1_sync_api_en"]
         assert rec["prompt_version"] == "2"
         assert rec["input_tokens"] == 4
+        assert rec["latency_ms"] == 12.5
         assert "natural_language_request" not in rec
     finally:
         logger.removeHandler(capture)
@@ -330,3 +351,76 @@ def test_questions_remain_in_sanitized_diagnostics_when_present(tmp_path):
         for row in payload["results"]
     )
     assert all(row["resolver_outcome_actual"] == "resolved" for row in payload["results"])
+
+
+def test_timeout_scenario_records_provider_attempt_and_redacts_secrets():
+    scenario = _scenario()
+    failed = EvalResult(
+        scenario_id=scenario.id,
+        evaluator="schema_validity",
+        status=EvalStatus.FAIL,
+        score=0.0,
+        message=f"provider said {API_KEY_SENTINEL}",
+    )
+    document = build_layer2_document(
+        traces=((scenario, IntentProviderTimeoutError("slow"), (failed,)),),
+        dataset_path="evals/datasets/architecture_intent_nl_golden.json",
+        telemetry_by_request_id={
+            "layer2-case1_sync_api_en": {
+                "attempt_count": 2,
+                "latency_ms": 10.5,
+                "input_tokens": 3,
+                "output_tokens": 4,
+            }
+        },
+    )
+    row = document["scenarios"][0]
+    assert row["scenario_result"] == "PROVIDER_ERROR"
+    assert row["provider_error_class"] == "timeout"
+    assert row["actual"] is None
+    assert row["provider_attempt_count"] == 2
+    assert row["latency_ms"] == 10.5
+    assert row["token_usage"] == {"input_tokens": 3, "output_tokens": 4}
+    assert document["run"]["provider_attempts"] == 2
+    assert document["run"]["interpreter_invocations"] == 1
+    serialized = json.dumps(document)
+    assert API_KEY_SENTINEL not in serialized
+    assert RAW_REQUEST_SENTINEL not in serialized
+
+
+def test_read_dataset_version_of_the_golden_file():
+    assert read_dataset_version(DEFAULT_DATASET_PATH) == 1
+
+
+def _intent_from_expected(expected: ExpectedOutcome) -> ArchitectureIntent:
+    capabilities = () if expected.capabilities is None else expected.capabilities
+    hints = () if expected.user_provided_hints is None else expected.user_provided_hints
+    pattern = expected.interaction_pattern or "unspecified"
+    workload = expected.workload_type or "unspecified"
+    return ArchitectureIntent(
+        workload_type=WorkloadType(workload),
+        interaction_pattern=InteractionPattern(pattern),
+        capabilities=frozenset(Capability(item) for item in capabilities),
+        user_provided_hints=frozenset(AwsServiceHint(item) for item in hints),
+    )
+
+
+def test_golden_dataset_fake_run_records_twenty_six_executions_and_invocations(tmp_path):
+    scenarios = load_architecture_intent_nl_golden_dataset(DEFAULT_DATASET_PATH)
+    interpreter = FakeIntentInterpreter(
+        results=[_intent_from_expected(scenario.expected) for scenario in scenarios]
+    )
+    diagnostic_path = tmp_path / "layer2-diagnostic.json"
+    suite = run_architecture_intent_nl_evals(
+        interpreter=interpreter,
+        diagnostic_path=diagnostic_path,
+    )
+    assert suite.failed == 0
+    assert interpreter.calls == 26
+    payload = json.loads(diagnostic_path.read_text(encoding="utf-8"))
+    assert payload["run"]["scenario_executions"] == 26
+    assert payload["run"]["interpreter_invocations"] == 26
+    assert payload["run"]["provider_attempts"] == 0
+    assert payload["run"]["dataset_version"] == 1
+    assert payload["run"]["aggregate_result"] == "PASS"
+    assert len(payload["scenarios"]) == 26
