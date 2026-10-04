@@ -4,34 +4,44 @@ This repository can render and plan Terraform. It does not apply or destroy it, 
 
 A separate bootstrap module, `bootstrap/aws-oidc/`, is human-applied reference source for a GitHub OIDC role. Nothing under `src/`, the CI workflow, or `TerraformRunner` applies that module. The agent does not manage the authority boundary that would constrain it.
 
-## Repository trust boundary
+## Build CI
 
-GitHub Actions for this repository triggers on `pull_request` to `main` and on `push` to `main`.
+GitHub Actions for ordinary integration triggers on `pull_request` to `main` and on `push` to `main` (`.github/workflows/ci.yml`).
 
-`pull_request_target` is not used. That event would run workflow code in the base repository's trust context against a pull request head, including a head the base repository does not control. The CI workflow must not gain that event. A unit test asserts the string `pull_request_target` does not appear in `.github/workflows/ci.yml`.
+`pull_request_target` is not used. The CI workflow's token permission is `contents: read`. It does not request `id-token: write`. It does not contain an `aws-plan` job. Plans produced by that workflow stay credential-free, as described in `docs/terraform-credential-free-plan.md`.
 
-The workflow's token permission is `contents: read`. It does not request `id-token: write`, pull-request write, or a secret.
+## V3 real plan
 
-## Fork constraint
+V3 is `.github/workflows/aws-plan.yml`. It is `workflow_dispatch` only. It is not part of build CI and it does not replace the credential-free proposal plan.
 
-A future job that assumes an AWS plan role must run only when the pull request head repository is this repository. A fork pull request must not receive that role, even if it carries a label. OIDC `id-token` permission is a workflow grant, not a secret, so the event type and the head-repository check are what keep a fork from assuming the role.
+Job `prepare` has `contents: read` and no AWS identity. Job `plan` needs `prepare`, uses the GitHub Environment `aws-plan`, and is the only job with `id-token: write`. It verifies the handoff artifact before `configure-aws-credentials`. The role session is requested for 900 seconds. Unsetting variables in a later step does not revoke that session.
 
-The current CI workflow does not assume an AWS role.
+The fixed target is account `891377250201`, region `us-east-1`, and role `arn:aws:iam::891377250201:role/IaCPlanRole`. The workflow does not apply or destroy.
+
+## Environment gate
+
+The name `aws-plan` in the workflow file does not create the environment. A human must create it with deployment branches limited to `main` and with required reviewers. No V3 environment secrets are required. `python -m iac_agent.aws_plan check-environment` reads a normalized description of that configuration and returns `ready` or `blocked`. It is not called from CI.
 
 ## Claim shape
 
-The bootstrap role trusts one exact GitHub OIDC subject. It is not a wildcard and it is not an OR of the legacy and current formats.
+The audience condition is `sts.amazonaws.com`. Trust is one exact `StringEquals` subject, not a wildcard.
 
-For a `pull_request` event on this repository the confirmed subject is:
+The earlier OIDC smoke proved federation for this subject:
 
 ```text
 repo:IngMatrix-PGB@167713460/iac-agent-platform@1368782253:pull_request
 ```
 
-The audience condition is `sts.amazonaws.com`. The subject ends in `:pull_request`, not an environment name. A different repository must not reuse this subject.
+That smoke is not V3 acceptance. The V3 subject, after a human trust migration, is:
 
-## What remains outside this repository
+```text
+repo:IngMatrix-PGB@167713460/iac-agent-platform@1368782253:environment:aws-plan
+```
 
-Applying `bootstrap/aws-oidc/` and enabling a labeled `aws-plan` job are human actions. They are not performed by CI here, and they are not performed by `TerraformRunner`. Until a human does that work, this platform's plans stay credential-free, as described in `docs/terraform-credential-free-plan.md`.
+The `pull_request` subject is removed in that same human update. A different repository must not reuse either subject.
+
+## What remains a human action
+
+Creating the GitHub Environment, replacing the trust subject, and adding any SQS read action to `IaCPlanRole` are human actions. An `AccessDenied` from a profile dispatch is candidate evidence. The workflow records the action when it can parse it and stops. It does not decide whether the action is safe, and it does not edit the role.
 
 No `terraform apply` and no `terraform destroy` are part of this boundary.

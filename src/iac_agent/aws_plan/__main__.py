@@ -9,6 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from iac_agent.aws_plan.acceptance import evaluate_environment
 from iac_agent.aws_plan.binding import GitHubPullRequestReader
 from iac_agent.aws_plan.evidence import write_evidence
 from iac_agent.aws_plan.execution import ConfigurationError
@@ -46,9 +47,17 @@ def main(argv: list[str] | None = None) -> int:
     plan_parser.add_argument("--purpose", required=True, choices=["profile", "acceptance"])
     plan_parser.add_argument("--module-dir", type=Path, default=_MODULE_DIR)
 
+    check_parser = sub.add_parser("check-environment")
+    check_parser.add_argument("--payload", type=Path, required=True)
+
     args = parser.parse_args(argv)
     run_id = os.environ.get("GITHUB_RUN_ID", "")
     run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
+    if args.command == "check-environment":
+        payload = json.loads(args.payload.read_text(encoding="utf-8"))
+        result = evaluate_environment(payload)
+        print(result)
+        return 0 if result == "ready" else 1
     if args.command == "prepare":
         token = os.environ.get("GH_TOKEN", "")
         if not token:
