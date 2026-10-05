@@ -50,6 +50,15 @@ jobs:
       - name: Install project
         run: pip install -e ".[dev]"
 
+      - name: Install Checkov 3.3.13
+        run: pip install -r ci/requirements-checkov.txt
+
+      - name: Set up Terraform 1.16.1
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.1"
+          terraform_wrapper: false
+
       - name: Prepare trusted workspace
         env:
           GH_TOKEN: ${{ github.token }}
@@ -93,6 +102,12 @@ jobs:
 
       - name: Install project
         run: pip install -e ".[dev]"
+
+      - name: Set up Terraform 1.16.1
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.1"
+          terraform_wrapper: false
 
       - name: Download handoff
         uses: actions/download-artifact@v4

@@ -285,6 +285,7 @@ def plan_validated(
     evidence: V3Evidence
     try:
         try:
+            active_runner.init(workspace, env_overrides=None)
             active_runner.plan(workspace, env_overrides=env)
             shown = active_runner.show_json(workspace, env_overrides=env)
         except TerraformCommandError as exc:

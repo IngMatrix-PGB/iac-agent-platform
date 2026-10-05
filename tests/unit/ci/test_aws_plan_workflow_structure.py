@@ -76,6 +76,71 @@ def test_aws_plan_workflow_is_dispatch_only():
         assert forbidden not in text
 
 
+def _terraform_setup(job: dict) -> dict:
+    matches = [
+        step for step in job["steps"] if step.get("uses") == "hashicorp/setup-terraform@v3"
+    ]
+    assert len(matches) == 1
+    setup = matches[0]
+    assert setup["with"]["terraform_version"] == "1.16.1"
+    assert setup["with"]["terraform_wrapper"] is False
+    return setup
+
+
+def test_both_jobs_install_repository_terraform_before_use():
+    workflow = _load(_AWS_PLAN)
+    prepare = workflow["jobs"]["prepare"]
+    plan = workflow["jobs"]["plan"]
+    _terraform_setup(prepare)
+    _terraform_setup(plan)
+
+    prepare_steps = prepare["steps"]
+    checkov = next(
+        index
+        for index, step in enumerate(prepare_steps)
+        if "ci/requirements-checkov.txt" in str(step.get("run", ""))
+    )
+    prepare_terraform = next(
+        index
+        for index, step in enumerate(prepare_steps)
+        if step.get("uses") == "hashicorp/setup-terraform@v3"
+    )
+    prepare_command = next(
+        index
+        for index, step in enumerate(prepare_steps)
+        if "iac_agent.aws_plan prepare" in str(step.get("run", ""))
+    )
+    assert checkov < prepare_terraform < prepare_command
+    assert "environment" not in prepare
+    assert "id-token" not in prepare["permissions"]
+
+    plan_steps = plan["steps"]
+    plan_terraform = next(
+        index
+        for index, step in enumerate(plan_steps)
+        if step.get("uses") == "hashicorp/setup-terraform@v3"
+    )
+    verify = next(
+        index
+        for index, step in enumerate(plan_steps)
+        if "verify-handoff" in str(step.get("run", ""))
+    )
+    credentials = next(
+        index
+        for index, step in enumerate(plan_steps)
+        if "configure-aws-credentials" in str(step.get("uses", ""))
+    )
+    plan_command = next(
+        index
+        for index, step in enumerate(plan_steps)
+        if "iac_agent.aws_plan plan" in str(step.get("run", ""))
+    )
+    assert plan_terraform < verify < credentials < plan_command
+    assert "if" not in plan_steps[credentials]
+    assert "git fetch" not in "\n".join(_step_marker(step) for step in plan_steps)
+    assert "git show" not in "\n".join(_step_marker(step) for step in plan_steps)
+
+
 def test_prepare_job_has_no_aws_authority():
     job = _load(_AWS_PLAN)["jobs"]["prepare"]
     assert job["permissions"] == {"contents": "read"}
