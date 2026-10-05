@@ -195,9 +195,21 @@ class PlanRunner:
         self.shown = shown
         self.error = error
         self.workspaces: list[Path] = []
+        self.calls: list[tuple[str, Path, object]] = []
+
+    def init(self, workspace, *, env_overrides=None):
+        self.calls.append(("init", Path(workspace), env_overrides))
+        return CommandResult(
+            command=("terraform", "init"),
+            returncode=0,
+            stdout="",
+            stderr="",
+            duration_seconds=0.0,
+        )
 
     def plan(self, workspace, plan_filename="tfplan", *, env_overrides=None):
         self.workspaces.append(Path(workspace))
+        self.calls.append(("plan", Path(workspace), env_overrides))
         v3_plan_env(env_overrides or {})
         target = Path(workspace) / plan_filename
         target.write_text("binary-plan", encoding="utf-8")
@@ -291,6 +303,9 @@ def test_plan_uses_reconstructed_workspace(tmp_path):
         runner=runner,
     )
     assert runner.workspaces == [root / "workspace"]
+    assert [call[0] for call in runner.calls] == ["init", "plan"]
+    assert runner.calls[0][1] == root / "workspace"
+    assert runner.calls[0][2] is None
     assert evidence.terminal_outcome is TerminalOutcome.PASS
     assert "skip_credentials_validation" not in (root / "workspace" / "main.tf").read_text(
         encoding="utf-8"
