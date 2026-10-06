@@ -49,7 +49,7 @@ export function App({
         <div className="shell-bar">
           <div className="brand">
             <span className="brand-mark" aria-hidden="true">
-              &gt;_
+              &gt;<span className="brand-caret">_</span>
             </span>
             <h1>IaC Agent</h1>
             <p className="product-kicker">Infrastructure control plane</p>
@@ -94,11 +94,16 @@ export function App({
       ) : null}
       {route.name === "unknown" ? <h2>Page not found.</h2> : null}
       <footer className="shell-footer">
-        <p className="signature">
-          <span className="signature-label">Designed and built by</span>
-          <span className="signature-name">Pablo Galeana Bailey</span>
-          <span className="signature-handle">Ing Matrix</span>
-        </p>
+        <div className="signature">
+          <p className="signature-prompt" aria-hidden="true">
+            ~/iac-agent <span className="signature-dollar">$</span> whoami
+          </p>
+          <p className="signature-line">
+            <span className="signature-label">Designed and built by</span>
+            <span className="signature-name">Pablo Galeana Bailey</span>
+            <span className="signature-handle">Ing Matrix</span>
+          </p>
+        </div>
         <a
           className="signature-link"
           href="https://github.com/IngMatrix-PGB"
