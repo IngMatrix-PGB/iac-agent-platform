@@ -157,11 +157,14 @@ function applyRead(result: ClientResult) {
           <RequestSummary body={body} />
           <Pipeline workflow={body.workflow} />
           <WorkflowStatus body={body} />
-          <PlanSummary plan={body.workflow?.plan ?? null} />
-          <Findings
-            findings={body.workflow?.findings ?? []}
-            workflowStatus={body.workflow?.workflow_status}
-          />
+          <div className="review-grid">
+            <PlanSummary plan={body.workflow?.plan ?? null} />
+            <Findings
+              findings={body.workflow?.findings ?? []}
+              workflowStatus={body.workflow?.workflow_status}
+              securityStatus={body.workflow?.security_status}
+            />
+          </div>
           <ApprovalPanel body={body} client={client} onResult={onDecision} />
         </>
       ) : null}
