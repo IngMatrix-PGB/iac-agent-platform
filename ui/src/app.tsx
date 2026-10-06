@@ -47,15 +47,14 @@ export function App({
     <main>
       <header className="shell-header">
         <div className="shell-bar">
-          <div>
-            <div className="brand">
-              <span className="brand-mark" aria-hidden="true">
-                &gt;_
-              </span>
-              <h1>IaC Agent</h1>
-            </div>
+          <div className="brand">
+            <span className="brand-mark" aria-hidden="true">
+              &gt;_
+            </span>
+            <h1>IaC Agent</h1>
             <p className="product-kicker">Infrastructure control plane</p>
           </div>
+          <div className="shell-side">
           <nav className="shell-nav" aria-label="Primary">
             <a
               href="/#compose"
@@ -77,8 +76,9 @@ export function App({
               Requests
             </a>
           </nav>
+          <HealthIndicator client={client} />
+          </div>
         </div>
-        <HealthIndicator client={client} />
       </header>
       {operatorClient === null ? <OperatorSecretForm onContinue={setSecret} /> : null}
       {operatorClient !== null && route.name === "compose" ? (

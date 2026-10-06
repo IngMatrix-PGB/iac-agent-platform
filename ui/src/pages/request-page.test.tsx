@@ -62,7 +62,7 @@ describe("request page", () => {
     expect(screen.getByText("Terraform apply was not executed.")).toBeInTheDocument();
     const plan = screen.getByRole("heading", { name: "Terraform plan summary" });
     const findings = screen.getByRole("table", { name: "Security findings" });
-    const approval = screen.getByRole("heading", { name: "Approval decision" });
+    const approval = screen.getByRole("heading", { name: "Human authorization" });
     expect(plan.compareDocumentPosition(findings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(findings.compareDocumentPosition(approval) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByText("Unavailable after reload.")).not.toBeInTheDocument();
