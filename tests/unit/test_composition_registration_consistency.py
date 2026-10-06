@@ -134,11 +134,7 @@ def test_every_composition_type_has_a_request_level_renderer_dispatch_case():
             resource_type: default_trusted_module_dirs()[resource_type]
             for resource_type in _CONSTITUENT_RESOURCE_TYPES[composition_type]
         }
-        composition = renderer.render(
-            spec,
-            trusted_module_dirs=module_source_dirs,
-            workspace=default_trusted_module_dirs()[ResourceType.SQS].parent.parent / "artifacts",
-        )
+        composition = renderer.render(spec, trusted_module_dirs=module_source_dirs)
         assert "main.tf" in composition.files
 
 
@@ -209,3 +205,20 @@ def test_every_composition_spec_type_is_registered_for_persistence():
         assert type(spec).__name__ in allowed_type_names, (
             f"{type(spec).__name__} is missing from _ALLOWED_WORKFLOW_TYPES"
         )
+
+
+def test_every_composition_type_publishes_repository_relative_module_sources():
+    """Every module `source` a composition commits under
+    `generated/<request_id>/` must be `../../terraform/modules/<module>`,
+    independent of where the runtime workspace lives."""
+    import re
+
+    for composition_type, spec in _EXAMPLE_SPECS.items():
+        composition = IacRenderer().render(spec, trusted_module_dirs=default_trusted_module_dirs())
+        sources = re.findall(r'source\s*=\s*"([^"]+)"', composition.files["main.tf"])
+        assert sources, composition_type
+        for source in sources:
+            assert re.fullmatch(r"\.\./\.\./terraform/modules/[a-z_]+", source), (
+                composition_type,
+                source,
+            )

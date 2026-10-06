@@ -114,4 +114,4 @@ def test_real_workflow_passes_for_a_secure_default_composition_request(
     assert result.get("terraform_plan_json") is None
     assert "terraform_plan_json" not in result
 
-    assert result["workspace"] == tmp_path / "req-worker-001"
+    assert result["workspace"] == tmp_path / "req-worker-001" / "generated" / "req-worker-001"

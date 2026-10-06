@@ -78,9 +78,8 @@ def test_aws_resource_spec_dispatches_to_the_aws_renderer():
     renderer = IacRenderer(aws_renderer=fake_aws, serverless_worker_renderer=fake_composition)
 
     spec = SQSResourceSpec(name="orders-queue")
-    workspace = Path("/repo/artifacts/req-1")
 
-    result = renderer.render(spec, trusted_module_dirs=_TRUSTED_MODULE_DIRS, workspace=workspace)
+    result = renderer.render(spec, trusted_module_dirs=_TRUSTED_MODULE_DIRS)
 
     assert result == "aws-rendered"
     assert len(fake_aws.calls) == 1
@@ -103,9 +102,8 @@ def test_serverless_worker_spec_dispatches_to_the_composition_renderer():
             name="orders-table", partition_key=DynamoDBKeySpec(name="pk", type="S")
         ),
     )
-    workspace = Path("/repo/artifacts/req-2")
 
-    result = renderer.render(spec, trusted_module_dirs=_TRUSTED_MODULE_DIRS, workspace=workspace)
+    result = renderer.render(spec, trusted_module_dirs=_TRUSTED_MODULE_DIRS)
 
     assert result == "composition-rendered"
     assert fake_aws.calls == []
@@ -135,9 +133,8 @@ def test_api_lambda_spec_dispatches_to_the_api_lambda_renderer():
         function=LambdaResourceSpec(name="orders-handler", handler="app.handler"),
         route=RouteSpec(method=HttpMethod.POST, path="/orders"),
     )
-    workspace = Path("/repo/artifacts/req-3")
 
-    result = renderer.render(spec, trusted_module_dirs=_TRUSTED_MODULE_DIRS, workspace=workspace)
+    result = renderer.render(spec, trusted_module_dirs=_TRUSTED_MODULE_DIRS)
 
     assert result == "api-lambda-rendered"
     assert fake_aws.calls == []
@@ -172,9 +169,8 @@ def test_api_lambda_dynamodb_spec_dispatches_to_its_own_renderer():
             name="orders-table", partition_key=DynamoDBKeySpec(name="id", type="S")
         ),
     )
-    workspace = Path("/repo/artifacts/req-4")
 
-    result = renderer.render(spec, trusted_module_dirs=_TRUSTED_MODULE_DIRS, workspace=workspace)
+    result = renderer.render(spec, trusted_module_dirs=_TRUSTED_MODULE_DIRS)
 
     assert result == "api-lambda-dynamodb-rendered"
     assert fake_aws.calls == []

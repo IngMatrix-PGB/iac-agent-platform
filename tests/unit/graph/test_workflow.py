@@ -467,9 +467,23 @@ def test_request_specific_workspace_created_under_root(tmp_path):
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
 
     workspace = result["workspace"]
-    assert workspace == tmp_path / "req-001"
+    assert workspace == tmp_path / "req-001" / "generated" / "req-001"
     assert workspace.is_dir()
-    assert workspace.parent == tmp_path
+    assert workspace.is_relative_to(tmp_path / "req-001")
+
+
+def test_workspace_mirrors_the_published_repository_layout(tmp_path):
+    """The source the renderer receives is the one that gets published,
+    and it resolves inside the request workspace to a staged copy of the
+    trusted module, so plan time and publication agree byte for byte."""
+    graph, renderer, _, _, _ = _build(tmp_path)
+    result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
+
+    module_source = renderer.render_calls[0]["module_source"]
+    assert module_source == "../../terraform/modules/sqs"
+    staged = (result["workspace"] / module_source).resolve()
+    assert staged == (tmp_path / "req-001" / "terraform" / "modules" / "sqs").resolve()
+    assert (staged / "main.tf").is_file()
 
 
 @pytest.mark.parametrize("bad_request_id", ["../escape", "a/../../b", "sub/dir"])
@@ -496,7 +510,7 @@ def test_workspace_path_does_not_depend_on_process_cwd(tmp_path, monkeypatch):
     graph, _, _, _, _ = _build(tmp_path)
     result = graph.invoke({"request_id": "req-001", "resource_spec": _spec()})
 
-    assert result["workspace"] == tmp_path / "req-001"
+    assert result["workspace"] == tmp_path / "req-001" / "generated" / "req-001"
 
 
 # ---------------------------------------------------------------------------

@@ -27,7 +27,7 @@ There is no Terraform-source route.
 
 An omitted `request_id` is generated in UTC as `req-%Y%m%dT%H%M%SZ-` plus 12 lowercase hexadecimal digits. The shape is `req-20260918T232211Z-a1b2c3d4e5f6`. The suffix is the first 12 digits of `uuid4().hex`. A caller-supplied id is kept as given. The generator does not rewrite it.
 
-That string is one identity. It is the checkpoint thread id, the workspace directory under `artifacts/`, the publication branch `iac-agent/<request_id>`, and the publication path `generated/<request_id>/`. The suffix exists so two requests created in the same UTC second do not share those four uses. It is not a distributed consensus id.
+That string is one identity. It is the checkpoint thread id, the workspace directory `<workspace_root>/<request_id>/`, the publication branch `iac-agent/<request_id>`, and the publication path `generated/<request_id>/`. The suffix exists so two requests created in the same UTC second do not share those four uses. It is not a distributed consensus id.
 
 The generator rejects a naive datetime. A caller-supplied id must be a single path segment: non-empty, not absolute, and without a separator or `..`.
 

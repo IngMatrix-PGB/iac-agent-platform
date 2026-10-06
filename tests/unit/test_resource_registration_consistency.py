@@ -130,3 +130,17 @@ def test_every_resource_type_has_a_non_empty_display_name():
         assert isinstance(display_name, str)
         assert display_name.strip() == display_name
         assert display_name != ""
+
+
+def test_every_resource_type_publishes_a_repository_relative_module_source():
+    """The rendered `source` is committed verbatim under
+    `generated/<request_id>/`, so it must point at the repository's own
+    `terraform/modules/<module>` — never at wherever the runtime
+    workspace happened to live (a home directory, `/opt/...`)."""
+    from iac_agent.request import IacRenderer
+
+    trusted_dirs = default_trusted_module_dirs()
+    for resource_type, spec in _EXAMPLE_SPECS.items():
+        composition = IacRenderer().render(spec, trusted_module_dirs=trusted_dirs)
+        expected = f'source = "../../terraform/modules/{trusted_dirs[resource_type].name}"'
+        assert expected in composition.files["main.tf"], resource_type

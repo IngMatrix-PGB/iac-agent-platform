@@ -92,4 +92,4 @@ def test_real_workflow_passes_for_a_secure_default_bucket_request(tmp_path, terr
     assert result.get("terraform_plan_json") is None
     assert "terraform_plan_json" not in result
 
-    assert result["workspace"] == tmp_path / "req-s3-001"
+    assert result["workspace"] == tmp_path / "req-s3-001" / "generated" / "req-s3-001"

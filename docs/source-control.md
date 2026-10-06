@@ -81,6 +81,18 @@ simply never appear in that mapping. `resolve_generated_file_path`
 additionally rejects an empty, absolute, backslash-containing, or
 `..`-containing relative path before ever building the final path.
 
+## Module sources are repository-relative
+
+Every module `source` in a published `main.tf` is
+`../../terraform/modules/<module>`: the path from
+`generated/<request_id>/` to the repository's own trusted modules. It
+does not depend on the host, the workspace root, or the container
+layout. The runtime workspace mirrors the repository for this reason:
+the trusted modules are copied to
+`<workspace_root>/<request_id>/terraform/modules/`, and Terraform and
+Checkov run in `<workspace_root>/<request_id>/generated/<request_id>/`.
+The files they evaluate are the files that are published.
+
 ## No local worktree mutation
 
 The adapter never touches the developer's checked-out working tree —
