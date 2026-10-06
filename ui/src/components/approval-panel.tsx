@@ -54,6 +54,7 @@ export function ApprovalPanel({
 
   return (
     <section className="panel decision" aria-labelledby="approval-heading" aria-busy={busy}>
+      <div className="decision-row">
       <div className="decision-head">
         <svg
           className="decision-lock"
@@ -69,14 +70,22 @@ export function ApprovalPanel({
           <path d="M8 11V7a4 4 0 0 1 8 0v4" />
         </svg>
         <div>
-          <h3 id="approval-heading">Approval decision</h3>
+          <h3 id="approval-heading">Human authorization</h3>
           <p className="decision-note">
             Approving opens a pull request. Terraform apply does not run.
           </p>
         </div>
       </div>
-      <p>Reject sends immediately and does not ask for confirmation.</p>
       <div className="approval-actions">
+        <button
+          className="button-secondary"
+          type="button"
+          disabled={busy}
+          aria-label="Reject request"
+          onClick={() => void decide("reject")}
+        >
+          Reject
+        </button>
         <button
           ref={approveRef}
           className="button-primary"
@@ -86,15 +95,9 @@ export function ApprovalPanel({
         >
           Approve
         </button>
-        <button
-          className="button-secondary"
-          type="button"
-          disabled={busy}
-          onClick={() => void decide("reject")}
-        >
-          Reject request
-        </button>
       </div>
+      </div>
+      <p className="decision-reject-note">Reject sends immediately and does not ask for confirmation.</p>
       {open ? (
         <dialog ref={dialogRef} aria-labelledby="approve-confirm-title">
           <p id="approve-confirm-title">{CONFIRM_TEXT}</p>

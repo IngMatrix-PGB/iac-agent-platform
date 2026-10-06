@@ -6,7 +6,9 @@ export function WorkflowStatus({ body }: { body: RequestResponse }) {
   const pullRequestUrl = workflow?.pull_request?.url;
   return (
     <section className="panel status-cluster" aria-labelledby="workflow-heading">
-      <h3 id="workflow-heading">Workflow</h3>
+      <h3 id="workflow-heading" className="visually-hidden">
+        Workflow
+      </h3>
       {workflow ? (
         <dl>
           {workflow.workflow_status === "error" && workflow.error ? null : (

@@ -701,3 +701,279 @@ dialog p {
     display: block;
   }
 }
+
+.shell-header {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.shell-bar {
+  align-items: center;
+}
+
+.shell-side {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+}
+
+.brand {
+  align-items: center;
+}
+
+.brand h1 {
+  margin: 0;
+}
+
+.brand .product-kicker {
+  margin: 0;
+  padding: 0.1rem 0.6rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+}
+
+.request-head {
+  margin: 0 0 var(--space-4);
+}
+
+.request-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: baseline;
+}
+
+.request-title h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.request-title .meta {
+  margin: 0;
+}
+
+.copy-id {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  margin: 0;
+  padding: 0.15rem;
+  border: 0;
+  background: none;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.copy-id svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.copy-id:hover:not(:disabled) {
+  color: var(--color-accent);
+}
+
+.architecture-line {
+  margin: var(--space-1) 0 0;
+  color: var(--color-muted);
+  font-size: 1.0625rem;
+}
+
+.intent-details {
+  margin-top: var(--space-2);
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
+
+.intent-details summary {
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+
+.review-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+  gap: var(--space-3);
+  align-items: stretch;
+}
+
+.review-grid > * {
+  margin-bottom: var(--space-3);
+}
+
+.plan-counts {
+  display: flex;
+  gap: var(--space-4);
+}
+
+.plan-note {
+  margin: var(--space-2) 0 0;
+  color: var(--color-muted);
+}
+
+.panel-head {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.gate-badge {
+  padding: 0.05rem 0.55rem;
+  border: 1px solid currentcolor;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
+.gate-badge-pass {
+  color: var(--color-status-pass-text);
+}
+
+.gate-badge-warn {
+  color: var(--color-status-warn-text);
+}
+
+.gate-badge-block {
+  color: var(--color-status-block-text);
+}
+
+.findings-table td {
+  padding: var(--space-1) var(--space-3) var(--space-1) 0;
+  border-bottom: 0;
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+}
+
+.findings-table td:first-child {
+  width: 5.5rem;
+  white-space: nowrap;
+}
+
+.finding-status {
+  text-transform: lowercase;
+}
+
+.finding-status-pass {
+  color: var(--color-status-pass-text);
+}
+
+.finding-status-warn {
+  color: var(--color-status-warn-text);
+}
+
+.finding-status-block {
+  color: var(--color-status-block-text);
+}
+
+.finding-severity {
+  color: var(--color-muted);
+  text-transform: lowercase;
+}
+
+.finding-severity::before {
+  content: "· ";
+}
+
+.findings-toggle {
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 400;
+}
+
+.findings-toggle:hover:not(:disabled) {
+  color: var(--color-accent);
+}
+
+.decision-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.decision h3 {
+  margin: 0;
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.decision .decision-note {
+  margin: 0;
+}
+
+.decision .approval-actions button {
+  margin: 0 0 0 var(--space-2);
+}
+
+.decision-reject-note {
+  margin: var(--space-2) 0 0;
+  color: var(--color-muted);
+  font-size: 0.75rem;
+  text-align: right;
+}
+
+@media (max-width: 48rem) {
+  .review-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+}
+
+@media (max-width: 40rem) {
+  .decision .approval-actions button {
+    margin: 0 0 var(--space-2);
+  }
+
+  .decision-reject-note {
+    text-align: left;
+  }
+}
+
+.status-cluster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+}
+
+.status-cluster > p {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
+
+.status-cluster dt {
+  display: inline;
+  margin-right: var(--space-2);
+}
+
+.status-cluster dd {
+  display: inline;
+}
+
+.status-cluster dl > div {
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.findings-table {
+  width: auto;
+}
