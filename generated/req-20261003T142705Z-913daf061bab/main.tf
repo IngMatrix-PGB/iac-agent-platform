@@ -12,7 +12,7 @@ provider "aws" {
 }
 
 module "bucket" {
-  source = "../../../../../opt/iac-agent/terraform/modules/s3"
+  source = "../../terraform/modules/s3"
 
   name       = "user-uploads"
   kms_key_id = null
