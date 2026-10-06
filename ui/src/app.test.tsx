@@ -76,8 +76,12 @@ describe("operator shell", () => {
   it("credits the author in the footer", () => {
     render(<App client={clientWith(vi.fn())} navigate={vi.fn()} pathname="/" />);
 
-    expect(screen.getByRole("contentinfo")).toHaveTextContent("Powered by Pablo Galeana Bailey");
-    expect(screen.getByRole("link", { name: "Pablo Galeana Bailey" })).toHaveAttribute(
+    const footer = screen.getByRole("contentinfo");
+    expect(footer).toHaveTextContent("Designed and built by");
+    expect(footer).toHaveTextContent("Pablo Galeana Bailey");
+    expect(footer).toHaveTextContent("Ing Matrix");
+    expect(footer).toHaveTextContent("@IngMatrix-PGB");
+    expect(screen.getByRole("link", { name: "Pablo Galeana Bailey on GitHub" })).toHaveAttribute(
       "href",
       "https://github.com/IngMatrix-PGB",
     );
