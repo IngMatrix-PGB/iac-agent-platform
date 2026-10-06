@@ -5,6 +5,7 @@ import type { RequestResponse } from "../api/types";
 import { ApprovalPanel } from "../components/approval-panel";
 import { ErrorBanner, noticeTone, type NoticeTone } from "../components/error-banner";
 import { Findings } from "../components/findings";
+import { Pipeline } from "../components/pipeline";
 import { PlanSummary } from "../components/plan-summary";
 import { RequestSummary } from "../components/request-summary";
 import { WorkflowStatus } from "../components/workflow-status";
@@ -154,6 +155,7 @@ function applyRead(result: ClientResult) {
       {body ? (
         <>
           <RequestSummary body={body} />
+          <Pipeline workflow={body.workflow} />
           <WorkflowStatus body={body} />
           <PlanSummary plan={body.workflow?.plan ?? null} />
           <Findings

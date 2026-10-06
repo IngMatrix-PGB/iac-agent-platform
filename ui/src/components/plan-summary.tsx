@@ -16,19 +16,19 @@ export function PlanSummary({ plan }: { plan: PlanDTO | null }) {
           <dt role="term" aria-label="Add">
             Add
           </dt>
-          <dd>{plan.add}</dd>
+          <dd className="plan-add">{plan.add}</dd>
         </div>
         <div>
           <dt role="term" aria-label="Change">
             Change
           </dt>
-          <dd>{plan.change}</dd>
+          <dd className="plan-change">{plan.change}</dd>
         </div>
         <div>
           <dt role="term" aria-label="Destroy">
             Destroy
           </dt>
-          <dd>{plan.destroy}</dd>
+          <dd className="plan-destroy">{plan.destroy}</dd>
         </div>
       </dl>
       {destructive ? <p className="destructive-sentence">Destructive change detected.</p> : null}

@@ -48,7 +48,12 @@ export function App({
       <header className="shell-header">
         <div className="shell-bar">
           <div>
-            <h1>IaC Agent</h1>
+            <div className="brand">
+              <span className="brand-mark" aria-hidden="true">
+                &gt;_
+              </span>
+              <h1>IaC Agent</h1>
+            </div>
             <p className="product-kicker">Infrastructure control plane</p>
           </div>
           <nav className="shell-nav" aria-label="Primary">
@@ -88,6 +93,9 @@ export function App({
         />
       ) : null}
       {route.name === "unknown" ? <h2>Page not found.</h2> : null}
+      <footer className="shell-footer">
+        Powered by <a href="https://github.com/IngMatrix-PGB">Pablo Galeana Bailey</a>
+      </footer>
     </main>
   );
 }

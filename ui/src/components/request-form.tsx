@@ -21,6 +21,7 @@ export function RequestForm({
       <label htmlFor="infrastructure-request">Infrastructure request</label>
       <textarea
         id="infrastructure-request"
+        placeholder="I need a synchronous serverless HTTP API to store and retrieve customer orders."
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
