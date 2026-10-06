@@ -47,7 +47,7 @@ The HTTP body is an explicit projection. It may include `request_id`, the approv
 
 It does not include the raw prompt, model output, assumptions, unresolved clarification text, Terraform source, Terraform plan JSON, Terraform addresses, ARNs, AWS account ids, raw Checkov JSON, `finding.resource`, `finding.message`, `finding.source`, `WorkflowError.message`, exception text, stack traces, subprocess output, checkpoint bodies, workspace paths, environment mappings, credentials, or GitHub owner, repository, branch, and base branch. The CLI still prints `WorkflowError.message`. Findings on the wire are only `policy_id`, `status`, and `severity`. The pull-request object is `url` only.
 
-`GET` reconstructs that projection from `WorkflowView`. A reconstructed view has the resource name and the workflow fields. It does not carry architecture, components, `matched_pattern`, or the full intent, so those fields are null or empty on `GET`. Batch 29 does not invent them and does not widen `WorkflowView` to copy the `POST` body. `POST` of a resolved request still projects the spec it just resolved.
+`GET` reconstructs that projection from `WorkflowView`. The view carries the typed request spec from the checkpoint, so `GET` derives architecture and components from it with the same functions `POST` uses. The checkpoint stores no `ArchitectureIntent` and no matched pattern, so `intent` and `matched_pattern` stay null on `GET`. Nothing is copied from the `POST` body.
 
 ## Observability
 

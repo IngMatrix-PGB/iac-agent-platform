@@ -334,8 +334,12 @@ def test_fresh_process_reads_and_approves_the_same_sqlite_checkpoint(tmp_path):
     assert loaded_body["workflow"]["workflow_status"] == listed_b_row["workflow_status"]
     assert loaded_body["intent"] is None
     assert loaded_body["resolution"]["matched_pattern"] is None
-    assert loaded_body["resolution"]["architecture"] is None
-    assert loaded_body["resolution"]["components"] == []
+    assert loaded_body["resolution"]["architecture"] == "serverless_worker"
+    assert [component["role"] for component in loaded_body["resolution"]["components"]] == [
+        "queue",
+        "function",
+        "table",
+    ]
     _assert_public(loaded.text, str(tmp_path))
 
     assert isinstance(spec, ServerlessWorkerSpec)

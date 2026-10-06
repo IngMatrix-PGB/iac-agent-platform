@@ -185,3 +185,49 @@ def test_ecr_component_exposes_mutability_and_scan():
         "image_tag_mutability": "IMMUTABLE",
         "scan_on_push": True,
     }
+
+
+def test_project_view_reconstructs_architecture_and_components_from_the_checkpoint_spec():
+    from dataclasses import replace
+
+    from iac_agent.api.project import project_view
+    from iac_agent.compositions.api_lambda.contract import HttpMethod, RouteSpec
+    from iac_agent.compositions.api_lambda_dynamodb.contract import ApiLambdaDynamoDbSpec
+    from iac_agent.providers.aws.api_gateway.contract import ApiGatewayResourceSpec
+    from iac_agent.providers.aws.dynamodb.contract import (
+        DynamoDBKeySpec,
+        DynamoDBKeyType,
+        DynamoDBResourceSpec,
+    )
+    from iac_agent.providers.aws.lambda_function.contract import LambdaResourceSpec
+
+    spec = ApiLambdaDynamoDbSpec(
+        name="orders",
+        api=ApiGatewayResourceSpec(name="orders-api"),
+        function=LambdaResourceSpec(name="orders-function", handler="app.handler"),
+        route=RouteSpec(method=HttpMethod.POST, path="/invoke"),
+        table=DynamoDBResourceSpec(
+            name="orders-table",
+            partition_key=DynamoDBKeySpec(name="id", type=DynamoDBKeyType.STRING),
+        ),
+    )
+
+    body = project_view(replace(_view(), resource_spec=spec))
+
+    assert body.resolution.architecture == "API Gateway + Lambda + DynamoDB"
+    assert [(item.role, item.name) for item in body.resolution.components] == [
+        ("api", "orders-api"),
+        ("route", "POST /invoke"),
+        ("function", "orders-function"),
+        ("table", "orders-table"),
+    ]
+    assert body.resolution.matched_pattern is None
+    assert body.intent is None
+
+
+def test_project_view_without_a_spec_keeps_architecture_absent():
+    from iac_agent.api.project import project_view
+
+    body = project_view(_view())
+    assert body.resolution.architecture is None
+    assert body.resolution.components == []
