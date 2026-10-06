@@ -123,6 +123,7 @@ independent layer of the same protection).
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -239,6 +240,29 @@ def _resolve_request_workspace(workspace_root: Path, request_id: str) -> Path:
     independently-drifting rule set."""
     validate_request_id(request_id)
     return workspace_root / request_id
+
+
+def _stage_request_workspace(
+    workspace_root: Path,
+    request_id: str,
+    trusted_module_dirs: Mapping[ResourceType, Path],
+) -> Path:
+    """Lay out `<workspace_root>/<request_id>` like the repository the
+    proposal is published to: the trusted modules under
+    `terraform/modules/<module>` and the generated root module under
+    `generated/<request_id>/`. The rendered
+    `../../terraform/modules/<module>` sources then resolve at plan time
+    exactly as they do after publication, so the files Terraform and
+    Checkov evaluate are byte-for-byte the files that are published."""
+    request_root = _resolve_request_workspace(workspace_root, request_id)
+    for module_dir in trusted_module_dirs.values():
+        shutil.copytree(
+            module_dir,
+            request_root / "terraform" / "modules" / module_dir.name,
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns(".terraform", "*.tfstate*", ".terraform.lock.hcl"),
+        )
+    return request_root / "generated" / request_id
 
 
 def _safe_error_message(exc: Exception) -> str:
@@ -431,10 +455,10 @@ def build_iac_workflow(
     def render_terraform(state: WorkflowState) -> dict:
         try:
             spec: IacRequestSpec = state["resource_spec"]
-            workspace = _resolve_request_workspace(workspace_root, state["request_id"])
-            composition = iac_renderer.render(
-                spec, trusted_module_dirs=trusted_module_dirs, workspace=workspace
+            workspace = _stage_request_workspace(
+                workspace_root, state["request_id"], trusted_module_dirs
             )
+            composition = iac_renderer.render(spec, trusted_module_dirs=trusted_module_dirs)
             composition.write_to(workspace)
         except Exception as exc:  # noqa: BLE001 - sanitized below; KeyboardInterrupt/
             # SystemExit are BaseException subclasses and are never caught here.

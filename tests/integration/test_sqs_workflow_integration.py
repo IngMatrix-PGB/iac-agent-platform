@@ -85,4 +85,4 @@ def test_real_workflow_passes_for_a_secure_dlq_enabled_request(tmp_path, terrafo
     assert result.get("terraform_plan_json") is None
     assert "terraform_plan_json" not in result
 
-    assert result["workspace"] == tmp_path / "req-001"
+    assert result["workspace"] == tmp_path / "req-001" / "generated" / "req-001"

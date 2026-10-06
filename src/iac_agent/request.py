@@ -24,7 +24,6 @@ change at all: this module only computes `module_source`/
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -47,6 +46,17 @@ from iac_agent.domain.resource import ResourceType
 from iac_agent.providers.aws.renderer import AWSResourceRenderer
 from iac_agent.providers.aws.resource import AWSResourceSpec, resource_type_of
 from iac_agent.providers.aws.terraform_render import GeneratedTerraformComposition
+
+#: Generated Terraform is committed at ``generated/<request_id>/``, two
+#: levels below the repository root, so every module ``source`` points
+#: at the repository's own trusted modules from there. It never depends
+#: on where the runtime workspace lives.
+PUBLISHED_MODULE_SOURCE_PREFIX = "../../terraform/modules"
+
+
+def _published_module_source(module_dir: Path) -> str:
+    return f"{PUBLISHED_MODULE_SOURCE_PREFIX}/{module_dir.name}"
+
 
 IacRequestSpec = AWSResourceSpec | ServerlessWorkerSpec | ApiLambdaSpec | ApiLambdaDynamoDbSpec
 
@@ -87,7 +97,6 @@ class IacRenderer:
         spec: IacRequestSpec,
         *,
         trusted_module_dirs: Mapping[ResourceType, Path],
-        workspace: Path,
     ) -> GeneratedTerraformComposition:
         """Render `spec` into a deterministic Terraform composition.
 
@@ -97,19 +106,17 @@ class IacRenderer:
         `CompositionType`-keyed mapping at all, because their
         constituent sub-resources (SQS/Lambda/DynamoDB, API Gateway/
         Lambda) are already registered there; this method just
-        resolves the ones each composition needs relative to
-        `workspace` at once instead of one at a time.
+        resolves the ones each composition needs at once instead of one
+        at a time. Each resolves to its published source,
+        `../../terraform/modules/<module>`; the workflow lays out the
+        runtime workspace so that same text also resolves at plan time.
         """
         match spec:
             case ServerlessWorkerSpec():
                 module_sources = ServerlessWorkerModuleSources(
-                    queue=os.path.relpath(trusted_module_dirs[ResourceType.SQS], start=workspace),
-                    function=os.path.relpath(
-                        trusted_module_dirs[ResourceType.LAMBDA], start=workspace
-                    ),
-                    table=os.path.relpath(
-                        trusted_module_dirs[ResourceType.DYNAMODB], start=workspace
-                    ),
+                    queue=_published_module_source(trusted_module_dirs[ResourceType.SQS]),
+                    function=_published_module_source(trusted_module_dirs[ResourceType.LAMBDA]),
+                    table=_published_module_source(trusted_module_dirs[ResourceType.DYNAMODB]),
                 )
                 return self._serverless_worker_renderer.render(spec, module_sources=module_sources)
             case ApiLambdaDynamoDbSpec():
@@ -118,31 +125,21 @@ class IacRenderer:
                 # isinstance semantics make ordering irrelevant to
                 # correctness here (see compositions/resource.py).
                 api_lambda_dynamodb_module_sources = ApiLambdaDynamoDbModuleSources(
-                    api=os.path.relpath(
-                        trusted_module_dirs[ResourceType.API_GATEWAY], start=workspace
-                    ),
-                    function=os.path.relpath(
-                        trusted_module_dirs[ResourceType.LAMBDA], start=workspace
-                    ),
-                    table=os.path.relpath(
-                        trusted_module_dirs[ResourceType.DYNAMODB], start=workspace
-                    ),
+                    api=_published_module_source(trusted_module_dirs[ResourceType.API_GATEWAY]),
+                    function=_published_module_source(trusted_module_dirs[ResourceType.LAMBDA]),
+                    table=_published_module_source(trusted_module_dirs[ResourceType.DYNAMODB]),
                 )
                 return self._api_lambda_dynamodb_renderer.render(
                     spec, module_sources=api_lambda_dynamodb_module_sources
                 )
             case ApiLambdaSpec():
                 api_module_sources = ApiLambdaModuleSources(
-                    api=os.path.relpath(
-                        trusted_module_dirs[ResourceType.API_GATEWAY], start=workspace
-                    ),
-                    function=os.path.relpath(
-                        trusted_module_dirs[ResourceType.LAMBDA], start=workspace
-                    ),
+                    api=_published_module_source(trusted_module_dirs[ResourceType.API_GATEWAY]),
+                    function=_published_module_source(trusted_module_dirs[ResourceType.LAMBDA]),
                 )
                 return self._api_lambda_renderer.render(spec, module_sources=api_module_sources)
             case _:
-                module_source = os.path.relpath(
-                    trusted_module_dirs[resource_type_of(spec)], start=workspace
+                module_source = _published_module_source(
+                    trusted_module_dirs[resource_type_of(spec)]
                 )
                 return self._aws_renderer.render(spec, module_source=module_source)
