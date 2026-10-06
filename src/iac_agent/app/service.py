@@ -74,6 +74,10 @@ class WorkflowView:
     pull_request: PullRequestResult | None
     error: WorkflowError | None
     security_gate: SecurityGateResult | None = None
+    #: The typed request the workflow ran on. A validated contract, not
+    #: raw model output, so a read can describe the architecture and its
+    #: components without storing a second copy of the submission.
+    resource_spec: IacRequestSpec | None = None
 
 
 def _to_view(request_id: str, values: dict) -> WorkflowView:
@@ -90,6 +94,7 @@ def _to_view(request_id: str, values: dict) -> WorkflowView:
         pull_request=values.get("pull_request"),
         error=values.get("error"),
         security_gate=security_gate,
+        resource_spec=resource_spec,
     )
 
 

@@ -99,13 +99,24 @@ def project_list_item(view: WorkflowView, *, created_at: str) -> RequestListItem
 
 
 def project_view(view: WorkflowView) -> RequestResponse:
-    """Project a checkpoint read. The view has no ArchitectureIntent."""
+    """Project a checkpoint read.
+
+    The checkpoint keeps the typed request spec, so architecture and
+    components are derived from it exactly as on submit. It keeps no
+    ArchitectureIntent and no matched pattern, so those stay absent.
+    """
+    spec = view.resource_spec
     return RequestResponse(
         request_id=view.request_id,
         outcome=view.workflow_status.value,
         approval_available=view.workflow_status is WorkflowStatus.AWAITING_APPROVAL,
         intent=None,
-        resolution=ResolutionDTO(outcome="resolved", name=view.resource_name),
+        resolution=ResolutionDTO(
+            outcome="resolved",
+            name=view.resource_name,
+            architecture=_architecture(spec) if spec is not None else None,
+            components=_components(spec) if spec is not None else [],
+        ),
         workflow=_workflow(view),
     )
 
