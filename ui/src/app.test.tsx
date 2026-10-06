@@ -73,6 +73,16 @@ describe("operator shell", () => {
     expect(screen.getByRole("heading", { level: 3, name: "Recent requests" })).toBeInTheDocument();
   });
 
+  it("credits the author in the footer", () => {
+    render(<App client={clientWith(vi.fn())} navigate={vi.fn()} pathname="/" />);
+
+    expect(screen.getByRole("contentinfo")).toHaveTextContent("Powered by Pablo Galeana Bailey");
+    expect(screen.getByRole("link", { name: "Pablo Galeana Bailey" })).toHaveAttribute(
+      "href",
+      "https://github.com/IngMatrix-PGB",
+    );
+  });
+
   it("returns to the compose route from a review", async () => {
     const user = userEvent.setup();
     const navigate = vi.fn();

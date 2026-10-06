@@ -555,6 +555,15 @@ dialog p {
   text-underline-offset: 0.4rem;
 }
 
+.shell-footer {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+}
+
 .brand {
   display: flex;
   gap: var(--space-2);

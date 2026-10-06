@@ -93,6 +93,9 @@ export function App({
         />
       ) : null}
       {route.name === "unknown" ? <h2>Page not found.</h2> : null}
+      <footer className="shell-footer">
+        Powered by <a href="https://github.com/IngMatrix-PGB">Pablo Galeana Bailey</a>
+      </footer>
     </main>
   );
 }
