@@ -54,7 +54,27 @@ export function ApprovalPanel({
 
   return (
     <section className="panel decision" aria-labelledby="approval-heading" aria-busy={busy}>
-      <h3 id="approval-heading">Approval decision</h3>
+      <div className="decision-head">
+        <svg
+          className="decision-lock"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <rect x="5" y="11" width="14" height="10" rx="2" />
+          <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+        </svg>
+        <div>
+          <h3 id="approval-heading">Approval decision</h3>
+          <p className="decision-note">
+            Approving opens a pull request. Terraform apply does not run.
+          </p>
+        </div>
+      </div>
       <p>Reject sends immediately and does not ask for confirmation.</p>
       <div className="approval-actions">
         <button

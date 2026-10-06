@@ -3,6 +3,11 @@ import { chipClass, statusLabel } from "./status-label";
 
 const OMITTED_WHEN_EMPTY = new Set(["pending", "running", "approved", "error"]);
 const EMPTY_COPY_WHEN = new Set(["awaiting_approval", "blocked", "rejected", "pr_created"]);
+const STATUS_ORDER: Record<string, number> = { block: 0, warn: 1, pass: 2 };
+
+function byStatus(left: FindingDTO, right: FindingDTO): number {
+  return (STATUS_ORDER[left.status] ?? 0) - (STATUS_ORDER[right.status] ?? 0);
+}
 
 export function Findings({
   findings,
@@ -17,6 +22,7 @@ export function Findings({
   if (findings.length === 0 && workflowStatus != null && EMPTY_COPY_WHEN.has(workflowStatus)) {
     return <p>No findings were returned.</p>;
   }
+  const ordered = [...findings].sort(byStatus);
   return (
     <section className="panel" aria-labelledby="findings-heading">
       <h3 id="findings-heading">Security findings</h3>
@@ -30,7 +36,7 @@ export function Findings({
           </tr>
         </thead>
         <tbody>
-          {findings.map((finding) => (
+          {ordered.map((finding) => (
             <tr key={`${finding.policy_id}:${finding.status}:${finding.severity}`}>
               <td>
                 <code className="enum">{finding.policy_id}</code>
@@ -50,7 +56,7 @@ export function Findings({
         </tbody>
       </table>
       <ul className="finding-stack" aria-label="Security findings">
-        {findings.map((finding) => (
+        {ordered.map((finding) => (
           <li key={`${finding.policy_id}:${finding.status}:${finding.severity}`}>
             <p>Policy</p>
             <p>
