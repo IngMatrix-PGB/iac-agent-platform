@@ -1,8 +1,15 @@
-# Registry / catalog
+# ADR: Defer a centralized resource registry / catalog
 
 **Status:** Deferred  
 **Date:** 2026-09-27  
 **Evidence:** Batch 27, ECR repository vertical slice
+
+## Context
+
+Adding a resource type touches several explicit registration points
+(dispatch, policy, Checkov, module map, display name, checkpoint
+allowlist, CLI). Batch 27 added ECR to measure whether that friction
+justifies a centralized registry or catalog.
 
 ## Decision
 
@@ -29,6 +36,20 @@ Those two are covered by dedicated tests. Missing an explicit
 dispatch arm, a Checkov profile, or a display-name registration fails
 loudly, through `ValueError`, `KeyError`, or the same existing
 fail-closed behavior.
+
+## Alternatives
+
+- **Explicit dispatch and registration (current)** — **KEPT.** Most
+  omissions fail loudly; the two silent ones have dedicated tests.
+- **Centralized registry / catalog** — **DEFERRED.** Relocates the same
+  boundaries without removing the two silent-failure paths.
+
+## Consequences
+
+- Adding a resource keeps touching each registration point by hand.
+- The two silent-failure boundaries depend on their dedicated tests;
+  a new silent boundary needs its own test.
+- No registry abstraction to maintain until a trigger below is met.
 
 ## Reconsider when
 
